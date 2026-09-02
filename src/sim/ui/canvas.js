@@ -130,7 +130,36 @@ function stackHTML(stack){
   return o.join('');
 }
 
+/* ───────── Calculator panel (Subnet Calculator-এর মতো lab-এর জন্য) ───────── */
+function renderPanel(el, p){
+  if(p.err){
+    el.innerHTML = '<div class="cp-err">' + esc(p.err) + '</div>';
+    return;
+  }
+  var o = ['<div class="cp">'];
+
+  /* bit গুলো — কোনটা network আর কোনটা host, রঙ দিয়ে আলাদা */
+  o.push('<div class="cp-bits"><span class="n">' + esc(p.bits.net) + '</span>' +
+         '<span class="h">' + esc(p.bits.host) + '</span></div>');
+  o.push('<div class="cp-legend">' +
+           '<span><i class="sw-n"></i>' + p.cidr + ' bit network</span>' +
+           '<span><i class="sw-h"></i>' + (32 - p.cidr) + ' bit host</span>' +
+         '</div>');
+
+  o.push('<div class="cp-rows">');
+  for(var i = 0; i < p.rows.length; i++){
+    var r = p.rows[i];
+    o.push('<button class="cp-row" data-why="' + esc(r[2]) + '">' +
+             '<span class="k">' + esc(r[0]) + '</span>' +
+             '<span class="v">' + esc(r[1]) + '</span>' +
+           '</button>' +
+           '<div class="cp-why">' + esc(r[2]) + '</div>');
+  }
+  o.push('</div></div>');
+  el.innerHTML = o.join('');
+}
+
 NS.ui = NS.ui || {};
-NS.ui.canvas = { render: render, esc: esc };
+NS.ui.canvas = { render: render, renderPanel: renderPanel, esc: esc };
 
 })(window.NetLab);

@@ -69,6 +69,15 @@ function renderControls(){
     if(ct.type === 'toggle'){
       o.push('<label class="ctl-row"><input type="checkbox" data-ctl="' + esc(ct.key) + '"' +
              (v ? ' checked' : '') + '><span class="cl">' + esc(ct.label) + '</span></label>');
+    } else if(ct.type === 'text'){
+      o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) + '</span>' +
+             '<input type="text" data-ctl="' + esc(ct.key) + '" value="' + esc(v) +
+             '" spellcheck="false" autocomplete="off"></div>');
+    } else if(ct.type === 'range'){
+      o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) +
+               ' <b class="ctl-v">/' + esc(v) + '</b></span>' +
+             '<input type="range" data-ctl="' + esc(ct.key) + '" value="' + esc(v) +
+             '" min="' + ct.min + '" max="' + ct.max + '" step="1"></div>');
     } else if(ct.type === 'choice'){
       o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) + '</span>' +
              '<select data-ctl="' + esc(ct.key) + '">');
@@ -143,10 +152,14 @@ function renderWhat(){
 function paint(){
   var eng = App.eng, st = eng.state, cur = eng.current();
 
-  NS.ui.canvas.render($('canvas'), st, {
-    active: cur ? cur.actor : null,
-    selected: App.selDev
-  });
+  if(App.lab.panel){
+    NS.ui.canvas.renderPanel($('canvas'), App.lab.panel(App.cfg));
+  } else {
+    NS.ui.canvas.render($('canvas'), st, {
+      active: cur ? cur.actor : null,
+      selected: App.selDev
+    });
+  }
 
   /* current step-এ packet থাকলে সেটিই inspector-এ দেখাও */
   if(cur && cur.packet) App.selPkt = cur.packet;
@@ -221,7 +234,7 @@ function rebuild(){
   stop();
   App.eng = new NS.Engine(App.lab, App.cfg);
   App.selPkt = null;
-  paint();
+  paint();     /* controls নিজে আবার আঁকা হয় না — তাই typing-এর caret ঠিক থাকে */
 }
 
 /* ───────── EVENTS ───────── */
@@ -231,13 +244,18 @@ function bind(){
     if(b) loadLab(b.getAttribute('data-lab'));
   });
 
-  $('labControls').addEventListener('change', function(e){
+  function onCtl(e){
     var el = e.target.closest('[data-ctl]');
     if(!el) return;
     App.cfg[el.getAttribute('data-ctl')] =
       el.type === 'checkbox' ? el.checked : el.value;
+    /* range-এর পাশের সংখ্যাটা সাথে সাথে বদলাক */
+    var lbl = el.parentNode.querySelector('.ctl-v');
+    if(lbl && el.type === 'range') lbl.textContent = '/' + el.value;
     rebuild();
-  });
+  }
+  $('labControls').addEventListener('change', onCtl);
+  $('labControls').addEventListener('input', onCtl);
 
   $('btnPlay').addEventListener('click', play);
   $('btnStep').addEventListener('click', function(){ stop(); App.eng.step(); paint(); });
@@ -284,6 +302,17 @@ function bind(){
   });
 
   /* field-এ click করলে তার ব্যাখ্যা খোলে/বন্ধ হয় */
+  /* Calculator-এর সারিতে click করলে ব্যাখ্যা খোলে */
+  $('canvas').addEventListener('click', function(e){
+    var r = e.target.closest('.cp-row');
+    if(!r) return;
+    var why = r.nextElementSibling;
+    if(why && why.classList.contains('cp-why')){
+      why.classList.toggle('on');
+      r.classList.toggle('open');
+    }
+  });
+
   $('insBody').addEventListener('click', function(e){
     var f = e.target.closest('.ins-f');
     if(!f) return;
