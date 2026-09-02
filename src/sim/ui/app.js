@@ -85,12 +85,19 @@ function renderControls(){
     '<div class="ctl-help">এই lab-এ কোনো বাড়তি setting নেই।</div>';
 }
 
+/* explanation-এ `code` আর **bold** লেখা যায় — সেটুকু markdown এখানে রূপান্তর হয় */
+function inline(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
 /* ───────── LEARNING PANEL ───────── */
 function renderLearn(){
   var L = App.lab, o = [];
 
   o.push('<div class="ln-h">এই Lab-এ কী শিখবেন</div><ul class="ln-list">');
-  for(var i = 0; i < L.learn.length; i++) o.push('<li>' + esc(L.learn[i]) + '</li>');
+  for(var i = 0; i < L.learn.length; i++) o.push('<li>' + inline(L.learn[i]) + '</li>');
   o.push('</ul>');
 
   if(L.mistakes && L.mistakes.length){
@@ -98,8 +105,8 @@ function renderLearn(){
     for(var j = 0; j < L.mistakes.length; j++){
       var m = L.mistakes[j];
       o.push('<div class="ln-myth">' +
-               '<div class="mm"><span class="lbl">ভুল ধারণা</span>' + esc(m.m) + '</div>' +
-               '<div class="mr"><span class="lbl">সঠিক ধারণা</span>' + esc(m.r) + '</div>' +
+               '<div class="mm"><span class="lbl">ভুল ধারণা</span>' + inline(m.m) + '</div>' +
+               '<div class="mr"><span class="lbl">সঠিক ধারণা</span>' + inline(m.r) + '</div>' +
              '</div>');
     }
   }
@@ -112,12 +119,8 @@ function renderLearn(){
 }
 
 /* ───────── "এখন কী হলো?" ───────── */
-/* explanation-এ `code` আর **bold** লেখা যায় — সেটুকু markdown এখানে রূপান্তর হয় */
 function mini(s){
-  return esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n\n/g, '</p><p>');
+  return inline(s).replace(/\n\n/g, '</p><p>');
 }
 
 function renderWhat(){
