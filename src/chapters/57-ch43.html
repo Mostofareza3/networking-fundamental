@@ -1,0 +1,221 @@
+<section class="chapter" id="ch43">
+  <div class="ch-eyebrow">Chapter 43</div>
+  <h1>একটি packet যেভাবে Internet পাড়ি দেয়</h1>
+  <p class="ch-lede">এবার আমরা Chapter 13-এর hop-by-hop যাত্রাকে বাস্তব পরিসরে নিয়ে যাব — আপনার ঘরের Wi-Fi থেকে অন্য মহাদেশের একটি data center পর্যন্ত, প্রতিটি ধাপে কে কী করছে।</p>
+
+  <h2>43.1 সম্পূর্ণ পথ</h2>
+
+  <div class="cb diagram"><pre>┌─────────────────────────────────────────────────────────┐
+│ ১. আপনার APPLICATION                                     │
+│    fetch("https://api.example.com/users")               │
+│    → socket() → connect() → write()          [Ch 16]    │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ২. আপনার OS KERNEL                                       │
+│    TLS record → TCP segment → IP packet → frame [Ch 3]  │
+│    Routing lookup: local নয় → gateway         [Ch 11]   │
+│    ARP: gateway-এর MAC কী?                     [Ch 8]    │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৩. NIC → Wi-Fi                                           │
+│    bytes → radio signal                                 │
+│    (Wi-Fi-র নিজস্ব link-layer ACK ও retransmission)      │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৪. বাসার ROUTER                                          │
+│    • frame গ্রহণ, Ethernet header ফেলে দেয়   [Ch 13]     │
+│    • ★ NAT: src IP ও port বদলে দেয় ★          [Ch 34]    │
+│    • Firewall নিয়ম প্রয়োগ                     [Ch 35]    │
+│    • TTL: 64 → 63                                       │
+│    • নতুন frame, ISP-র দিকে                              │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৫. ISP-র ACCESS NETWORK                                  │
+│    Fiber/DSL/cable → ISP-র aggregation router            │
+│    এখানে CGNAT থাকতে পারে (আরেক স্তরের NAT)   [Ch 34]    │
+│    TTL: 63 → 62 → 61 ...                                │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৬. ISP-র CORE / BGP সিদ্ধান্ত                [Ch 42]     │
+│    "203.0.113.0/24 → কোন পথে?"                          │
+│    peering আছে? → সরাসরি                                 │
+│    নেই? → transit provider-কে                            │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৭. IXP বা TRANSIT                                        │
+│    হয়তো একটি সমুদ্রতলের cable                             │
+│    ★ এখানেই propagation delay-র সিংহভাগ ★    [Ch 36]    │
+│    ঢাকা → সিঙ্গাপুর ≈ 30ms একমুখী                         │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৮. গন্তব্য ISP / CLOUD PROVIDER                          │
+│    Edge router → DDoS scrubbing → core                  │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ৯. DATA CENTER                                           │
+│    Edge → Firewall → Load Balancer            [Ch 47]   │
+│    LB সিদ্ধান্ত নেয়: কোন backend?                          │
+│    (Layer 4 হলে শুধু IP/port; Layer 7 হলে HTTP-ও দেখে)   │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ১০. Top-of-Rack SWITCH                        [Ch 7]    │
+│     MAC table দেখে সঠিক server-এ                         │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ১১. SERVER-এর NIC → KERNEL                               │
+│     frame → packet → segment → socket buffer            │
+│     4-tuple দেখে সঠিক socket খুঁজে বের করা     [Ch 15]   │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│ ১২. SERVER PROCESS                                       │
+│     nginx-এর read() → TLS decrypt → HTTP parse          │
+│     → application → database → response                 │
+└────────────────────────┬────────────────────────────────┘
+                         ▼
+            পুরো পথ উল্টো দিকে
+   (কিন্তু ★একই পথে নাও হতে পারে★ — asymmetric routing)</pre></div>
+
+  <h2>43.2 প্রতিটি স্তরে কী বদলায়</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Field</th><th>কে বদলায়</th><th>কতবার</th></tr></thead>
+    <tbody>
+      <tr><td>Ethernet header</td><td>প্রতিটি router</td><td>প্রতিটি hop-এ (১০–২০ বার)</td></tr>
+      <tr><td>TTL</td><td>প্রতিটি router</td><td>প্রতিটি hop-এ ১ কমে</td></tr>
+      <tr><td>Source IP</td><td><strong>শুধু NAT</strong></td><td>১–২ বার (বাসার NAT, CGNAT)</td></tr>
+      <tr><td>Source port</td><td><strong>শুধু NAT</strong></td><td>১–২ বার</td></tr>
+      <tr><td>Destination IP</td><td><strong>শুধু load balancer</strong> (DNAT করলে)</td><td>০–১ বার</td></tr>
+      <tr><td>TCP payload</td><td>কেউ না (TLS-এ তো সম্ভবই নয়)</td><td>০ বার</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — তিনটি স্তরের পরিচয়</div>
+    <div class="cb diagram"><pre>MAC address  → ★ এক hop ★
+                প্রতিটি link-এ নতুন করে লেখা
+
+IP address   → ★ end-to-end ★
+                শুধু NAT/LB বদলায়
+
+Port + 4-tuple → ★ connection-এর পরিচয় ★
+                  দুই প্রান্তের kernel-এর কাছে অর্থবহ
+
+TLS session  → ★ দুটি application-এর মধ্যে ★
+                পথের কেউ পড়তে পারে না</pre></div>
+    <p>প্রতিটি স্তরের পরিচয়ের একটি নির্দিষ্ট <em>পরিধি</em> আছে — এবং সেই পরিধি বোঝাই networking বোঝার মূল।</p>
+  </div>
+
+  <h2>43.3 সময়ের বাজেট</h2>
+
+  <div class="cb diagram"><pre>ঢাকা → সিঙ্গাপুরের একটি server, একটি সাধারণ API call:
+
+  DNS lookup (cache miss)          :  40 ms
+  TCP handshake (1 RTT)            :  60 ms
+  TLS 1.3 handshake (1 RTT)        :  60 ms
+  HTTP request → প্রথম byte (1 RTT) :  60 ms
+  ────────────────────────────────────────────
+  Network-এর মোট                    : 220 ms
+  Server-এর processing              :  30 ms
+  ────────────────────────────────────────────
+  ব্যবহারকারী যা অনুভব করেন           : 250 ms
+
+★ ৮৮% সময় শুধু ★অপেক্ষা★ — কোনো কাজ হচ্ছে না,
+  শুধু packet যাওয়া-আসা করছে।
+
+একই request, connection পুনর্ব্যবহার করে:
+  HTTP request → response          :  60 ms
+  Server processing                :  30 ms
+  ────────────────────────────────────────────
+                                   :  90 ms   ★ ৬৪% কম
+
+একই request, CDN edge থেকে (ঢাকায়):
+  HTTP request → response          :   8 ms
+  Cache HIT                        :   1 ms
+  ────────────────────────────────────────────
+                                   :   9 ms   ★ ৯৬% কম</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — যেখানে জয় আছে</div>
+    <p>উপরের তিনটি সংখ্যা (২৫০ / ৯০ / ৯) এই বইয়ের সবচেয়ে ব্যবহারিক শিক্ষা:</p>
+    <ol>
+      <li><strong>Connection reuse</strong> — প্রায় বিনামূল্যে ৬০% উন্নতি। Keep-alive, connection pool, HTTP/2।</li>
+      <li><strong>CDN</strong> — দূরত্ব কমানোই সবচেয়ে বড় জয়। ৯৬% পর্যন্ত।</li>
+      <li><strong>Round trip কমানো</strong> — ধারাবাহিক API call-এর waterfall ভাঙুন।</li>
+    </ol>
+    <p>লক্ষ্য করুন — এই তিনটির কোনোটিই "কোড দ্রুত করা" নয়। Server-এর ৩০ms optimize করে ২০ms করলে ব্যবহারকারী ৪% উন্নতি দেখবেন। কিন্তু CDN বসালে ৯৬%। <strong>Distributed system-এ latency-র উৎস প্রায়ই CPU নয়, দূরত্ব ও round trip।</strong></p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 43 — নিজের packet-এর যাত্রা</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি প্রকৃত request-এর প্রতিটি hop, প্রতিটি AS, এবং সময়ের প্রকৃত বিভাজন।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre>TARGET=example.com
+
+echo "=== ১. DNS: নাম → IP ==="
+dig +short $TARGET
+
+echo -e "\n=== ২. পথ (AS সহ) ==="
+traceroute -A -n -m 20 $TARGET 2>/dev/null | head -20
+
+echo -e "\n=== ৩. প্রতিটি hop-এর loss ও jitter ==="
+mtr -r -c 20 -n $TARGET 2>/dev/null
+
+echo -e "\n=== ৪. সময়ের বিভাজন ==="
+curl -w "
+DNS      : %{time_namelookup}s
+TCP      : %{time_connect}s
+TLS      : %{time_appconnect}s
+TTFB     : %{time_starttransfer}s
+মোট      : %{time_total}s
+─────────────────────────
+Server-এর processing ≈ TTFB − TLS
+" -o /dev/null -s https://$TARGET
+
+echo -e "\n=== ৫. দ্বিতীয়বার (connection warm) ==="
+curl -w "মোট: %{time_total}s\n" -o /dev/null -s https://$TARGET
+
+echo -e "\n=== ৬. প্রথম hop-এর MAC (ARP) ==="
+ip neigh | grep $(ip route | awk '/default/ {print $3}')</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> Traceroute-এ প্রথম hop আপনার বাসার router, তারপর ISP, তারপর transit/peering, তারপর গন্তব্যের network — AS নম্বর দেখে প্রতিটি চিনতে পারবেন। <code>mtr</code>-এ কোথায় latency লাফ দিচ্ছে দেখুন (সেটিই সাধারণত সমুদ্রতলের cable)। curl-এর দুই দফা তুলনায় connection reuse-এর প্রকৃত লাভ দেখবেন।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> এই বইয়ের সব ধারণা একটি বাস্তব request-এ একসাথে কাজ করছে — DNS, ARP, routing, BGP, TCP, TLS, HTTP। প্রতিটি ধাপের একটি পরিমাপযোগ্য খরচ আছে, এবং আপনি এখন জানেন কোনটি কমানো যায় আর কোনটি ভৌত সীমা।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>একটি packet ১০–২০টি router পেরোয়; প্রতিটিতে নতুন Ethernet header ও TTL−1।</li>
+      <li>Source IP/port শুধু NAT-এ বদলায় (১–২ বার); destination IP শুধু load balancer-এ।</li>
+      <li>TCP payload কেউ বদলায় না — এবং TLS-এ কেউ পড়তেও পারে না।</li>
+      <li>পরিচয়ের পরিধি: MAC = এক hop, IP = end-to-end, 4-tuple = connection, TLS = দুটি application।</li>
+      <li>একটি আন্তঃমহাদেশীয় API call-এ ~৮৮% সময় শুধু অপেক্ষা।</li>
+      <li>সবচেয়ে বড় তিনটি জয়: <strong>connection reuse</strong>, <strong>CDN</strong>, <strong>কম round trip</strong>।</li>
+      <li>Server-এর code optimize করার চেয়ে দূরত্ব ও round trip কমানো প্রায়ই বহুগুণ কার্যকর।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি packet ১৫টি router পেরোল। Destination IP কতবার বদলাল?</summary>
+    <div class="ans"><p>সাধারণত <strong>০ বার</strong>। Router-রা destination IP ছোঁয় না — সেটিই end-to-end পরিচয়। ব্যতিক্রম: গন্তব্যে একটি load balancer DNAT করলে destination IP একবার বদলাতে পারে (public VIP → internal backend IP)। বিপরীতে source IP ১–২ বার বদলায় (বাসার NAT এবং সম্ভবত CGNAT)।</p></div>
+  </details>
+  <details class="qa"><summary>একটি ২৫০ms-এর API call-এ কোথায় optimize করলে সবচেয়ে বেশি লাভ?</summary>
+    <div class="ans"><p>প্রথমে দেখুন কোথায় সময় যাচ্ছে (<code>curl -w</code>)। সাধারণত: (১) <strong>Connection reuse</strong> — DNS, TCP ও TLS handshake বাদ দিয়ে ~৬০% সাশ্রয়, প্রায় বিনা খরচে। (২) <strong>CDN/edge</strong> — দূরত্ব কমিয়ে ~৯৬% পর্যন্ত। (৩) <strong>Round trip কমানো</strong> — ধারাবাহিক call একত্র করা। Server-এর ৩০ms code optimize করা তালিকার সবচেয়ে নিচে — সেখানে ৩৩% উন্নতিও শেষ ফলাফলে মাত্র ৪%।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার packet-এর source IP পথে কে কে বদলাতে পারে?</summary>
+    <div class="ans"><p>শুধুমাত্র NAT করে এমন যন্ত্র: (১) আপনার বাসার router (private → public), (২) ISP-র CGNAT (যদি থাকে), (৩) কর্পোরেট NAT gateway, (৪) cloud-এর NAT Gateway (যদি আপনি private subnet-এ থাকেন), (৫) কিছু VPN। সাধারণ router, switch বা firewall source IP বদলায় না। প্রতিটি NAT-কে সেই mapping-এর state রাখতে হয়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch42"><div class="d">পূর্ববর্তী</div><div class="t">Ch 42 — What Is the Internet?</div></a>
+    <a class="nx" href="#ch44"><div class="d">পরবর্তী</div><div class="t">Ch 44 — HTTP/2</div></a>
+  </div>
+</section>

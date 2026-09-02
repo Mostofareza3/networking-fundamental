@@ -1,0 +1,293 @@
+<section class="chapter" id="ch33">
+  <div class="ch-eyebrow">Chapter 33</div>
+  <h1>TLS Handshake</h1>
+  <p class="ch-lede">আগের chapter-এর সব উপাদান এখানে একসাথে কাজ করে। TLS handshake-এ ঠিক কী ঘটে — এবং কেন এটি TLS 1.3-এ ১ RTT-তে নেমে এসেছে।</p>
+
+  <h2>33.1 Handshake কী অর্জন করে</h2>
+
+  <div class="cb diagram"><pre>শেষে দুই পক্ষের কাছে থাকবে:
+
+  1. একটি ভাগ করা symmetric session key
+     (যা কখনো তারে যায়নি)
+
+  2. Server-এর পরিচয়ের নিশ্চয়তা
+     (certificate যাচাই করা হয়েছে)
+
+  3. কোন cipher ব্যবহার হবে তার সিদ্ধান্ত
+
+  4. Handshake নিজেই বদলানো হয়নি তার নিশ্চয়তা
+
+এবং এই সবটাই একটি ★প্রকাশ্য, শত্রুভাবাপন্ন★
+চ্যানেলে সম্পন্ন হয়।</pre></div>
+
+  <h2>33.2 TLS 1.3 Handshake — ধাপে ধাপে</h2>
+
+  <div class="stepper" data-steps="5" id="st-tls">
+    <div class="sp-head"><strong>TLS 1.3 Handshake</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+
+      <div class="sp-step" data-i="0">
+        <h4>ধাপ ০ — TCP handshake আগে (QUIC হলে নয়)</h4>
+        <div class="cb diagram"><pre>Client ──── SYN ────▶ Server
+Client ◀── SYN-ACK ── Server
+Client ──── ACK ────▶ Server
+            ↑ ১ RTT খরচ
+
+এখন TCP connection প্রস্তুত। TLS শুরু হবে এর উপরে।
+
+(HTTP/3-এ QUIC transport ও crypto handshake একসাথে
+ করে, তাই এই ধাপটি আলাদা করে লাগে না — Ch 45)</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ১ — ClientHello</h4>
+        <div class="cb diagram"><pre>Client ────────────────────────────▶ Server
+
+  ClientHello:
+    • TLS version: 1.3 support করি
+    • Random: 32 bytes এলোমেলো সংখ্যা
+    • Cipher suites: এগুলো আমি জানি —
+        TLS_AES_256_GCM_SHA384
+        TLS_CHACHA20_POLY1305_SHA256
+    • ★ Key Share ★: আমার ephemeral DH public key
+        (TLS 1.3-এর মূল optimization — আগেই পাঠিয়ে দিলাম)
+    • ★ SNI ★: server_name = example.com
+        (কোন virtual host চাই — ★ plaintext ★)
+    • ALPN: h2, http/1.1 (কোন protocol চালাব)
+
+★ TLS 1.2-তে key share পরে পাঠানো হতো, তাই একটি
+  অতিরিক্ত round trip লাগত। TLS 1.3-এ client অনুমান
+  করে নেয় server কোন group ব্যবহার করবে এবং প্রথমেই
+  key পাঠিয়ে দেয় — এতেই ১ RTT সাশ্রয়।</pre></div>
+        <div class="box warn"><div class="bt">⚠️ SNI plaintext-এ যায়</div>
+        <p><strong>SNI</strong> (Server Name Indication) না থাকলে server জানতেই পারত না কোন certificate পাঠাবে — কারণ একটি IP-তে শত শত site থাকতে পারে (Ch 28-এর <code>Host</code> header-এর সমস্যা, কিন্তু encryption শুরুর <em>আগে</em>)। এটি একটি মুরগি-ডিম সমস্যা: certificate পাঠাতে হলে জানতে হবে কোন site, কিন্তু জানতে হলে encryption দরকার, আর encryption-এর জন্য certificate দরকার।</p>
+        <p>ফলে <strong>domain নামটি plaintext-এ যায়</strong> — পথের যে কেউ দেখতে পায় আপনি কোন site-এ যাচ্ছেন। <strong>ECH</strong> (Encrypted Client Hello) এটি সমাধানের চেষ্টা করছে, কিন্তু এখনো সর্বত্র প্রচলিত নয়।</p></div>
+      </div>
+
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ২ — ServerHello এবং তারপর সবকিছু encrypted</h4>
+        <div class="cb diagram"><pre>Client ◀──────────────────────────── Server
+
+  ServerHello:                        [plaintext]
+    • নির্বাচিত version: TLS 1.3
+    • Random: 32 bytes
+    • নির্বাচিত cipher: TLS_AES_256_GCM_SHA384
+    • ★ Key Share ★: আমার ephemeral DH public key
+
+  ═══ এই বিন্দু থেকে সবকিছু encrypted ═══
+      (দুই পক্ষই এখন DH দিয়ে handshake key
+       হিসাব করে ফেলেছে)
+
+  {EncryptedExtensions}               [encrypted]
+    • ALPN নির্বাচন: h2
+
+  {Certificate}                       [encrypted]
+    • example.com-এর certificate
+    • intermediate CA-র certificate
+
+  {CertificateVerify}                 [encrypted]
+    • ★ এখন পর্যন্ত সব handshake message-এর একটি
+      signature, server-এর private key দিয়ে ★
+    • এটিই প্রমাণ করে server সত্যিই সেই private
+      key-র মালিক (শুধু certificate থাকা যথেষ্ট নয় —
+      certificate তো public!)
+
+  {Finished}                          [encrypted]
+    • পুরো handshake-এর একটি MAC
+    • প্রমাণ করে handshake-এর কোনো অংশ বদলানো হয়নি</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৩ — Client যাচাই করে এবং Finished পাঠায়</h4>
+        <div class="cb diagram"><pre>Client যা যাচাই করে:
+
+  1. Certificate chain বৈধ? (leaf → intermediate → root)
+  2. Root কি আমার trust store-এ আছে?
+  3. মেয়াদ শেষ হয়নি তো?
+  4. ★ Hostname কি SAN-এ আছে? ★
+     example.com == certificate-এর SAN?
+  5. Revoke করা হয়নি তো? (OCSP stapling / CRL)
+  6. CertificateVerify-র signature ঠিক আছে?
+  7. Finished-এর MAC ঠিক আছে?
+
+  যেকোনো একটি ব্যর্থ হলে →
+     ★ connection বাতিল, ব্যবহারকারীকে সতর্কবার্তা ★
+
+Client ────────────────────────────▶ Server
+
+  {Finished}                          [encrypted]
+
+  ★ এখান থেকে application data ★
+  {GET / HTTP/1.1 ...}                [encrypted]
+
+  লক্ষ্য করুন — client তার Finished-এর সাথেই
+  প্রথম request পাঠিয়ে দিচ্ছে।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="4">
+        <h4>মোট খরচ</h4>
+        <div class="cb diagram"><pre>TLS 1.2:
+  TCP handshake        : 1 RTT
+  TLS handshake        : 2 RTT
+  ─────────────────────────────
+  প্রথম byte পাঠাতে      : 3 RTT
+
+TLS 1.3:
+  TCP handshake        : 1 RTT
+  TLS handshake        : 1 RTT   ★ অর্ধেক!
+  ─────────────────────────────
+  প্রথম byte পাঠাতে      : 2 RTT
+
+TLS 1.3 + 0-RTT resumption (পুনঃসংযোগে):
+  TCP handshake        : 1 RTT
+  TLS                  : 0 RTT   ★ প্রথম packet-এই data
+  ─────────────────────────────
+                       : 1 RTT
+
+QUIC (HTTP/3), প্রথমবার:
+  transport + crypto একসাথে : 1 RTT
+QUIC পুনঃসংযোগে:
+                            : 0 RTT ★
+
+RTT 60ms হলে TLS 1.2 → 1.3 সাশ্রয় ৬০ms প্রতি
+নতুন connection। একটি page-এ ৫টি origin হলে ৩০০ms।</pre></div>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <h2>33.3 Session Resumption এবং 0-RTT</h2>
+
+  <div class="cb diagram"><pre>প্রথম সংযোগের পর server একটি "session ticket" দেয়:
+
+  Server ──▶ NewSessionTicket
+             (একটি encrypted blob যাতে session-এর
+              তথ্য আছে — server-কে কিছু মনে রাখতে হয় না)
+
+পরের বার connect করলে:
+
+  Client ──▶ ClientHello
+             + ticket
+             + ★ early data (0-RTT) ★  ← প্রথম packet-এই!
+
+  ⇒ Handshake শেষ হওয়ার আগেই request পাঠানো হয়ে গেল</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ 0-RTT-এর একটি বাস্তব বিপদ</div>
+    <p>0-RTT data <strong>replay আক্রমণের ঝুঁকিতে</strong> আছে। আক্রমণকারী early data সহ packet-টি রেকর্ড করে পরে আবার পাঠাতে পারে — এবং server সেটি একটি নতুন বৈধ request হিসেবে গ্রহণ করবে, কারণ handshake তখনো সম্পূর্ণ হয়নি বলে replay সুরক্ষা নেই।</p>
+    <div class="cb diagram"><pre>বিপজ্জনক:
+    POST /transfer?to=attacker&amount=1000
+    → replay করলে দুবার টাকা যাবে!
+
+নিরাপদ:
+    GET /index.html
+    → replay করলে শুধু একই page আবার পাঠানো হবে</pre></div>
+    <p><strong>নিয়ম: 0-RTT-তে শুধু idempotent request (GET) পাঠান।</strong> এজন্যই browser ও server উভয়েই সতর্কভাবে এটি ব্যবহার করে — অনেক server 0-RTT-তে শুধু GET অনুমোদন করে।</p>
+  </div>
+
+  <h2>33.4 TLS 1.2 বনাম 1.3</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th></th><th>TLS 1.2</th><th>TLS 1.3</th></tr></thead>
+    <tbody>
+      <tr><td>Handshake RTT</td><td>2</td><td><strong>1</strong> (resumption-এ 0)</td></tr>
+      <tr><td>Cipher suite-এর সংখ্যা</td><td>৩৭+ (অনেকগুলো দুর্বল)</td><td><strong>৫টি</strong>, সবই AEAD</td></tr>
+      <tr><td>Forward secrecy</td><td>ঐচ্ছিক</td><td><strong>বাধ্যতামূলক</strong></td></tr>
+      <tr><td>RSA key exchange</td><td>অনুমোদিত</td><td><strong>সম্পূর্ণ বাতিল</strong></td></tr>
+      <tr><td>Certificate</td><td>Plaintext-এ যায়</td><td><strong>Encrypted</strong></td></tr>
+      <tr><td>দুর্বল algorithm</td><td>RC4, 3DES, MD5, SHA-1, CBC</td><td><strong>সব বাদ</strong></td></tr>
+      <tr><td>Renegotiation</td><td>আছে (আক্রমণের উৎস)</td><td>বাদ</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ TLS 1.3-এর নকশা-দর্শন</div>
+    <p>TLS 1.3-এর সবচেয়ে বড় অবদান নতুন feature যোগ করা নয় — বরং <strong>বিকল্প কমিয়ে ফেলা</strong>। TLS 1.2-এর অধিকাংশ দুর্বলতা এসেছিল অতিরিক্ত নমনীয়তা থেকে: এত বেশি cipher suite, এত বেশি configuration, যে ভুল করা সহজ ছিল (এবং downgrade attack সম্ভব ছিল)।</p>
+    <p>TLS 1.3 কার্যত বলে: "শুধু নিরাপদ বিকল্পগুলো রাখলাম। ভুল করার সুযোগই দিলাম না।" এটি একটি চমৎকার নিরাপত্তা-নকশার নীতি — <em>secure by default, insecure by impossible</em>।</p>
+  </div>
+
+  <h2>33.5 বাস্তব TLS সমস্যা যা developer-রা দেখেন</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Error</th><th>অর্থ</th><th>প্রতিকার</th></tr></thead>
+    <tbody>
+      <tr><td><code>CERT_HAS_EXPIRED</code></td><td>Certificate-এর মেয়াদ শেষ</td><td>নবায়ন করুন; auto-renewal (certbot) সেট করুন</td></tr>
+      <tr><td><code>UNABLE_TO_VERIFY_LEAF_SIGNATURE</code></td><td>Intermediate certificate পাঠানো হয়নি</td><td>Server-এ full chain configure করুন (<code>fullchain.pem</code>, শুধু <code>cert.pem</code> নয়)</td></tr>
+      <tr><td><code>HOSTNAME_MISMATCH</code></td><td>Certificate-এর SAN-এ এই নাম নেই</td><td>সঠিক নামের certificate নিন, বা সঠিক নামে connect করুন</td></tr>
+      <tr><td><code>SELF_SIGNED_CERT_IN_CHAIN</code></td><td>Root কোনো পরিচিত CA নয়</td><td>Development-এ স্বাভাবিক; production-এ প্রকৃত CA দরকার</td></tr>
+      <tr><td><code>DEPTH_ZERO_SELF_SIGNED_CERT</code></td><td>Self-signed certificate</td><td>Corporate proxy? তাদের root CA ইনস্টল করুন</td></tr>
+      <tr><td><code>SSLV3_ALERT_HANDSHAKE_FAILURE</code></td><td>কোনো cipher-এ মিল হয়নি</td><td>Client বা server খুব পুরনো; TLS version মেলান</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ সবচেয়ে সাধারণ production ভুল: অসম্পূর্ণ chain</div>
+    <p>আপনার browser-এ site ঠিকঠাক খোলে, কিন্তু <code>curl</code> বা আপনার backend service ব্যর্থ হয়। কারণ প্রায়ই: server শুধু leaf certificate পাঠাচ্ছে, intermediate নয়।</p>
+    <p>Browser গুলো "AIA fetching" করে অনুপস্থিত intermediate নিজে নামিয়ে নেয়, তাই সমস্যা লুকিয়ে থাকে। কিন্তু <code>curl</code>, Java, Go, Python — এরা তা করে না, তাই তাদের কাছে chain ভাঙা।</p>
+    <p><strong>যাচাই:</strong> <code>openssl s_client -connect host:443 -showcerts</code> — কতগুলো certificate আসছে দেখুন। অন্তত দুটি (leaf + intermediate) হওয়া উচিত। <strong>সমাধান:</strong> nginx-এ <code>ssl_certificate</code>-এ <code>fullchain.pem</code> ব্যবহার করুন।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 33 — Handshake নিজের চোখে</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি বাস্তব TLS handshake-এর ধাপগুলো, ব্যবহৃত version ও cipher, এবং সময়ের ভাগ।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># সম্পূর্ণ handshake-এর বিবরণ
+openssl s_client -connect example.com:443 -servername example.com &lt;/dev/null 2>&1 | head -40
+
+# TLS 1.3 জোর করে ব্যবহার করুন
+openssl s_client -connect example.com:443 -tls1_3 &lt;/dev/null 2>&1 | grep -E "Protocol|Cipher"
+
+# কোন version ও cipher ব্যবহার হলো
+curl -v https://example.com 2>&1 | grep -E "SSL connection|TLS|ALPN|subject|issuer"
+
+# ★ সময়ের বিভাজন — সবচেয়ে দরকারি ★
+curl -w "
+DNS lookup    : %{time_namelookup}s
+TCP connect   : %{time_connect}s
+TLS handshake : %{time_appconnect}s
+প্রথম byte     : %{time_starttransfer}s
+মোট           : %{time_total}s
+" -o /dev/null -s https://example.com
+
+# TLS 1.2 বনাম 1.3-এর সময় তুলনা করুন
+echo "TLS 1.2:"; curl -w "%{time_appconnect}\n" -o /dev/null -s --tlsv1.2 --tls-max 1.2 https://example.com
+echo "TLS 1.3:"; curl -w "%{time_appconnect}\n" -o /dev/null -s --tlsv1.3 https://example.com</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>Protocol : TLSv1.3</code> এবং <code>Cipher : TLS_AES_256_GCM_SHA384</code>। curl-এর timing-এ <code>time_connect</code> হলো TCP handshake শেষের মুহূর্ত এবং <code>time_appconnect</code> হলো TLS শেষের মুহূর্ত — এই দুটির <em>পার্থক্যই</em> TLS handshake-এর প্রকৃত খরচ। TLS 1.2 জোর করলে সেই পার্থক্য প্রায় দ্বিগুণ দেখবেন।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> TLS-এর খরচ পরিমাপযোগ্য এবং version-ভেদে বাস্তব পার্থক্য আছে। আর curl-এর এই timing breakdown একটি ধীর request-এর কারণ নির্ণয়ের সবচেয়ে দ্রুত উপায়: DNS ধীর? TCP ধীর? TLS ধীর? নাকি server নিজেই ধীর?</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Handshake চারটি জিনিস প্রতিষ্ঠা করে: session key, server-এর পরিচয়, cipher-এর সিদ্ধান্ত, এবং handshake-এর অখণ্ডতা।</li>
+      <li>TLS 1.3-এ client প্রথম message-এই key share পাঠায় — এতেই ১ RTT সাশ্রয়।</li>
+      <li>ServerHello-র পর থেকে certificate সহ সবকিছু encrypted।</li>
+      <li><strong>CertificateVerify</strong> প্রমাণ করে server private key-র প্রকৃত মালিক — শুধু certificate থাকা যথেষ্ট নয়।</li>
+      <li><strong>SNI plaintext-এ যায়</strong> — domain নাম গোপন থাকে না (ECH এটি সমাধানের চেষ্টা করছে)।</li>
+      <li>0-RTT resumption দ্রুত কিন্তু replay-প্রবণ — শুধু idempotent request-এ ব্যবহার করুন।</li>
+      <li>TLS 1.3 নিরাপত্তা বাড়িয়েছে মূলত <em>বিকল্প কমিয়ে</em> — দুর্বল সব algorithm বাদ, forward secrecy বাধ্যতামূলক।</li>
+      <li>সবচেয়ে সাধারণ production ভুল: অসম্পূর্ণ certificate chain (browser লুকায়, curl ধরে ফেলে)।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Certificate পাঠানোই যথেষ্ট নয় কেন — CertificateVerify কেন দরকার?</summary>
+    <div class="ans"><p>Certificate একটি <em>public</em> document — যে কেউ example.com-এর certificate ডাউনলোড করে নিজের বলে পাঠাতে পারে। আসল প্রশ্ন হলো: সে কি সংশ্লিষ্ট <em>private key</em>-র মালিক? <strong>CertificateVerify</strong> এটিই প্রমাণ করে — server তার private key দিয়ে এখন পর্যন্ত সব handshake message-এর একটি signature তৈরি করে, যা কেবল প্রকৃত মালিকই পারে।</p></div>
+  </details>
+  <details class="qa"><summary>SNI encrypted করা যায় না কেন (ECH ছাড়া)?</summary>
+    <div class="ans"><p>একটি মুরগি-ডিম সমস্যা: server-কে জানতে হবে কোন site-এর certificate পাঠাবে (একটি IP-তে শত শত site থাকতে পারে), কিন্তু certificate পাঠানোর আগে কোনো ভাগ করা key নেই, তাই encryption সম্ভব নয়। তাই SNI-কে প্রথম plaintext message-এই পাঠাতে হয়। ECH এটি সমাধান করে একটি পূর্বনির্ধারিত public key (DNS-এর HTTPS record থেকে পাওয়া) দিয়ে ClientHello-র সংবেদনশীল অংশ encrypt করে।</p></div>
+  </details>
+  <details class="qa"><summary>0-RTT-তে POST request পাঠানো কেন বিপজ্জনক?</summary>
+    <div class="ans"><p>0-RTT data replay-প্রবণ। Handshake সম্পূর্ণ হওয়ার আগে পাঠানো বলে এতে replay সুরক্ষা নেই — আক্রমণকারী packet-টি রেকর্ড করে পরে আবার পাঠাতে পারে, এবং server সেটিকে নতুন বৈধ request হিসেবে গ্রহণ করবে। একটি "টাকা পাঠাও" POST দুবার কার্যকর হয়ে যেতে পারে। GET (idempotent) replay হলে কোনো ক্ষতি নেই, তাই 0-RTT-তে শুধু GET নিরাপদ।</p></div>
+  </details>
+  <details class="qa"><summary>Browser-এ site খোলে কিন্তু curl বলছে "unable to verify". সবচেয়ে সম্ভাব্য কারণ?</summary>
+    <div class="ans"><p>Server অসম্পূর্ণ certificate chain পাঠাচ্ছে — intermediate certificate বাদ পড়েছে। Browser গুলো AIA (Authority Information Access) extension দেখে অনুপস্থিত intermediate নিজে ডাউনলোড করে নেয়, তাই সমস্যা লুকিয়ে থাকে। curl, Java, Go, Python এটি করে না। সমাধান: nginx-এর <code>ssl_certificate</code>-এ <code>fullchain.pem</code> দিন, শুধু <code>cert.pem</code> নয়। যাচাই: <code>openssl s_client -showcerts</code>-এ কতগুলো certificate আসছে দেখুন।</p></div>
+  </details>
+  <details class="qa"><summary>TLS 1.3 কীভাবে TLS 1.2-এর চেয়ে বেশি নিরাপদ হলো?</summary>
+    <div class="ans"><p>মূলত <em>বিকল্প কমিয়ে</em>। ৩৭টির বদলে মাত্র ৫টি cipher suite, সবগুলোই AEAD। RC4, 3DES, MD5, SHA-1, CBC mode, RSA key exchange, renegotiation — সব বাতিল। Forward secrecy বাধ্যতামূলক। Certificate encrypted। ফলে ভুল configuration করার সুযোগই প্রায় নেই, এবং downgrade attack-এর জায়গাও নেই। উপরন্তু handshake ১ RTT কম — নিরাপত্তা ও গতি দুটোই একসাথে উন্নত।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch32"><div class="d">পূর্ববর্তী</div><div class="t">Ch 32 — Cryptography</div></a>
+    <a class="nx" href="#ch34"><div class="d">পরবর্তী</div><div class="t">Ch 34 — NAT</div></a>
+  </div>
+</section>

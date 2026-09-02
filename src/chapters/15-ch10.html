@@ -1,0 +1,253 @@
+<section class="chapter" id="ch10">
+  <div class="ch-eyebrow">Chapter 10</div>
+  <h1>Subnetting</h1>
+  <p class="ch-lede">Subnetting-এর দুর্নাম আছে — CCNA-র পরীক্ষায় শত শত অঙ্ক কষতে হয় বলে। কিন্তু একজন developer-এর জন্য এটি আসলে একটি সরল প্রশ্নের উত্তর: <strong>"এই দুটি address কি একই network-এ?"</strong> এই একটি প্রশ্নের উত্তরের উপর নির্ভর করে packet সরাসরি যাবে নাকি router-এ যাবে।</p>
+
+  <h2>10.1 Why does this exist?</h2>
+  <p>আপনার machine প্রতিটি packet পাঠানোর আগে একটি সিদ্ধান্ত নেয়:</p>
+  <div class="cb diagram"><pre>Destination কি আমার নিজের network-এ?
+   হ্যাঁ →  ARP করে সরাসরি পাঠাব
+   না   →  gateway-কে দিয়ে দেব</pre></div>
+
+  <p>এই সিদ্ধান্ত নিতে হলে "আমার network" বলতে ঠিক কোন কোন address বোঝায় — তা সংজ্ঞায়িত করতে হবে। <strong>Subnet mask ঠিক সেই সীমারেখাটি আঁকে।</strong></p>
+
+  <p>দ্বিতীয় কারণটি সাংগঠনিক। একটি প্রতিষ্ঠানের কাছে <code>10.0.0.0/8</code> আছে (১.৬ কোটি address)। সবাইকে একটি সমতল network-এ রাখলে broadcast storm হবে (Ch 6), নিরাপত্তার সীমানা টানা যাবে না, আর একটি ভুল সবাইকে প্রভাবিত করবে। তাই ভাগ করা হয়:</p>
+
+  <div class="cb diagram"><pre>10.0.0.0/8  →  10.0.1.0/24   Engineering
+               10.0.2.0/24   Sales
+               10.0.3.0/24   Guest Wi-Fi
+               10.0.10.0/24  Servers
+               10.0.20.0/24  Database   ← এখানে firewall কড়া</pre></div>
+
+  <h2>10.2 Subnet Mask এবং CIDR</h2>
+  <p>একটি <strong>subnet mask</strong> বলে দেয় IP address-এর কতগুলো bit "network" আর কতগুলো "host"।</p>
+
+  <div class="cb diagram"><pre>দুটি লেখার রীতি, একই অর্থ:
+
+  Dotted decimal :  255.255.255.0
+  CIDR notation  :  /24
+
+  255.255.255.0 = 11111111.11111111.11111111.00000000
+                  └────── 24টি 1 ──────┘└─ 8টি 0 ─┘
+                       network            host
+
+নিয়ম: mask-এ 1 গুলো সবসময় বাঁ দিক থেকে একটানা।
+      10101010 এরকম mask অবৈধ।
+
+CIDR = Classless Inter-Domain Routing
+"Classless" কারণ পুরনো class A/B/C ব্যবস্থা বাতিল —
+এখন যেকোনো prefix length ব্যবহার করা যায়।</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>CIDR</th><th>Subnet Mask</th><th>মোট address</th><th>ব্যবহারযোগ্য host</th><th>সাধারণ ব্যবহার</th></tr></thead>
+    <tbody>
+      <tr><td><code>/8</code></td><td>255.0.0.0</td><td>16,777,216</td><td>16,777,214</td><td>বিশাল private range</td></tr>
+      <tr><td><code>/16</code></td><td>255.255.0.0</td><td>65,536</td><td>65,534</td><td>বড় প্রতিষ্ঠান, VPC</td></tr>
+      <tr><td><code>/24</code></td><td>255.255.255.0</td><td>256</td><td>254</td><td>সবচেয়ে প্রচলিত LAN</td></tr>
+      <tr><td><code>/25</code></td><td>255.255.255.128</td><td>128</td><td>126</td><td>ছোট বিভাগ</td></tr>
+      <tr><td><code>/26</code></td><td>255.255.255.192</td><td>64</td><td>62</td><td>ছোট office</td></tr>
+      <tr><td><code>/30</code></td><td>255.255.255.252</td><td>4</td><td>2</td><td>দুই router-এর মাঝের link</td></tr>
+      <tr><td><code>/31</code></td><td>255.255.255.254</td><td>2</td><td>2*</td><td>point-to-point (RFC 3021)</td></tr>
+      <tr><td><code>/32</code></td><td>255.255.255.255</td><td>1</td><td>1</td><td>একক host-এর route</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ "−2" কেন</div>
+    <p>প্রতিটি subnet-এ দুটি address সংরক্ষিত:</p>
+    <ul>
+      <li><strong>Network address</strong> — সব host bit শূন্য (<code>192.168.1.0</code>)। এটি network-টিকে <em>নির্দেশ</em> করে, কোনো host নয়।</li>
+      <li><strong>Broadcast address</strong> — সব host bit এক (<code>192.168.1.255</code>)। এখানে পাঠালে subnet-এর সবাই পায়।</li>
+    </ul>
+    <p><code>/31</code> ব্যতিক্রম: দুটি router-এর মাঝের link-এ broadcast-এর প্রয়োজন নেই, তাই RFC 3021 দুটো address-ই host হিসেবে ব্যবহারের অনুমতি দেয়। <code>/32</code> মানে একটি একক address — routing table বা firewall rule-এ ব্যবহৃত।</p>
+  </div>
+
+  <h2>10.3 হাতে হিসাব — একটি /24</h2>
+
+  <div class="cb diagram"><pre>দেওয়া আছে:  192.168.1.0/24
+
+/24 → প্রথম 24 bit স্থির, শেষ 8 bit পরিবর্তনশীল
+
+  192  .  168  .   1   .    0
+  স্থির    স্থির    স্থির    ← এই byte-টি 0 থেকে 255
+
+Network address  : 192.168.1.0     (host bits সব 0)
+প্রথম host        : 192.168.1.1
+শেষ host          : 192.168.1.254
+Broadcast         : 192.168.1.255   (host bits সব 1)
+
+মোট address : 2⁸ = 256
+Usable host : 256 − 2 = 254</pre></div>
+
+  <h2>10.4 হাতে হিসাব — একটি /26 (এখানেই আসল শেখা)</h2>
+
+  <div class="cb diagram"><pre>দেওয়া আছে:  192.168.1.0/26
+
+/26 → শেষ byte-এর প্রথম 2 bit network, বাকি 6 bit host
+
+শেষ byte:  n n h h h h h h
+           └─┘ └────────┘
+         network    host (2⁶ = 64টি address)
+
+সুতরাং প্রতিটি subnet-এর আকার 64। চারটি subnet তৈরি হয়:
+
+┌──────────────────┬─────────────┬────────────────┬─────────────┐
+│ Subnet           │ Network     │ Host range     │ Broadcast   │
+├──────────────────┼─────────────┼────────────────┼─────────────┤
+│ 192.168.1.0/26   │ .0          │ .1   –  .62    │ .63         │
+│ 192.168.1.64/26  │ .64         │ .65  –  .126   │ .127        │
+│ 192.168.1.128/26 │ .128        │ .129 –  .190   │ .191        │
+│ 192.168.1.192/26 │ .192        │ .193 –  .254   │ .255        │
+└──────────────────┴─────────────┴────────────────┴─────────────┘
+
+প্রতিটিতে usable host: 64 − 2 = 62</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ দ্রুত হিসাবের কৌশল</div>
+    <p>মুখস্থ করার দরকার নেই, শুধু এই দুটি সূত্র:</p>
+    <div class="cb diagram"><pre>Block size = 2^(32 − prefix)         ← মোট কত address
+           = 256 − mask-এর শেষ octet  ← শেষ octet-এ কত
+
+উদাহরণ /26:
+  256 − 192 = 64   →  subnet গুলো শুরু হয় 0, 64, 128, 192-তে
+
+উদাহরণ /28:
+  mask = 255.255.255.240
+  256 − 240 = 16   →  0, 16, 32, 48, 64, ... 240</pre></div>
+    <p>এরপর: network address = আপনার IP-র নিচের নিকটতম গুণিতক; broadcast = পরের গুণিতক − 1।</p>
+  </div>
+
+  <h2>10.5 Interactive Subnet Calculator</h2>
+  <p>নিচে যেকোনো CIDR লিখুন এবং হিসাবটি ধাপে ধাপে দেখুন। কয়েকটি চেষ্টা করুন: <code>192.168.1.100/26</code>, <code>10.0.0.0/8</code>, <code>172.16.5.130/28</code>, <code>203.0.113.7/30</code>।</p>
+
+  <div class="calc" id="subnetCalc">
+    <div class="ct">🧮 Subnet Calculator</div>
+    <div class="row">
+      <input type="text" id="cidrIn" value="192.168.1.100/26" placeholder="যেমন 192.168.1.100/26" spellcheck="false">
+      <button class="iconbtn" id="cidrGo">হিসাব করুন</button>
+    </div>
+    <div class="out" id="cidrOut"></div>
+  </div>
+
+  <h2>10.6 "একই subnet-এ কিনা" — যেভাবে kernel হিসাব করে</h2>
+  <p>Kernel-এর পদ্ধতিটি বাস্তবে খুবই সরল — একটি bitwise AND:</p>
+
+  <div class="cb diagram"><pre>প্রশ্ন: আমি 192.168.1.5/24। আমি কি 192.168.1.200-এ
+       সরাসরি পাঠাতে পারি?
+
+ধাপ ১ — নিজের network বের করো:
+   192.168.1.5    = 11000000.10101000.00000001.00000101
+   mask /24       = 11111111.11111111.11111111.00000000
+   AND            = 11000000.10101000.00000001.00000000
+                  = 192.168.1.0
+
+ধাপ ২ — গন্তব্যের network বের করো (একই mask দিয়ে):
+   192.168.1.200  = 11000000.10101000.00000001.11001000
+   mask /24       = 11111111.11111111.11111111.00000000
+   AND            = 11000000.10101000.00000001.00000000
+                  = 192.168.1.0
+
+ধাপ ৩ — মিলল?  192.168.1.0 == 192.168.1.0  →  হ্যাঁ
+       ⇒ একই subnet ⇒ ARP করে সরাসরি পাঠাও
+
+
+এবার 192.168.2.50-এর জন্য:
+   192.168.2.50 AND /24  =  192.168.2.0
+   192.168.1.0 ≠ 192.168.2.0  →  না
+   ⇒ ভিন্ন subnet ⇒ default gateway-কে দাও</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>Subnet mask কোনো "setting" নয় — এটি একটি <strong>প্রশ্নের উত্তর দেওয়ার যন্ত্র</strong>। প্রতিটি packet-এর জন্য kernel এই AND operation চালায় এবং সিদ্ধান্ত নেয়: local নাকি gateway। ভুল mask দিলে machine ভুল সিদ্ধান্ত নেয় — যেমন <code>/24</code>-এর বদলে <code>/16</code> দিলে সে ভাববে <code>192.168.2.50</code>-ও local, ARP করবে, কেউ উত্তর দেবে না, এবং connection timeout হবে। <strong>"একই তারে আছি কিন্তু ping যাচ্ছে না" — প্রায়ই এটিই কারণ।</strong></p>
+  </div>
+
+  <h2>10.7 Developer Perspective — কোথায় এটি লাগে</h2>
+
+  <div class="box dev">
+    <div class="bt">⚙️ বাস্তব ব্যবহার</div>
+    <ul>
+      <li><strong>Cloud VPC:</strong> AWS/GCP-তে VPC তৈরি করতে গেলেই CIDR চাইবে। <code>10.0.0.0/16</code> নিলে ভেতরে <code>10.0.1.0/24</code> (public subnet), <code>10.0.2.0/24</code> (private subnet) ইত্যাদি ভাগ করবেন। ভুল আকার বেছে নিলে পরে বদলানো কঠিন।</li>
+      <li><strong>Security group / firewall rule:</strong> <code>allow from 10.0.2.0/24</code> — অর্থাৎ শুধু ওই subnet-এর ২৫৪টি address থেকে। <code>/32</code> মানে ঠিক একটি IP।</li>
+      <li><strong>Kubernetes:</strong> pod CIDR, service CIDR, node CIDR — তিনটি আলাদা range, এবং এগুলো overlap করলে cluster ভেঙে পড়ে।</li>
+      <li><strong>VPN ও peering:</strong> দুটি network যুক্ত করার সময় তাদের CIDR overlap করলে routing অসম্ভব। এজন্যই সবাই <code>192.168.1.0/24</code> ব্যবহার করার অভ্যাসটি সমস্যাজনক — দুটি অফিস যুক্ত করতে গেলেই সংঘাত।</li>
+      <li><strong>Docker:</strong> <code>172.17.0.0/16</code> default। আপনার কোম্পানির network যদি ওই range ব্যবহার করে, Docker চালু করলেই কিছু internal service অদৃশ্য হয়ে যাবে।</li>
+    </ul>
+  </div>
+
+  <h2>10.8 কয়েকটি অনুশীলন</h2>
+  <p>নিচেরগুলো নিজে করার চেষ্টা করুন, তারপর উত্তর খুলুন। Calculator ব্যবহার করে যাচাই করতে পারেন।</p>
+
+  <details class="qa"><summary>অনুশীলন ১ — <code>192.168.1.0/26</code> subnet-এ <code>192.168.1.70</code> কি আছে?</summary>
+    <div class="ans"><p>না। <code>/26</code>-এর block size 64, তাই subnet গুলো: 0–63, 64–127, 128–191, 192–255। <code>192.168.1.0/26</code>-এর পরিধি <code>.0</code> থেকে <code>.63</code>। <code>.70</code> পড়ে পরের subnet-এ (<code>192.168.1.64/26</code>)। অর্থাৎ এই দুটি host সরাসরি কথা বলতে পারবে না — router লাগবে।</p></div>
+  </details>
+
+  <details class="qa"><summary>অনুশীলন ২ — <code>10.5.20.130/28</code>: network address, broadcast, এবং host range কী?</summary>
+    <div class="ans"><p><code>/28</code> → block size = 2^(32−28) = 16। শেষ octet-এ 16-এর গুণিতক: 0, 16, 32, ... 128, <strong>144</strong>, 160...<br>
+    130 পড়ে 128 আর 143-এর মধ্যে। সুতরাং:</p>
+    <ul>
+      <li>Network: <code>10.5.20.128</code></li>
+      <li>প্রথম host: <code>10.5.20.129</code></li>
+      <li>শেষ host: <code>10.5.20.142</code></li>
+      <li>Broadcast: <code>10.5.20.143</code></li>
+      <li>Usable: 14</li>
+    </ul></div>
+  </details>
+
+  <details class="qa"><summary>অনুশীলন ৩ — একটি অফিসে ৫০০টি device। কোন prefix সবচেয়ে উপযুক্ত?</summary>
+    <div class="ans"><p><code>/23</code>। হিসাব: <code>/24</code> দেয় ২৫৪টি host — যথেষ্ট নয়। <code>/23</code> দেয় 2⁹ − 2 = <strong>510</strong>টি — ঠিক মানানসই। <code>/22</code> দিত ১০২২টি — অপচয় (এবং broadcast domain অপ্রয়োজনীয়ভাবে বড়)।<br>
+    তবে বাস্তবে অভিজ্ঞ network designer-রা এখানে দুটি <code>/24</code> নিতেন এবং তাদের মাঝে router বসাতেন — যাতে broadcast domain ছোট থাকে এবং বিভাগ অনুযায়ী নিরাপত্তা-নীতি প্রয়োগ করা যায়।</p></div>
+  </details>
+
+  <details class="qa"><summary>অনুশীলন ৪ — আপনার machine <code>192.168.1.5/24</code>। কেউ ভুল করে mask <code>/16</code> করে দিল। কী ভাঙবে?</summary>
+    <div class="ans"><p>Machine এখন ভাববে পুরো <code>192.168.0.0 – 192.168.255.255</code> তার local network। ফলে <code>192.168.2.10</code>-এ পাঠাতে গেলে সে <strong>gateway-কে না দিয়ে সরাসরি ARP করবে</strong>। কিন্তু ওই host অন্য physical segment-এ, তাই ARP-এর কোনো উত্তর আসবে না → packet কখনো পাঠানোই হবে না → timeout।<br>
+    মজার ব্যাপার — Internet ঠিকই কাজ করবে (কারণ <code>8.8.8.8</code> এখনো non-local), কিন্তু পাশের subnet-এর কোনো server-এ পৌঁছানো যাবে না। এই অসামঞ্জস্যপূর্ণ উপসর্গটিই mask-এর ভুলের স্বাক্ষর।</p></div>
+  </details>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 10 — আপনার নিজের subnet</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার machine কোন subnet-এ আছে, সেখানে কতগুলো address সম্ভব, এবং সীমারেখাটি বাস্তবে কোথায়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার IP এবং prefix
+ip -brief addr show           # যেমন: wlan0  UP  192.168.0.107/24
+
+# আপনার routing table-এ subnet টি কীভাবে দেখাচ্ছে
+ip route
+
+# subnet-এর সব host scan করুন (ping sweep)
+for i in $(seq 1 254); do (ping -c1 -W1 192.168.0.$i >/dev/null 2>&1 \
+  && echo "192.168.0.$i সক্রিয়") & done; wait</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ip route</code>-এ একটি লাইন থাকবে <code>192.168.0.0/24 dev wlan0 proto kernel scope link src 192.168.0.107</code> — লক্ষ্য করুন <code>scope link</code>, অর্থাৎ "এই গুলোতে সরাসরি পৌঁছানো যায়, gateway লাগবে না"। উপরের calculator-এ আপনার নিজের CIDR বসিয়ে দেখুন range মিলছে কিনা।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Subnet কোনো তাত্ত্বিক ভাগ নয় — এটি routing table-এ একটি প্রকৃত entry, যা আপনার kernel প্রতিটি packet-এর জন্য পরীক্ষা করে। "Local" মানে ঠিক এই একটি লাইন।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Subnet mask ঠিক করে address-এর কতগুলো bit network আর কতগুলো host।</li>
+      <li>CIDR (<code>/24</code>) এবং dotted mask (<code>255.255.255.0</code>) একই জিনিসের দুই লেখা।</li>
+      <li>Block size = 2^(32 − prefix) = 256 − mask-এর শেষ octet।</li>
+      <li>প্রতিটি subnet-এ ২টি address সংরক্ষিত: network (সব host bit 0) ও broadcast (সব host bit 1)।</li>
+      <li>Kernel bitwise AND দিয়ে ঠিক করে destination local কিনা — এটিই subnetting-এর মূল উদ্দেশ্য।</li>
+      <li>ভুল mask = ভুল local/remote সিদ্ধান্ত = রহস্যময় timeout।</li>
+      <li>বাস্তবে CIDR লাগে VPC design, firewall rule, Kubernetes, VPN ও Docker-এ।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>/24</code> এবং <code>/25</code>-এর পার্থক্য কী?</summary>
+    <div class="ans"><p><code>/24</code>-এ ২৫৬টি address (২৫৪টি usable), <code>/25</code>-এ ১২৮টি (১২৬টি usable)। <code>/25</code> একটি <code>/24</code>-কে দুই ভাগে ভাগ করে: <code>x.x.x.0–127</code> এবং <code>x.x.x.128–255</code>। প্রতিটি ভাগ নিজস্ব network ও broadcast address সহ আলাদা subnet — অর্থাৎ তাদের মধ্যে কথা বলতে router লাগবে।</p></div>
+  </details>
+  <details class="qa"><summary>একটি subnet-এ দুটি address কেন ব্যবহার করা যায় না?</summary>
+    <div class="ans"><p><strong>Network address</strong> (সব host bit 0) — এটি subnet-টিকে নির্দেশ করতে ব্যবহৃত হয় (routing table-এ, configuration-এ), কোনো নির্দিষ্ট host নয়। <strong>Broadcast address</strong> (সব host bit 1) — এখানে পাঠালে subnet-এর সবাই পায়, তাই এটি কোনো একক host-এর হতে পারে না। ব্যতিক্রম <code>/31</code> (RFC 3021), যেখানে point-to-point link-এ broadcast অর্থহীন বলে দুটি address-ই ব্যবহারযোগ্য।</p></div>
+  </details>
+  <details class="qa"><summary><code>10.0.0.0/8</code> এবং <code>10.0.0.0/24</code> — একই network কি?</summary>
+    <div class="ans"><p>না। দুটোর network address একই (<code>10.0.0.0</code>), কিন্তু আকার সম্পূর্ণ ভিন্ন। <code>/8</code>-এ <code>10.0.0.0</code> থেকে <code>10.255.255.255</code> — ১.৬ কোটি address। <code>/24</code>-এ শুধু <code>10.0.0.0</code> থেকে <code>10.0.0.255</code> — ২৫৬টি। Prefix length ছাড়া একটি network address অসম্পূর্ণ তথ্য।</p></div>
+  </details>
+  <details class="qa"><summary>Kernel কীভাবে ঠিক করে একটি packet local নাকি remote?</summary>
+    <div class="ans"><p>Destination IP এবং নিজের IP — দুটোকেই subnet mask দিয়ে bitwise AND করে network portion বের করে। দুটি ফলাফল সমান হলে destination local (ARP করে সরাসরি পাঠাবে); অসমান হলে remote (default gateway-কে দেবে)। এটি প্রতিটি packet-এর জন্য routing table lookup-এর অংশ হিসেবে ঘটে।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch9"><div class="d">পূর্ববর্তী</div><div class="t">Ch 9 — IP Addresses</div></a>
+    <a class="nx" href="#ch11"><div class="d">পরবর্তী</div><div class="t">Ch 11 — Default Gateway</div></a>
+  </div>
+</section>

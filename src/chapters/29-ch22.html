@@ -1,0 +1,200 @@
+<section class="chapter" id="ch22">
+  <div class="ch-eyebrow">Chapter 22</div>
+  <h1>TCP Connection Termination এবং TIME_WAIT</h1>
+  <p class="ch-lede">Connection বন্ধ করা খোলার চেয়ে জটিল, কারণ দুই দিকের data stream স্বাধীনভাবে শেষ হতে পারে। আর TIME_WAIT — সেই অবস্থা যা দেখলে সবাই বিরক্ত হয় এবং অনেকে ভুল করে বন্ধ করে দেয়।</p>
+
+  <h2>22.1 Four-Way Handshake</h2>
+  <p>TCP connection <strong>full-duplex</strong> — দুটি স্বাধীন byte stream। তাই প্রতিটি দিক আলাদাভাবে বন্ধ করতে হয়।</p>
+
+  <div class="cb diagram"><pre>   CLIENT                                    SERVER
+      │                                         │
+ ESTABLISHED                              ESTABLISHED
+      │                                         │
+      │  close() করলাম                           │
+      │  FIN, seq=1000                          │
+      ├────────────────────────────────────────▶│
+      │                                         │
+ FIN_WAIT_1                                CLOSE_WAIT
+      │                                         │
+      │◀────────────────────────────────────────┤
+      │            ACK=1001                     │
+ FIN_WAIT_2                                     │
+      │                                         │
+      │      ◀── server এখনো data পাঠাতে পারে ──│
+      │      ◀── ("half-close" অবস্থা)          │
+      │                                         │
+      │                              server-ও close() করল
+      │            FIN, seq=5000                │
+      │◀────────────────────────────────────────┤
+      │                                    LAST_ACK
+      │            ACK=5001                     │
+      ├────────────────────────────────────────▶│
+      │                                         │
+  TIME_WAIT                                  CLOSED
+      │                                         
+      │  2 × MSL অপেক্ষা (সাধারণত 60s)
+      │
+   CLOSED</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ কেন চারটি packet, তিনটি নয়</div>
+    <p>খোলার সময় SYN-ACK একটি packet-এ দুটি কাজ করে। বন্ধ করার সময় সেটি সবসময় সম্ভব নয়, কারণ <strong>একদিকে data শেষ হলেও অন্যদিকে চলতে পারে</strong>।</p>
+    <p>উদাহরণ: আপনি একটি বড় ফাইল upload করছেন এবং শেষ করে FIN পাঠালেন। Server তখনো processing করছে এবং কয়েক সেকেন্ড পরে response পাঠাবে। সে সঙ্গে সঙ্গে FIN পাঠাতে পারে না — শুধু ACK দিয়ে বলে "তোমার শেষ, বুঝেছি", তারপর নিজের কাজ শেষ করে আলাদাভাবে FIN পাঠায়। (তবে server-এর কিছু বলার না থাকলে ACK ও FIN একসাথেও যেতে পারে।)</p>
+  </div>
+
+  <h2>22.2 TIME_WAIT — সবচেয়ে ভুল বোঝা অবস্থা</h2>
+
+  <p>যে পক্ষ <em>প্রথমে</em> close করে, সে শেষ ACK পাঠানোর পর <strong>TIME_WAIT</strong> অবস্থায় যায় এবং <code>2 × MSL</code> সময় অপেক্ষা করে (MSL = Maximum Segment Lifetime, সাধারণত ৩০ সেকেন্ড; তাই মোট ~৬০ সেকেন্ড, Linux-এ hard-coded)।</p>
+
+  <div class="box why">
+    <div class="bt">💡 কেন এই অপেক্ষা — দুটি কারণ</div>
+
+    <p><strong>কারণ ১ — শেষ ACK হারিয়ে যেতে পারে</strong></p>
+    <div class="cb diagram"><pre>Client শেষ ACK পাঠাল ──✗ হারিয়ে গেল
+
+Server তখনো LAST_ACK-এ অপেক্ষা করছে
+  → timeout হলে সে FIN আবার পাঠাবে
+
+  যদি client সঙ্গে সঙ্গে CLOSED হয়ে যেত:
+    → সে ওই FIN-এর জবাবে RST পাঠাত
+    → server একটি ভুল error দেখত
+    → "connection reset by peer"
+
+  TIME_WAIT-এ থাকায়:
+    → client FIN-টি চিনতে পারে
+    → আবার ACK পাঠায়
+    → server শান্তিতে বন্ধ হয়</pre></div>
+
+    <p><strong>কারণ ২ — পুরনো packet নতুন connection-এ ঢুকে পড়া</strong></p>
+    <div class="cb diagram"><pre>ধরুন একটি packet network-এ কোথাও আটকে ছিল (routing loop)।
+Connection বন্ধ হয়ে গেল।
+
+সঙ্গে সঙ্গে একই 4-tuple দিয়ে নতুন connection খোলা হলো:
+    (192.168.1.5:51234 → 10.0.0.5:443)
+
+এখন সেই পুরনো, দেরিতে পৌঁছানো packet এসে হাজির।
+Sequence number কাকতালীয়ভাবে মিলে গেলে
+নতুন connection পুরনো data গ্রহণ করে ফেলবে!
+    → data corruption
+
+TIME_WAIT নিশ্চিত করে যে ওই 4-tuple পুনর্ব্যবহারের আগে
+network-এ ভাসমান সব পুরনো packet মরে গেছে
+(2 × MSL = একটি packet-এর সর্বোচ্চ আয়ুর দ্বিগুণ)।</pre></div>
+  </div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ "Address already in use" — সবচেয়ে পরিচিত বিরক্তি</div>
+    <p>আপনি server বন্ধ করে আবার চালু করলেন, এবং পেলেন:</p>
+    <div class="cb"><span class="cb-lang">text</span><pre>Error: listen EADDRINUSE: address already in use :::8080</pre></div>
+    <p>কারণ: আগের connection গুলো TIME_WAIT-এ, তাই ওই local port তখনো "ব্যবহৃত" হিসেবে গণ্য।</p>
+    <p><strong>সঠিক সমাধান —</strong> <code>SO_REUSEADDR</code> socket option। এটি kernel-কে বলে "TIME_WAIT-এ থাকা socket থাকলেও এই address-এ bind করতে দাও"। এটি নিরাপদ, কারণ TIME_WAIT-এর সুরক্ষা তখনো 4-tuple-ভিত্তিকভাবে বজায় থাকে।</p>
+    <div class="cb"><span class="cb-lang">js</span><pre>// Node.js — server.listen() নিজেই SO_REUSEADDR সেট করে
+
+// Python
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+// Go — net.Listen() default-এ সেট করে
+
+// C
+int yes = 1;
+setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof(yes));</pre></div>
+    <p><strong>ভুল সমাধান —</strong> <code>net.ipv4.tcp_tw_recycle = 1</code> সেট করা। এটি NAT-এর পেছনের client-দের জন্য connection ভেঙে দেয় এবং এটি Linux 4.12 থেকে সরিয়েই ফেলা হয়েছে। Internet-এ পুরনো blog post-এ এই পরামর্শ এখনো পাওয়া যায় — <strong>অনুসরণ করবেন না</strong>।</p>
+  </div>
+
+  <h2>22.3 কে TIME_WAIT-এ যায় — এবং এটি কেন গুরুত্বপূর্ণ</h2>
+
+  <div class="box tip">
+    <div class="bt">✓ যে প্রথমে close করে, সেই TIME_WAIT-এ যায়</div>
+    <p>এটি একটি নকশাগত সিদ্ধান্ত যার বড় বাস্তব প্রভাব আছে:</p>
+    <ul>
+      <li><strong>Server আগে close করলে</strong> — server-এ হাজার হাজার TIME_WAIT socket জমে। প্রতিটি কিছু memory খায় এবং port-এর সীমা তৈরি করতে পারে।</li>
+      <li><strong>Client আগে close করলে</strong> — TIME_WAIT client-এর দিকে যায়, যেখানে সাধারণত connection-এর সংখ্যা অনেক কম।</li>
+    </ul>
+    <p>এজন্যই <strong>HTTP-তে সাধারণত client-ই connection বন্ধ করে</strong> (বা keep-alive দিয়ে খোলা রাখা হয়)। একটি ব্যস্ত API server-এ যদি প্রতিটি response-এর পর server নিজে close করে, সেখানে দ্রুত লক্ষাধিক TIME_WAIT socket জমতে পারে।</p>
+  </div>
+
+  <h2>22.4 RST — রূঢ় সমাপ্তি</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th></th><th>FIN (ভদ্র)</th><th>RST (রূঢ়)</th></tr></thead>
+    <tbody>
+      <tr><td>অর্থ</td><td>"আমার পাঠানো শেষ"</td><td>"এই connection বাতিল, এখনই"</td></tr>
+      <tr><td>Buffer-এর data</td><td>পাঠানো সম্পূর্ণ হয়</td><td>ফেলে দেওয়া হয়</td></tr>
+      <tr><td>উত্তর</td><td>ACK আশা করে</td><td>কোনো উত্তরের আশা নেই</td></tr>
+      <tr><td>TIME_WAIT</td><td>হয়</td><td>হয় না</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>RST কখন পাঠানো হয়:</p>
+  <ul>
+    <li><strong>বন্ধ port-এ connect করলে</strong> → এটিই <code>connection refused</code>-এর প্রকৃত রূপ</li>
+    <li>একটি মৃত/অজানা connection-এ packet এলে</li>
+    <li>Application <code>SO_LINGER=0</code> দিয়ে জোর করে বন্ধ করলে</li>
+    <li>Process crash করলে — kernel বাকি connection গুলোতে RST পাঠায়</li>
+    <li>Firewall জোর করে connection কাটলে</li>
+  </ul>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — error message-এর মানে</div>
+    <ul>
+      <li><code>ECONNREFUSED</code> — <strong>SYN-এর জবাবে RST এল।</strong> Machine পৌঁছানো গেছে, routing ঠিক আছে, কিন্তু ওই port-এ কেউ শুনছে না। প্রায়ই মানে: service চলছে না, বা ভুল port, বা <code>127.0.0.1</code>-এ bind করা।</li>
+      <li><code>ECONNRESET</code> — <strong>প্রতিষ্ঠিত connection-এ RST এল।</strong> অপর পক্ষ crash করেছে, বা জোর করে বন্ধ করেছে, বা মাঝখানের কোনো firewall/load balancer idle connection কেটে দিয়েছে।</li>
+      <li><code>ETIMEDOUT</code> — <strong>কোনো উত্তরই আসেনি।</strong> Packet হারাচ্ছে, বা firewall নীরবে ফেলে দিচ্ছে (DROP, REJECT নয়), বা host পৌঁছানো যাচ্ছে না।</li>
+      <li><code>EPIPE</code> — <strong>বন্ধ হয়ে যাওয়া connection-এ লিখতে চেয়েছেন।</strong> সাধারণত আগেই একটি ECONNRESET বা FIN এসেছিল।</li>
+    </ul>
+    <p>এই চারটির পার্থক্য জানা debugging-এর সময় সরাসরি সঠিক দিকে নিয়ে যায়: RST মানে packet পৌঁছেছে (network ঠিক), timeout মানে পৌঁছায়নি (network বা firewall দেখুন)।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 22 — TIME_WAIT এবং RST তৈরি করে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — TIME_WAIT বাস্তবে কখন তৈরি হয়, কতক্ষণ থাকে, এবং RST কেমন দেখায়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># বর্তমান TIME_WAIT socket গুলো গুনুন
+ss -tan | awk '{print $1}' | sort | uniq -c
+
+# অনেকগুলো ছোট connection তৈরি করুন
+for i in $(seq 1 30); do curl -s -o /dev/null http://example.com; done
+
+# আবার গুনুন — TIME_WAIT বেড়েছে
+ss -tan state time-wait | wc -l
+
+# ৬০ সেকেন্ড পরে আবার দেখুন — কমে গেছে
+
+# RST দেখুন: একটি বন্ধ port-এ connect করুন
+sudo tcpdump -i lo -n 'tcp port 9999' &
+curl -s http://127.0.0.1:9999 ; echo "exit code: $?"</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> curl গুলো চালানোর পর TIME_WAIT-এর সংখ্যা লাফিয়ে বাড়ে, তারপর প্রায় ৬০ সেকেন্ডে ধীরে ধীরে শূন্যে নামে। বন্ধ port-এ connect করলে tcpdump-এ দেখবেন <code>Flags [S]</code>-এর সঙ্গে সঙ্গে <code>Flags [R.]</code> — অর্থাৎ RST, এবং curl বলবে <code>Connection refused</code>।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> TIME_WAIT কোনো ত্রুটি নয়, এটি একটি নিরাপত্তা-ব্যবস্থা যার নির্দিষ্ট আয়ু আছে। আর <code>connection refused</code> আসলে একটি প্রকৃত RST packet — অর্থাৎ আপনার packet গন্তব্যে <em>পৌঁছেছে</em>, যা নিজেই একটি মূল্যবান তথ্য।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>TCP full-duplex, তাই বন্ধ করতে চারটি packet: FIN → ACK → FIN → ACK।</li>
+      <li>একদিক বন্ধ হলেও অন্যদিক চলতে পারে (half-close)।</li>
+      <li><strong>যে প্রথমে close করে সে TIME_WAIT-এ যায়</strong>, ২ × MSL (~৬০s) সময়ের জন্য।</li>
+      <li>TIME_WAIT-এর দুটি কারণ: হারানো শেষ ACK সামলানো, এবং পুরনো packet নতুন connection-এ ঢুকতে না দেওয়া।</li>
+      <li>"Address already in use"-এর সঠিক সমাধান <code>SO_REUSEADDR</code>; <code>tcp_tw_recycle</code> নয় (এটি বিপজ্জনক ও অপসারিত)।</li>
+      <li>RST = তাৎক্ষণিক, রূঢ় সমাপ্তি; buffer-এর data হারায়, TIME_WAIT হয় না।</li>
+      <li><code>ECONNREFUSED</code> (RST এল) ≠ <code>ETIMEDOUT</code> (কিছুই এল না) — এই পার্থক্য debugging-এ মূল্যবান।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>TIME_WAIT কেন প্রয়োজন — দুটি কারণ বলুন।</summary>
+    <div class="ans"><p>(১) <strong>শেষ ACK হারালে:</strong> peer FIN আবার পাঠাবে; TIME_WAIT-এ থাকা socket সেটি চিনে আবার ACK পাঠাতে পারে। CLOSED হয়ে গেলে সে RST পাঠাত এবং peer একটি ভুল error দেখত। (২) <strong>পুরনো packet:</strong> network-এ ভাসমান কোনো দেরিতে আসা packet যেন একই 4-tuple-এর নতুন connection-এ ঢুকে data corrupt না করে। ২ × MSL সময় নিশ্চিত করে সেই সব packet মরে গেছে।</p></div>
+  </details>
+  <details class="qa"><summary>একটি ব্যস্ত API server-এ লক্ষাধিক TIME_WAIT socket। সম্ভাব্য কারণ ও সমাধান?</summary>
+    <div class="ans"><p>Server-ই প্রতিটি response-এর পর প্রথমে <code>close()</code> করছে — তাই TIME_WAIT server-এর দিকে জমছে। সমাধান: (১) <strong>HTTP keep-alive</strong> সক্রিয় করে connection পুনর্ব্যবহার করা — সবচেয়ে কার্যকর; (২) client-কে প্রথমে close করতে দেওয়া; (৩) load balancer ব্যবহার করে backend-এ persistent connection রাখা। <code>tcp_tw_recycle</code> ব্যবহার করবেন না।</p></div>
+  </details>
+  <details class="qa"><summary><code>connection refused</code> এবং <code>connection timed out</code> — কোনটি বেশি তথ্য দেয়?</summary>
+    <div class="ans"><p><code>connection refused</code> বেশি তথ্য দেয় — এর মানে আপনার SYN packet গন্তব্যে <strong>পৌঁছেছে</strong> এবং সেখানকার kernel সক্রিয়ভাবে RST দিয়ে জবাব দিয়েছে। অর্থাৎ routing, DNS, firewall — সব ঠিক আছে; শুধু ওই port-এ কেউ শুনছে না। <code>timed out</code> অনেক কম নির্দিষ্ট: packet হারাচ্ছে, বা firewall নীরবে DROP করছে, বা host পৌঁছানো যাচ্ছে না — অনেক সম্ভাবনা।</p></div>
+  </details>
+  <details class="qa"><summary>Half-close কী এবং কখন কাজে লাগে?</summary>
+    <div class="ans"><p>একদিকের stream বন্ধ করে অন্যদিক খোলা রাখা — <code>shutdown(fd, SHUT_WR)</code> দিয়ে করা হয়। Client বলে "আমার পাঠানো শেষ" কিন্তু response গ্রহণ করতে থাকে। ক্লাসিক ব্যবহার: <code>cat file | nc host port</code> — client সব data পাঠিয়ে FIN দেয়, server তখন বুঝতে পারে input শেষ, processing করে উত্তর পাঠায়। FIN না দিলে server জানতই না কখন data শেষ হলো।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch21"><div class="d">পূর্ববর্তী</div><div class="t">Ch 21 — Congestion Control</div></a>
+    <a class="nx" href="#ch23"><div class="d">পরবর্তী</div><div class="t">Ch 23 — UDP</div></a>
+  </div>
+</section>

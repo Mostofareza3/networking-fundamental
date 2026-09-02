@@ -1,0 +1,225 @@
+<section class="chapter" id="ch42">
+  <div class="ch-eyebrow">Chapter 42</div>
+  <h1>What Is the Internet?</h1>
+  <p class="ch-lede">"Internet" শব্দটির উৎপত্তি <em>inter-network</em> থেকে — network-দের মধ্যেকার network। এই নামটিই এর মূল প্রকৃতি বলে দেয়, এবং সেটি বোঝা জরুরি।</p>
+
+  <h2>42.1 Internet একটি জোট, একটি network নয়</h2>
+
+  <div class="cb diagram"><pre>এটি নয়:                  বরং এটি:
+
+   ┌──────────┐          ┌───┐   ┌───┐   ┌───┐
+   │          │          │AS1├───┤AS2├───┤AS3│
+   │ INTERNET │          └─┬─┘   └─┬─┘   └─┬─┘
+   │          │            │       │       │
+   └──────────┘          ┌─┴─┐   ┌─┴─┐   ┌─┴─┐
+                         │AS4├───┤AS5├───┤AS6│
+  একটি বিশাল network      └───┘   └───┘   └───┘
+
+                    ~৭৫,০০০ স্বাধীন network
+                    যারা স্বেচ্ছায় যুক্ত হয়েছে
+
+  • কোনো কেন্দ্রীয় কর্তৃপক্ষ নেই
+  • কোনো একক মালিক নেই
+  • প্রতিটি network নিজের নিয়ম চালায়
+  • তারা যুক্ত হয়েছে কারণ যুক্ত না থাকলে
+    তাদের গ্রাহকরা অন্যদের কাছে পৌঁছাতে পারত না
+
+★ Internet-এর "রাজধানী" নেই। এটি একটি
+  চুক্তিভিত্তিক ব্যবস্থা, একটি প্রতিষ্ঠান নয়।</pre></div>
+
+  <h2>42.2 Autonomous System (AS)</h2>
+
+  <p>একটি <strong>Autonomous System</strong> হলো একটি একক প্রশাসনিক নিয়ন্ত্রণে থাকা IP prefix-এর সমষ্টি, যার একটি নিজস্ব routing নীতি আছে।</p>
+
+  <div class="cb diagram"><pre>প্রতিটি AS-এর একটি নম্বর (ASN):
+
+  AS15169  →  Google
+  AS32934  →  Meta / Facebook
+  AS16509  →  Amazon AWS
+  AS13335  →  Cloudflare
+  AS7713   →  Telkom Indonesia
+  AS17494  →  BTCL (Bangladesh)
+
+একটি AS-এর তিনটি জিনিস থাকে:
+  1. এক বা একাধিক IP prefix (যেমন 8.8.8.0/24)
+  2. একটি ASN
+  3. একটি routing নীতি ("কার traffic আমি বহন করব")
+
+কারা AS হয়:
+  • ISP
+  • বড় প্রতিষ্ঠান (Google, Meta, ব্যাংক)
+  • Cloud provider
+  • বিশ্ববিদ্যালয়, গবেষণা network
+  • Internet exchange</pre></div>
+
+  <h2>42.3 BGP — যে protocol Internet-কে জোড়া রাখে</h2>
+
+  <div class="cb diagram"><pre>BGP (Border Gateway Protocol) দিয়ে AS-রা একে অপরকে
+বলে "আমার মাধ্যমে কোন prefix গুলোতে পৌঁছানো যায়":
+
+  AS100 ঘোষণা করে:
+    "203.0.113.0/24 → আমার কাছে আসো"
+    "AS path: 100"
+
+  AS200 সেটি শুনে নিজের প্রতিবেশীদের বলে:
+    "203.0.113.0/24 → আমার মাধ্যমে যাওয়া যায়"
+    "AS path: 200 100"     ← নিজের ASN যোগ করল
+
+  AS300 শুনে বলে:
+    "AS path: 300 200 100"
+
+★ AS path দুটি কাজ করে:
+  1. দূরত্বের ইঙ্গিত (কম hop = সাধারণত ভালো)
+  2. ★ Loop prevention ★ — নিজের ASN path-এ দেখলে
+     সেই route বাতিল করে (Ch 13-এর TTL-এর মতো ধারণা)</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ BGP পথ নয়, নীতি বাছে</div>
+    <p>একটি সাধারণ ভুল ধারণা: BGP "সবচেয়ে দ্রুত পথ" বেছে নেয়। বাস্তবে BGP-র সিদ্ধান্ত মূলত <strong>ব্যবসায়িক ও নীতিগত</strong>, কারিগরি নয়। সে latency মাপে না, bandwidth জানে না।</p>
+    <p>BGP-র অগ্রাধিকার ক্রম (সরলীকৃত): local preference (নীতি) → সবচেয়ে ছোট AS path → origin type → MED → eBGP over iBGP → নিকটতম IGP প্রতিবেশী।</p>
+    <p>লক্ষ্য করুন — <strong>local preference সবার আগে</strong>, এবং সেটি সম্পূর্ণভাবে প্রশাসকের নির্ধারিত। একটি ISP ইচ্ছাকৃতভাবে একটি ধীর কিন্তু সস্তা পথ বেছে নিতে পারে। এজন্যই কখনো কখনো ঢাকা থেকে ঢাকার একটি server-এ traffic সিঙ্গাপুর ঘুরে আসে।</p>
+  </div>
+
+  <h2>42.4 Transit, Peering, IXP</h2>
+
+  <div class="cb diagram"><pre>TRANSIT — "আমি টাকা দিচ্ছি, তুমি আমার সব traffic নাও"
+
+     Tier 1 ISP
+         │  $$$
+         ▼
+     Regional ISP
+         │  $$
+         ▼
+     Local ISP
+         │  $
+         ▼
+      আপনি
+
+  গ্রাহক অর্থ দেয়, provider পুরো Internet-এ
+  পৌঁছানোর দায়িত্ব নেয়।
+
+
+PEERING — "আমরা সরাসরি traffic বিনিময় করব, বিনামূল্যে"
+
+     ISP-A  ◀────────▶  ISP-B
+              settlement-free
+
+  দুই পক্ষেরই লাভ:
+    • Transit-এর খরচ বাঁচে
+    • Latency কমে (কম hop)
+    • ★ কিন্তু শুধু নিজেদের গ্রাহকদের traffic ★
+      (A, B-র মাধ্যমে C-তে যেতে পারবে না)
+
+
+IXP (Internet Exchange Point) — এক জায়গায় সবাই
+
+     ┌─────────────────────────────────┐
+     │        IXP (একটি বড় switch)     │
+     └──┬────┬────┬────┬────┬────┬─────┘
+        │    │    │    │    │    │
+      ISP-A B    C  Google CDN  ...
+
+  একটি physical port দিয়ে ডজনখানেক network-এর
+  সাথে peering। খরচ ও latency দুটোই নাটকীয়ভাবে কমে।
+
+  বড় IXP: AMS-IX (আমস্টারডাম), DE-CIX (ফ্রাঙ্কফুর্ট),
+  Equinix। বাংলাদেশে: BDIX।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — কেন এই অর্থনীতি আপনাকে প্রভাবিত করে</div>
+    <ul>
+      <li><strong>Latency ভূগোল অনুসরণ করে না, অর্থনীতি অনুসরণ করে।</strong> ঢাকার দুটি ISP-র মধ্যে peering না থাকলে ঢাকা থেকে ঢাকার traffic সিঙ্গাপুর ঘুরে আসতে পারে — ৫ms-এর বদলে ১২০ms।</li>
+      <li><strong>BDIX-এর মতো local IXP</strong> এজন্যই গুরুত্বপূর্ণ — স্থানীয় traffic স্থানীয়ভাবেই থাকে।</li>
+      <li><strong>CDN-রা IXP-তে বসে থাকে</strong> এবং বড় ISP-দের সাথে সরাসরি peer করে — এজন্যই তাদের content এত দ্রুত (Ch 46)।</li>
+      <li><strong>Cloud region বাছাই</strong> শুধু ভৌগোলিক দূরত্বের প্রশ্ন নয় — সংশ্লিষ্ট peering সম্পর্কও গুরুত্বপূর্ণ। প্রকৃত পরিমাপ (<code>mtr</code>) অনুমানের চেয়ে ভালো।</li>
+    </ul>
+  </div>
+
+  <h2>42.5 Tier-এর শ্রেণিবিন্যাস</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Tier</th><th>সংজ্ঞা</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Tier 1</strong></td><td>কারো কাছে transit কেনে না; শুধু peering দিয়েই পুরো Internet-এ পৌঁছায়</td><td>Lumen, Arelion, NTT, Tata, GTT</td></tr>
+      <tr><td><strong>Tier 2</strong></td><td>কিছু peering, কিছু transit কেনে</td><td>অধিকাংশ জাতীয় ISP</td></tr>
+      <tr><td><strong>Tier 3</strong></td><td>শুধু transit কেনে</td><td>ছোট স্থানীয় ISP</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ "Default-Free Zone"</div>
+    <p>Tier 1 network-দের router-গুলোতে <strong>কোনো default route নেই</strong> (Ch 11)। তাদের কাছে পুরো global routing table আছে — বর্তমানে প্রায় ৯ লক্ষ IPv4 prefix এবং ২ লক্ষ IPv6 prefix। কোনো prefix সেখানে না থাকলে সেই গন্তব্য কার্যত Internet-এ নেই।</p>
+    <p>এটি Chapter 11-এর delegation শৃঙ্খলের শেষ প্রান্ত: আপনার laptop → বাসার router → ISP → regional → Tier 1। প্রতিটি স্তর "আমি জানি না, ওকে দাও" বলতে বলতে শেষে এমন কারো কাছে পৌঁছায় যে সত্যিই সব জানে।</p>
+  </div>
+
+  <h2>42.6 BGP-র ভঙ্গুরতা</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ BGP বিশ্বাসের উপর দাঁড়িয়ে</div>
+    <p>BGP-তে ঐতিহাসিকভাবে কোনো প্রমাণীকরণ নেই। একটি AS যেকোনো prefix ঘোষণা করতে পারে, এবং প্রতিবেশীরা সাধারণত বিশ্বাস করে — অনেকটা ARP-এর মতো (Ch 8), কিন্তু বৈশ্বিক পরিসরে।</p>
+    <p><strong>বাস্তব ঘটনা:</strong></p>
+    <ul>
+      <li><strong>২০০৮ — Pakistan Telecom</strong> YouTube-এর prefix ঘোষণা করে (দেশে ব্লক করার উদ্দেশ্যে), কিন্তু ঘোষণাটি বিশ্বব্যাপী ছড়িয়ে পড়ে। YouTube প্রায় ২ ঘণ্টা বিশ্বজুড়ে অদৃশ্য।</li>
+      <li><strong>২০২১ — Facebook</strong> একটি ভুল configuration-এ নিজেদের BGP ঘোষণা প্রত্যাহার করে ফেলে। Facebook, Instagram, WhatsApp ৬ ঘণ্টা বিশ্বব্যাপী বন্ধ। এমনকি তাদের নিজেদের অফিসের দরজার card reader-ও কাজ করেনি, কারণ সেগুলোও একই network-এর উপর নির্ভরশীল ছিল।</li>
+      <li><strong>বহুবার — BGP hijacking</strong> ব্যবহার করে traffic নিজের দিকে টেনে নজরদারি বা cryptocurrency চুরির ঘটনা ঘটেছে।</li>
+    </ul>
+    <p><strong>প্রশমন:</strong> <strong>RPKI</strong> (Resource Public Key Infrastructure) — cryptographically যাচাই করা যায় কোন AS কোন prefix ঘোষণার অধিকার রাখে। গ্রহণ ক্রমশ বাড়ছে কিন্তু এখনো সর্বজনীন নয়।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 42 — Internet-এর কাঠামো নিজে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার packet কোন কোন AS-এর মধ্য দিয়ে যাচ্ছে, এবং কোন প্রতিষ্ঠান কোন IP-র মালিক।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার ISP-র AS নম্বর
+curl -s https://ipinfo.io/org; echo
+
+# একটি IP-র মালিক কে
+whois 8.8.8.8 | grep -iE "orgname|netname|origin"
+curl -s https://ipinfo.io/1.1.1.1 | head -12
+
+# AS সহ traceroute — কোন কোন প্রতিষ্ঠান পেরোচ্ছেন
+traceroute -A 8.8.8.8 2>/dev/null | head -15
+# বা
+mtr -z -r -c 10 8.8.8.8 2>/dev/null
+
+# একটি AS-এর সব prefix (সংখ্যা দেখুন)
+whois -h whois.radb.net -- '-i origin AS15169' 2>/dev/null | grep -c "^route:"
+
+# আপনার নিজের public IP এবং তার AS
+curl -s https://ipinfo.io/json</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>traceroute -A</code>-তে প্রতিটি hop-এর পাশে <code>[AS15169]</code>-এর মতো লেখা দেখবেন — অর্থাৎ ওই router কোন প্রতিষ্ঠানের। লক্ষ্য করুন প্রথম কয়েকটি hop আপনার ISP-র, তারপর হয়তো একটি transit provider, তারপর গন্তব্যের প্রতিষ্ঠান। কখনো কখনো দেখবেন traffic অপ্রত্যাশিত দেশ ঘুরে যাচ্ছে — সেটাই peering-এর অর্থনীতি।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Internet" একটি বিমূর্ততা নয় — আপনার প্রতিটি packet নির্দিষ্ট কিছু প্রতিষ্ঠানের নির্দিষ্ট যন্ত্রের মধ্য দিয়ে যাচ্ছে, এবং সেই পথটি বাণিজ্যিক চুক্তি দ্বারা নির্ধারিত।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Internet = ~৭৫,০০০ স্বাধীন AS-এর স্বেচ্ছাসম্মত জোট; কোনো কেন্দ্রীয় কর্তৃপক্ষ নেই।</li>
+      <li>একটি AS = নিজস্ব routing নীতিসহ একটি প্রশাসনিক ইউনিট, যার একটি ASN আছে।</li>
+      <li>BGP দিয়ে AS-রা prefix-এর reachability ঘোষণা করে; AS path loop prevention-ও করে।</li>
+      <li><strong>BGP নীতি বাছে, পথের গুণমান নয়</strong> — local preference সবার আগে।</li>
+      <li>Transit = অর্থের বিনিময়ে পুরো Internet; peering = পারস্পরিক, বিনামূল্যে, শুধু নিজেদের গ্রাহকদের জন্য।</li>
+      <li>IXP এক জায়গায় বহু network-এর peering সম্ভব করে — খরচ ও latency দুটোই কমায়।</li>
+      <li>Tier 1-দের কোনো default route নেই — তারা "default-free zone"।</li>
+      <li>BGP-তে প্রমাণীকরণ ছিল না; RPKI সেটি যোগ করছে, কিন্তু গ্রহণ এখনো অসম্পূর্ণ।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>ঢাকা থেকে ঢাকার একটি server-এ latency ১২০ms হতে পারে কেন?</summary>
+    <div class="ans"><p>দুটি ISP-র মধ্যে সরাসরি peering না থাকলে traffic তাদের সাধারণ upstream-এ যেতে বাধ্য — যা হয়তো সিঙ্গাপুর বা হংকং-এ। ভৌগোলিকভাবে ৫ km দূরত্ব, কিন্তু network-এর পথ ৬০০০ km। এটিই local IXP (যেমন BDIX)-এর মূল যুক্তি: স্থানীয় traffic স্থানীয়ভাবে বিনিময় করা। <strong>Internet-এ দূরত্ব ভৌগোলিক নয়, topological।</strong></p></div>
+  </details>
+  <details class="qa"><summary>Transit এবং peering-এর মৌলিক পার্থক্য কী?</summary>
+    <div class="ans"><p><strong>Transit</strong> একটি ক্রয়-বিক্রয় সম্পর্ক: আপনি অর্থ দেন, provider আপনার traffic <em>পুরো Internet-এ</em> পৌঁছে দেওয়ার দায়িত্ব নেয়। <strong>Peering</strong> একটি পারস্পরিক সম্পর্ক: দুটি network সাধারণত বিনামূল্যে traffic বিনিময় করে, কিন্তু <em>শুধু নিজেদের গ্রাহকদের</em> traffic — আপনি peer-এর মাধ্যমে তৃতীয় পক্ষের কাছে যেতে পারবেন না।</p></div>
+  </details>
+  <details class="qa"><summary>২০২১-এ Facebook-এর ৬ ঘণ্টার outage কীভাবে ঘটল?</summary>
+    <div class="ans"><p>একটি ভুল configuration-এর ফলে তাদের router-রা BGP-তে নিজেদের prefix-এর ঘোষণা প্রত্যাহার করে ফেলে। ফলে বিশ্বের কোনো router আর জানত না Facebook-এর IP-তে কীভাবে পৌঁছাতে হয় — তারা কার্যত Internet-এর মানচিত্র থেকে মুছে গেল। পুনরুদ্ধার কঠিন হয়ে পড়ে কারণ তাদের নিজেদের internal tool ও physical access ব্যবস্থাও একই network-এর উপর নির্ভরশীল ছিল — একটি ধ্রুপদী circular dependency।</p></div>
+  </details>
+  <details class="qa"><summary>BGP কি সবচেয়ে দ্রুত পথ বেছে নেয়?</summary>
+    <div class="ans"><p>না। BGP latency মাপে না, bandwidth জানে না, congestion দেখে না। তার সিদ্ধান্তের সবচেয়ে বড় নিয়ামক হলো <strong>local preference</strong> — যা সম্পূর্ণভাবে network প্রশাসকের নির্ধারিত এবং প্রায়ই ব্যবসায়িক (কোন পথ সস্তা)। তারপরে আসে AS path-এর দৈর্ঘ্য, যা দূরত্বের একটি মোটামুটি ইঙ্গিত মাত্র। তাই BGP-র বাছাই করা পথ প্রায়ই সবচেয়ে দ্রুত নয়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch41"><div class="d">পূর্ববর্তী</div><div class="t">Ch 41 — Packet Capture</div></a>
+    <a class="nx" href="#ch43"><div class="d">পরবর্তী</div><div class="t">Ch 43 — Crossing the Internet</div></a>
+  </div>
+</section>

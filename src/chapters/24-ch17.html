@@ -1,0 +1,245 @@
+<section class="chapter" id="ch17">
+  <div class="ch-eyebrow">Chapter 17</div>
+  <h1>TCP — অবিশ্বস্ত network-এর উপর নির্ভরযোগ্যতা</h1>
+  <p class="ch-lede">"TCP নির্ভরযোগ্য" — এই বাক্যটি সত্য কিন্তু অর্থহীন, যতক্ষণ না আপনি জানেন <em>কীভাবে</em>। IP packet হারাতে পারে, নকল হতে পারে, উল্টো ক্রমে আসতে পারে। এই বিশৃঙ্খলার উপর একটি পরিচ্ছন্ন byte stream কীভাবে দাঁড় করানো হয় — সেটাই এই chapter।</p>
+
+  <h2>17.1 Why does this exist?</h2>
+  <p>IP-এর প্রতিশ্রুতি অত্যন্ত সীমিত। সে বলে: "আমি চেষ্টা করব।" ব্যস।</p>
+
+  <div class="cb diagram"><pre>IP যা নিশ্চিত করে না:
+
+  ✗ Packet পৌঁছাবে       — router-এর queue ভরে গেলে ফেলে দেয়
+  ✗ ক্রম বজায় থাকবে       — ভিন্ন পথে গেলে ভিন্ন সময়ে পৌঁছায়
+  ✗ একবারই আসবে          — retransmission-এ duplicate হতে পারে
+  ✗ অবিকৃত থাকবে         — bit নষ্ট হতে পারে (checksum ধরে, কিন্তু ঠিক করে না)
+  ✗ সময়মতো আসবে          — কোনো সময়সীমা নেই
+
+IP যা নিশ্চিত করে:
+  ✓ চেষ্টা করবে। (best effort)</pre></div>
+
+  <p>এখন আপনি একটি database driver লিখছেন। আপনার দরকার: যা পাঠিয়েছি তার সবটুকু, ঠিক যে ক্রমে পাঠিয়েছি, ঠিক একবার করে। কেউ একজনকে IP-এর বিশৃঙ্খলা আর আপনার এই চাহিদার মাঝখানে দাঁড়াতে হবে।</p>
+
+  <div class="box why">
+    <div class="bt">💡 Why TCP</div>
+    <p>TCP-র কাজ একটি বাক্যে: <strong>একটি অবিশ্বস্ত, ক্রমহীন packet-ব্যবস্থাকে একটি নির্ভরযোগ্য, ক্রমবদ্ধ byte stream-এ রূপান্তর করা।</strong></p>
+    <p>এবং সে এটি করে <em>শুধুমাত্র দুই প্রান্তে</em> — মাঝের কোনো router TCP-র কিছু জানে না। এটিই <strong>end-to-end principle</strong>: যে কাজ শুধু প্রান্তে সঠিকভাবে করা সম্ভব, সেটি প্রান্তেই করো, মাঝখানে নয়। এই নীতিই Internet-এর মাঝখানটাকে সরল ও দ্রুত রাখতে দিয়েছে।</p>
+  </div>
+
+  <h2>17.2 TCP-এর প্রতিশ্রুতি</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>প্রতিশ্রুতি</th><th>কীভাবে অর্জন করে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>কিছু হারাবে না</strong></td><td>ACK + timeout + retransmission</td></tr>
+      <tr><td><strong>ক্রম বজায় থাকবে</strong></td><td>Sequence number দিয়ে receiver পুনর্বিন্যাস করে</td></tr>
+      <tr><td><strong>Duplicate হবে না</strong></td><td>একই sequence number দুবার এলে দ্বিতীয়টি ফেলে দেয়</td></tr>
+      <tr><td><strong>অবিকৃত থাকবে</strong></td><td>Checksum; ভুল হলে ফেলে দেয় → ACK আসে না → আবার পাঠায়</td></tr>
+      <tr><td><strong>Receiver ডুববে না</strong></td><td>Flow control — receive window (Ch 20)</td></tr>
+      <tr><td><strong>Network ডুববে না</strong></td><td>Congestion control — congestion window (Ch 21)</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ TCP যা প্রতিশ্রুতি দেয় না</div>
+    <ul>
+      <li><strong>নির্দিষ্ট সময়ে পৌঁছানো</strong> — TCP নির্ভরযোগ্য, দ্রুত নয়। Retransmission মানেই বিলম্ব।</li>
+      <li><strong>Message-এর সীমানা</strong> — এটি byte stream (Ch 4)। আপনার message কোথায় শেষ, তা আপনাকেই বলতে হবে।</li>
+      <li><strong>নিরাপত্তা</strong> — TCP encryption করে না, প্রমাণীকরণ করে না। সেটি TLS-এর কাজ (Ch 31–33)।</li>
+      <li><strong>Application পড়েছে</strong> — TCP-র ACK মানে receiver-এর <em>kernel</em> পেয়েছে। Application process টি crash করলেও ACK চলে গিয়ে থাকতে পারে।</li>
+    </ul>
+  </div>
+
+  <h2>17.3 TCP-এর মৌলিক ধারণা — একটি চিঠির উপমা</h2>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>ধরুন আপনি একটি ৫০০ পৃষ্ঠার পাণ্ডুলিপি ডাকযোগে পাঠাচ্ছেন, কিন্তু ডাক ব্যবস্থা অনির্ভরযোগ্য — কিছু খাম হারায়, কিছু উল্টো ক্রমে পৌঁছায়। আপনি যা করবেন:</p>
+    <ol>
+      <li><strong>প্রতিটি পৃষ্ঠায় নম্বর দেবেন</strong> → sequence number</li>
+      <li><strong>প্রাপককে বলবেন "প্রতিটি পৃষ্ঠা পেলে জানাবেন"</strong> → ACK</li>
+      <li><strong>নির্দিষ্ট সময়ে জবাব না এলে আবার পাঠাবেন</strong> → timeout + retransmission</li>
+      <li><strong>প্রাপক নম্বর দেখে সাজিয়ে নেবেন</strong> → reordering</li>
+      <li><strong>একই পৃষ্ঠা দুবার এলে একটি ফেলে দেবেন</strong> → duplicate detection</li>
+      <li><strong>প্রাপক বলবেন "আস্তে পাঠান, আমার টেবিল ভরে গেছে"</strong> → flow control</li>
+      <li><strong>ডাকঘরে ভিড় দেখলে ধীরে পাঠাবেন</strong> → congestion control</li>
+    </ol>
+    <p>TCP ঠিক এই সাতটি কাজ করে, শুধু byte-এর হিসাবে, মাইক্রোসেকেন্ডে। <strong>এই তালিকাটিই TCP।</strong></p>
+  </div>
+
+  <h2>17.4 TCP Header</h2>
+
+  <div class="cb diagram"><pre> 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+┌───────────────────────────────┬───────────────────────────────┐
+│        Source Port            │      Destination Port         │
+├───────────────────────────────┴───────────────────────────────┤
+│                     Sequence Number                           │
+├───────────────────────────────────────────────────────────────┤
+│                  Acknowledgment Number                        │
+├──────┬────────┬───────────────┬───────────────────────────────┤
+│Offset│ Rsvd   │ U A P R S F   │          Window Size          │
+│      │        │ R C S S Y I   │                               │
+│      │        │ G K H T N N   │                               │
+├──────┴────────┴───────────────┼───────────────────────────────┤
+│           Checksum            │        Urgent Pointer         │
+├───────────────────────────────┴───────────────────────────────┤
+│                  Options (variable)                           │
+└───────────────────────────────────────────────────────────────┘
+                    সর্বনিম্ন 20 bytes</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Field</th><th>কাজ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sequence Number</strong></td><td>এই segment-এর প্রথম byte-টি stream-এর কত নম্বর byte</td></tr>
+      <tr><td><strong>Ack Number</strong></td><td>"আমি এই byte পর্যন্ত পেয়েছি, এখন এটি আশা করছি"</td></tr>
+      <tr><td><strong>Window Size</strong></td><td>"আমি আর কত bytes নিতে পারব" — flow control (Ch 20)</td></tr>
+      <tr><td><strong>SYN</strong></td><td>Connection শুরু করছি, sequence number সমন্বয় করছি</td></tr>
+      <tr><td><strong>ACK</strong></td><td>Ack Number field-টি বৈধ</td></tr>
+      <tr><td><strong>FIN</strong></td><td>আমার আর পাঠানোর কিছু নেই (ভদ্র সমাপ্তি)</td></tr>
+      <tr><td><strong>RST</strong></td><td>এই connection বাতিল, এখনই (রূঢ় সমাপ্তি)</td></tr>
+      <tr><td><strong>PSH</strong></td><td>Buffer-এ জমাবে না, এখনই application-কে দাও</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>17.5 Sequence Number — byte গোনা হয়, packet নয়</h2>
+
+  <div class="box tip">
+    <div class="bt">✓ একটি গুরুত্বপূর্ণ সূক্ষ্মতা</div>
+    <p>TCP-এর sequence number <strong>packet গোনে না, byte গোনে</strong>। এটি একটি মৌলিক নকশাগত সিদ্ধান্ত।</p>
+    <div class="cb diagram"><pre>ভুল ধারণা:      packet 1, packet 2, packet 3
+আসল ব্যবস্থা:    byte 1000-2459, byte 2460-3919, ...</pre></div>
+    <p><strong>কেন byte?</strong> কারণ segment-এর আকার পরিবর্তনশীল — MTU বদলাতে পারে, TCP পুনরায় পাঠানোর সময় ভিন্ন আকারে ভাগ করতে পারে (repacketization)। Byte গুনলে এই সবকিছু নির্বিঘ্নে কাজ করে; packet গুনলে করত না।</p>
+  </div>
+
+  <div class="cb diagram"><pre>Application 5000 bytes লিখল। TCP ভাগ করল (MSS = 1460):
+
+  Segment 1:  seq = 1000    →  bytes 1000 – 2459   (1460 B)
+  Segment 2:  seq = 2460    →  bytes 2460 – 3919   (1460 B)
+  Segment 3:  seq = 3920    →  bytes 3920 – 5379   (1460 B)
+  Segment 4:  seq = 5380    →  bytes 5380 – 5999   ( 620 B)
+
+পরের segment-এর seq = আগেরটির seq + তার data-র দৈর্ঘ্য
+
+Receiver ACK পাঠায় "পরবর্তী প্রত্যাশিত byte" হিসেবে:
+  Segment 1 পেয়ে → ACK = 2460   ("2459 পর্যন্ত পেয়েছি")
+  Segment 2 পেয়ে → ACK = 3920</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ প্রাথমিক sequence number এলোমেলো কেন</div>
+    <p>TCP connection ০ থেকে শুরু করে না — প্রতিটি connection একটি random Initial Sequence Number (ISN) দিয়ে শুরু হয়। দুটি কারণ: (১) আগের কোনো connection-এর দেরিতে পৌঁছানো packet যেন নতুন connection-এ ঢুকে না পড়ে; (২) নিরাপত্তা — sequence অনুমানযোগ্য হলে আক্রমণকারী নকল packet ঢুকিয়ে connection ছিনিয়ে নিতে পারত (TCP sequence prediction attack)।</p>
+  </div>
+
+  <h2>17.6 ACK এবং Retransmission — নির্ভরযোগ্যতার মূল যন্ত্র</h2>
+
+  <div class="cb diagram"><pre>স্বাভাবিক অবস্থা:
+
+  Sender                              Receiver
+    │  seq=1000, 1460 bytes              │
+    ├───────────────────────────────────▶│
+    │                                    │  buffer-এ রাখল
+    │◀───────────────────────────────────┤
+    │            ACK=2460                │  "2459 পর্যন্ত পেয়েছি"
+    │                                    │
+
+
+হারানোর অবস্থা:
+
+  Sender                              Receiver
+    │  seq=1000                          │
+    ├──────────────✗ (router ফেলে দিল)   │
+    │                                    │
+    │  ⏱ RTO timer চলছে...                │
+    │  (কোনো ACK আসছে না)                 │
+    │                                    │
+    │  ⏰ Timeout! আবার পাঠাও              │
+    │  seq=1000  (retransmission)        │
+    ├───────────────────────────────────▶│
+    │◀───────────────────────────────────┤
+    │            ACK=2460                │</pre></div>
+
+  <h3>RTO — কতক্ষণ অপেক্ষা করবে</h3>
+  <p><strong>RTO</strong> (Retransmission Timeout) স্থির নয় — TCP নিজে RTT মেপে এটি হিসাব করে।</p>
+
+  <div class="cb diagram"><pre>প্রতিটি ACK-এ TCP RTT মাপে (কতক্ষণে উত্তর এল)
+
+  SRTT  = মসৃণ করা গড় RTT      (smoothed)
+  RTTVAR = RTT-এর ওঠানামা        (variance)
+
+  RTO = SRTT + 4 × RTTVAR
+
+কেন variance যোগ করা হয়?
+  স্থিতিশীল network-এ (RTT সবসময় ~20ms):
+      RTO ≈ 25ms  →  দ্রুত পুনরুদ্ধার
+  অস্থির network-এ (RTT 20–200ms):
+      RTO ≈ 400ms →  ধৈর্য ধরে, ভুল retransmit এড়ায়
+
+Timeout হলে RTO দ্বিগুণ হয় (exponential backoff):
+  1s → 2s → 4s → 8s → 16s ...
+কারণ: বারবার ব্যর্থ মানে network সত্যিই খারাপ,
+      আরও চাপ দেওয়া পরিস্থিতি খারাপ করবে।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — কেন প্রথম হারানোটি সবচেয়ে ব্যয়বহুল</div>
+    <p>একটি packet loss শুধু একটি packet-এর দেরি নয়। Timeout-ভিত্তিক retransmission-এ কমপক্ষে একটি RTO (সাধারণত ২০০ms থেকে ১ সেকেন্ড) অপেক্ষা করতে হয় — যেখানে স্বাভাবিক RTT হয়তো ৩০ms। উপরন্তু congestion control window অর্ধেক বা তারও কম করে দেয় (Ch 21), তাই তার পরের কিছুক্ষণ throughput কমে থাকে।</p>
+    <p><strong>এজন্যই ০.১% packet loss-ও একটি TCP connection-এর throughput নাটকীয়ভাবে কমিয়ে দিতে পারে</strong> — বিশেষ করে দীর্ঘ RTT-র পথে। Fast retransmit (পরের chapter) এই খরচ অনেকটা কমায়, কিন্তু পুরোপুরি নয়।</p>
+  </div>
+
+  <h2>17.7 Connection State Machine</h2>
+  <p>TCP একটি state machine — <code>ss</code> বা <code>netstat</code>-এ আপনি এই state গুলোই দেখেন:</p>
+
+  <div class="cb diagram"><pre>                    CLOSED
+                       │
+        ┌──────────────┴──────────────┐
+        │ (server)                    │ (client)
+        ▼                             ▼
+     LISTEN                      SYN_SENT
+        │                             │
+        │ SYN পেল                      │ SYN-ACK পেল
+        ▼                             ▼
+    SYN_RCVD ──────────────────▶ ESTABLISHED
+                                      │
+                        ┌─────────────┴──────────────┐
+                        │ close() করলাম              │ FIN পেলাম
+                        ▼                            ▼
+                   FIN_WAIT_1                   CLOSE_WAIT
+                        │                            │
+                        ▼                            ▼
+                   FIN_WAIT_2                     LAST_ACK
+                        │                            │
+                        ▼                            ▼
+                   TIME_WAIT ──── 2×MSL ────────▶ CLOSED
+                                                     
+বিস্তারিত Ch 18 (উপরের অংশ) এবং Ch 22 (নিচের অংশ)।</pre></div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>IP best-effort; TCP-র কাজ সেই অবিশ্বস্ততার উপর নির্ভরযোগ্য byte stream তৈরি করা।</li>
+      <li>TCP-র সব বুদ্ধি <strong>দুই প্রান্তে</strong> — মাঝের router-রা কিছু জানে না (end-to-end principle)।</li>
+      <li>Sequence number <strong>byte গোনে, packet নয়</strong> — তাই আকার বদলালেও কাজ চলে।</li>
+      <li>ACK = "এই byte পর্যন্ত পেয়েছি, এখন এটি চাই"।</li>
+      <li>RTO গতিশীল: <code>SRTT + 4 × RTTVAR</code>, এবং ব্যর্থ হলে দ্বিগুণ হয়।</li>
+      <li>TCP নির্ভরযোগ্যতা দেয়, কিন্তু <strong>সময়ের নিশ্চয়তা, message সীমানা বা নিরাপত্তা দেয় না</strong>।</li>
+      <li>ACK মানে receiver-এর kernel পেয়েছে — application পড়েছে বা process করেছে, তা নয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>TCP sequence number packet না গুনে byte গোনে কেন?</summary>
+    <div class="ans"><p>কারণ segment-এর আকার স্থির নয়। MTU বদলাতে পারে, এবং retransmission-এর সময় TCP ভিন্ন আকারে ভাগ করে পাঠাতে পারে (repacketization)। Byte-ভিত্তিক গণনায় "১০০০ থেকে ২৪৫৯ নম্বর byte পেয়েছি" — এই বক্তব্য packet কীভাবে ভাগ হয়েছে তার উপর নির্ভর করে না। Packet গুনলে পুনরায় ভাগ করা মাত্রই হিসাব ভেঙে পড়ত।</p></div>
+  </details>
+  <details class="qa"><summary>TCP নির্ভরযোগ্য — এর মানে কি আপনার data সবসময় পৌঁছাবে?</summary>
+    <div class="ans"><p>না। TCP প্রতিশ্রুতি দেয় — <em>যদি</em> data পৌঁছায়, তবে সেটি সঠিক ক্রমে, অবিকৃত এবং একবারই পৌঁছাবে; আর না পৌঁছালে সে চেষ্টা করবে এবং শেষ পর্যন্ত ব্যর্থ হলে <em>আপনাকে জানাবে</em> (connection reset/timeout)। কিন্তু তার ফেলে দেওয়া নীরবে হারানো ঠেকানোর ক্ষমতা নেই — cable কাটলে বা host crash করলে connection ভাঙবে। নির্ভরযোগ্যতা মানে "নীরবে ভুল হবে না", "কখনো ব্যর্থ হবে না" নয়।</p></div>
+  </details>
+  <details class="qa"><summary>RTO কেন স্থির না রেখে RTT থেকে হিসাব করা হয়?</summary>
+    <div class="ans"><p>কারণ network-ভেদে RTT-র পার্থক্য বিশাল — একই data center-এ ০.৫ms, আন্তঃমহাদেশীয় পথে ৩০০ms। RTO খুব ছোট হলে সুস্থ packet-কেও হারানো ভেবে অপ্রয়োজনীয় retransmission হবে (network-এ আরও চাপ)। খুব বড় হলে প্রকৃত loss থেকে পুনরুদ্ধারে অনেক দেরি হবে। তাই TCP নিজেই RTT মেপে অভিযোজিত হয়, এবং variance যোগ করে অস্থিরতার জন্য জায়গা রাখে।</p></div>
+  </details>
+  <details class="qa"><summary>TCP-র ACK পেলে কি নিশ্চিত হওয়া যায় যে receiver application data টি process করেছে?</summary>
+    <div class="ans"><p>না। ACK পাঠায় receiver-এর <strong>kernel</strong>, data টি receive buffer-এ পৌঁছানোমাত্র। Application তখনো <code>read()</code> করেনি হতে পারে, এমনকি সেই মুহূর্তে crash করতে পারে। এজন্যই নির্ভরযোগ্য application-এ <strong>application-level acknowledgment</strong> দরকার — যেমন HTTP-র 200 response, বা message queue-র explicit ack। "TCP ACK পেয়েছি তাই কাজ হয়েছে" — এই ধারণা distributed system-এ একটি ধ্রুপদী ভুল।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch16"><div class="d">পূর্ববর্তী</div><div class="t">Ch 16 — Sockets</div></a>
+    <a class="nx" href="#ch18"><div class="d">পরবর্তী</div><div class="t">Ch 18 — TCP Handshake</div></a>
+  </div>
+</section>

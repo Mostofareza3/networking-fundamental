@@ -1,0 +1,293 @@
+<section class="chapter" id="ch26">
+  <div class="ch-eyebrow">Chapter 26</div>
+  <h1>DNS Resolution — একটি নাম যেভাবে IP হয়</h1>
+  <p class="ch-lede">আপনি browser-এ <code>example.com</code> লিখলেন। মিলিসেকেন্ডের মধ্যে একটি IP পাওয়া গেল। এই সময়ের মধ্যে সম্ভবত চারটি ভিন্ন server-কে জিজ্ঞেস করা হয়েছে — এবং প্রত্যেকে ভিন্ন ধরনের উত্তর দিয়েছে।</p>
+
+  <h2>26.1 চরিত্র পরিচিতি</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>ভূমিকা</th><th>কাজ</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Stub resolver</strong></td><td>আপনার OS-এর ভেতরের ক্ষুদ্র client। সে নিজে কিছু খুঁজে বের করে না — শুধু recursive resolver-কে জিজ্ঞেস করে।</td><td><code>getaddrinfo()</code>, systemd-resolved</td></tr>
+      <tr><td><strong>Recursive resolver</strong></td><td>আসল পরিশ্রমটি করে — root থেকে শুরু করে ধাপে ধাপে খুঁজে বের করে, এবং cache রাখে।</td><td>ISP-র resolver, 8.8.8.8, 1.1.1.1</td></tr>
+      <tr><td><strong>Root server</strong></td><td>শুধু বলে TLD-র server কারা। ১৩টি "নাম" (a–m.root-servers.net), কিন্তু anycast-এর কারণে বাস্তবে বিশ্বজুড়ে ১৫০০+ যন্ত্র।</td><td><code>a.root-servers.net</code></td></tr>
+      <tr><td><strong>TLD server</strong></td><td>শুধু বলে একটি নির্দিষ্ট domain-এর authoritative server কারা।</td><td><code>.com</code>-এর server</td></tr>
+      <tr><td><strong>Authoritative server</strong></td><td>প্রকৃত উত্তর জানে — কারণ record গুলো তারই।</td><td><code>ns1.example.com</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>26.2 সম্পূর্ণ resolution — ধাপে ধাপে</h2>
+
+  <div class="stepper" data-steps="7" id="st-dns">
+    <div class="sp-head"><strong><code>www.example.com</code> খোঁজা</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+      <div class="sp-step" data-i="0">
+        <h4>ধাপ ০ — Cache পরীক্ষা (প্রায়ই এখানেই শেষ)</h4>
+        <div class="cb diagram"><pre>Browser cache        →  আছে? উত্তর দাও, শেষ।
+      ↓ নেই
+OS cache             →  আছে? উত্তর দাও, শেষ।
+      ↓ নেই
+/etc/hosts           →  আছে? উত্তর দাও, শেষ।
+      ↓ নেই
+Recursive resolver-কে জিজ্ঞেস করো</pre></div>
+        <p>বাস্তবে ৯০%+ query cache থেকেই মিটে যায়। নিচের পুরো প্রক্রিয়াটি তুলনামূলকভাবে বিরল।</p>
+      </div>
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ১ — Stub → Recursive resolver</h4>
+        <div class="cb diagram"><pre>আপনার machine ──▶ 8.8.8.8 (বা ISP-র resolver)
+                  UDP port 53
+
+  "www.example.com এর A record কী?
+   RD (Recursion Desired) = 1"
+
+  ↑ এই flag-টি বলে: "তুমি পুরো কাজটা করে
+    আমাকে চূড়ান্ত উত্তর দাও"</pre></div>
+      </div>
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ২ — Resolver → Root server</h4>
+        <div class="cb diagram"><pre>Resolver ──▶ a.root-servers.net
+  "www.example.com এর A record?"
+
+Root ──▶ Resolver
+  "আমি জানি না। কিন্তু .com-এর জন্য
+   এদের কাছে যাও:
+     a.gtld-servers.net  192.5.6.30
+     b.gtld-servers.net  192.33.14.30
+     ..."
+
+  ★ এটি একটি REFERRAL, উত্তর নয়।
+    Root server কখনো প্রকৃত IP দেয় না।</pre></div>
+        <p>Resolver root server-দের IP আগে থেকেই জানে — এগুলো তার configuration-এ hard-coded ("root hints")। এটাই একমাত্র জায়গা যেখানে কিছু hard-code করা আছে।</p>
+      </div>
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৩ — Resolver → TLD server</h4>
+        <div class="cb diagram"><pre>Resolver ──▶ a.gtld-servers.net (.com এর server)
+  "www.example.com এর A record?"
+
+TLD ──▶ Resolver
+  "আমিও জানি না। কিন্তু example.com-এর
+   authoritative server হলো:
+     ns1.example.com  93.184.216.1
+     ns2.example.com  93.184.216.2"
+
+  ★ আরেকটি referral।
+    লক্ষ্য করুন — server-এর নামের সাথে IP-ও
+    দেওয়া হয়েছে (একে বলে "glue record")।
+    নাহলে ns1.example.com খুঁজতে গিয়ে
+    আবার example.com খুঁজতে হতো — অসীম চক্র।</pre></div>
+      </div>
+      <div class="sp-step" data-i="4">
+        <h4>ধাপ ৪ — Resolver → Authoritative server</h4>
+        <div class="cb diagram"><pre>Resolver ──▶ ns1.example.com
+  "www.example.com এর A record?"
+
+Authoritative ──▶ Resolver
+  "www.example.com.  300  IN  A  93.184.215.14"
+       │              │    │   │      │
+       │              │    │   │      └─ উত্তর!
+       │              │    │   └─ record type
+       │              │    └─ class (সবসময় IN)
+       │              └─ TTL (সেকেন্ডে)
+       └─ নাম
+
+  ★ AA (Authoritative Answer) flag সেট করা —
+    "এটি আমার নিজের record, আমি নিশ্চিত"</pre></div>
+      </div>
+      <div class="sp-step" data-i="5">
+        <h4>ধাপ ৫ — Cache এবং উত্তর</h4>
+        <div class="cb diagram"><pre>Recursive resolver উত্তরটি cache-এ রাখে (৩০০ সেকেন্ড)
+                    এবং আপনাকে পাঠিয়ে দেয়
+
+Resolver ──▶ আপনার machine
+  "www.example.com = 93.184.215.14, TTL 300"
+
+আপনার OS-ও এটি cache করে।
+Browser-ও নিজের মতো cache করে।
+
+★ পরের ১০,০০০ ব্যবহারকারী একই resolver ব্যবহার করলে
+  তারা কেউ root বা TLD পর্যন্ত যাবে না।
+  এটাই DNS-এর scale-এর রহস্য।</pre></div>
+      </div>
+      <div class="sp-step" data-i="6">
+        <h4>সম্পূর্ণ চিত্র</h4>
+        <div class="cb diagram"><pre>┌─────────┐
+│ Browser │
+└────┬────┘
+     │ (1) www.example.com?
+     ▼
+┌─────────┐
+│OS Stub  │  ← cache, /etc/hosts দেখে
+└────┬────┘
+     │ (2) recursive query, RD=1
+     ▼
+┌──────────────────┐        (3) ?          ┌──────┐
+│  Recursive       │──────────────────────▶│ ROOT │
+│  Resolver        │◀──── .com এখানে ──────│      │
+│  (8.8.8.8)       │                       └──────┘
+│                  │        (4) ?          ┌──────┐
+│  ★ সব কাজ         │──────────────────────▶│ .com │
+│    এখানে হয়       │◀── example.com এখানে ─│ TLD  │
+│                  │                       └──────┘
+│                  │        (5) ?          ┌──────┐
+│                  │──────────────────────▶│ AUTH │
+│                  │◀──── 93.184.215.14 ───│ ns1  │
+└────┬─────────────┘                       └──────┘
+     │ (6) উত্তর + TTL
+     ▼
+┌─────────┐
+│ Browser │  এখন TCP connect করতে পারে
+└─────────┘</pre></div>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ "Recursive" এবং "Iterative" — নামের বিভ্রান্তি</div>
+    <p>আপনার machine একটি <strong>recursive query</strong> পাঠায়: "সব কাজ তুমি করো, আমাকে চূড়ান্ত উত্তর দাও।"</p>
+    <p>Resolver তারপর <strong>iterative query</strong> পাঠায়: root, TLD, authoritative — প্রতিটিকে আলাদাভাবে, প্রতিবার একটু এগিয়ে। এদের প্রত্যেকে বলে "আমি জানি না, ওখানে যাও"।</p>
+    <p>অর্থাৎ resolver-কে "recursive resolver" বলা হয় কারণ সে <em>recursive query গ্রহণ করে</em>, নিজে recursive query পাঠায় বলে নয়।</p>
+  </div>
+
+  <h2>26.3 Record Type</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Type</th><th>কী দেয়</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A</strong></td><td>IPv4 address</td><td><code>example.com. 300 IN A 93.184.215.14</code></td></tr>
+      <tr><td><strong>AAAA</strong></td><td>IPv6 address</td><td><code>example.com. 300 IN AAAA 2606:2800::1</code></td></tr>
+      <tr><td><strong>CNAME</strong></td><td>অন্য নামের alias</td><td><code>www.example.com. IN CNAME example.com.</code></td></tr>
+      <tr><td><strong>NS</strong></td><td>এই domain-এর authoritative server</td><td><code>example.com. IN NS ns1.example.com.</code></td></tr>
+      <tr><td><strong>MX</strong></td><td>Email কোথায় পাঠাতে হবে (priority সহ)</td><td><code>example.com. IN MX 10 mail.example.com.</code></td></tr>
+      <tr><td><strong>TXT</strong></td><td>যেকোনো text — SPF, DKIM, domain মালিকানা যাচাই</td><td><code>"v=spf1 include:_spf.google.com ~all"</code></td></tr>
+      <tr><td><strong>SRV</strong></td><td>Service-এর host ও port</td><td><code>_sip._tcp.example.com. IN SRV 10 60 5060 sip.example.com.</code></td></tr>
+      <tr><td><strong>PTR</strong></td><td>Reverse lookup: IP → নাম</td><td><code>14.215.184.93.in-addr.arpa. IN PTR example.com.</code></td></tr>
+      <tr><td><strong>SOA</strong></td><td>Zone-এর মূল তথ্য (serial, refresh, negative TTL)</td><td>প্রতিটি zone-এ একটি</td></tr>
+      <tr><td><strong>CAA</strong></td><td>কোন CA এই domain-এর certificate দিতে পারবে</td><td><code>example.com. IN CAA 0 issue "letsencrypt.org"</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ CNAME-এর দুটি নিয়ম যা সবাই ভাঙতে চায়</div>
+    <ol>
+      <li><strong>CNAME-এর সাথে অন্য কোনো record থাকতে পারে না।</strong> একটি নামে CNAME থাকলে সেখানে MX, TXT, A — কিছুই থাকতে পারবে না।</li>
+      <li><strong>ফলে zone apex-এ (<code>example.com</code>, subdomain ছাড়া) CNAME অসম্ভব</strong> — কারণ apex-এ SOA ও NS record বাধ্যতামূলক।</li>
+    </ol>
+    <p>এজন্যই <code>example.com</code>-কে সরাসরি একটি CDN-এর নামে point করা যায় না, কিন্তু <code>www.example.com</code>-কে যায়। সমাধান হিসেবে DNS provider-রা অ-প্রমিত ব্যবস্থা তৈরি করেছে: ALIAS, ANAME, বা "CNAME flattening" (Cloudflare) — যা মূলত provider-এর দিকেই CNAME resolve করে A record হিসেবে ফেরত দেয়।</p>
+    <p>এছাড়া CNAME-এর একটি লুকানো খরচ আছে: প্রতিটি CNAME একটি অতিরিক্ত lookup — <code>www</code> → CNAME → তারপর সেই নামের A record খোঁজা। শৃঙ্খল দীর্ঘ হলে latency বাড়ে।</p>
+  </div>
+
+  <h2>26.4 <code>dig</code>-এর output পড়া</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ dig example.com
+
+; &lt;&lt;&gt;&gt; DiG 9.18.1 &lt;&lt;&gt;&gt; example.com
+;; ->>HEADER&lt;&lt;- opcode: QUERY, status: NOERROR, id: 43521
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1
+                    ↑
+    qr = query response   rd = recursion desired
+    ra = recursion available   (aa থাকলে authoritative)
+
+;; QUESTION SECTION:
+;example.com.                   IN      A          ← কী জিজ্ঞেস করেছি
+
+;; ANSWER SECTION:
+example.com.            285     IN      A       93.184.215.14
+                         ↑                            ↑
+                     অবশিষ্ট TTL                    উত্তর
+        (৩০০ ছিল, ১৫ সেকেন্ড আগে cache হয়েছে)
+
+;; Query time: 2 msec              ← ২ms মানে cache থেকে এসেছে
+;; SERVER: 127.0.0.53#53(127.0.0.53)   ← কোন resolver ব্যবহার হলো
+;; WHEN: Wed Sep 02 20:30:00 +06 2026
+;; MSG SIZE  rcvd: 56</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ TTL দেখে cache শনাক্ত করা</div>
+    <p>একই query দুবার চালিয়ে TTL-এর সংখ্যাটি লক্ষ্য করুন। যদি এটি <em>কমতে</em> থাকে (300 → 285 → 270), তার মানে উত্তরটি cache থেকে আসছে এবং resolver গণনা করে দেখাচ্ছে আর কতক্ষণ বৈধ। প্রতিবার পূর্ণ TTL দেখালে বুঝবেন এটি authoritative server থেকে সরাসরি আসছে। <code>Query time</code>-ও সংকেত দেয়: ১–৫ms মানে cache, ৫০–৩০০ms মানে প্রকৃত resolution হয়েছে।</p>
+  </div>
+
+  <h2>26.5 DNS-এর নিরাপত্তা ও গোপনীয়তা</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>প্রযুক্তি</th><th>কী সমাধান করে</th><th>কীভাবে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>DNSSEC</strong></td><td>উত্তর জাল করা (integrity)</td><td>Record-এ cryptographic signature; root থেকে শুরু করে বিশ্বাসের শৃঙ্খল</td></tr>
+      <tr><td><strong>DoT</strong> (DNS over TLS)</td><td>আড়ি পাতা (privacy)</td><td>Port 853-এ TLS-এর ভেতরে DNS</td></tr>
+      <tr><td><strong>DoH</strong> (DNS over HTTPS)</td><td>আড়ি পাতা + অবরোধ</td><td>Port 443-এ HTTPS-এর ভেতরে; সাধারণ web traffic থেকে আলাদা করা কঠিন</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ DNSSEC এবং DoH আলাদা জিনিস</div>
+    <p>সাধারণ DNS query <strong>plaintext UDP</strong> — যে কেউ পথে বসে দেখতে পারে আপনি কোন site খুঁজছেন, এবং জাল উত্তরও পাঠাতে পারে।</p>
+    <ul>
+      <li><strong>DNSSEC</strong> নিশ্চিত করে উত্তরটি <em>খাঁটি</em> — কিন্তু encryption করে না। সবাই তখনো দেখতে পায় আপনি কী খুঁজছেন।</li>
+      <li><strong>DoH/DoT</strong> query-টি <em>গোপন</em> করে — কিন্তু resolver নিজে মিথ্যা বললে ধরার উপায় নেই।</li>
+    </ul>
+    <p>দুটি ভিন্ন সমস্যার ভিন্ন সমাধান, এবং একসাথে ব্যবহার করাই আদর্শ। লক্ষণীয় — TLS থাকলেও DNS query আপনার ব্রাউজিং ফাঁস করে দেয়, এবং SNI (Ch 33) সেটি আরও করে।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 26 — পুরো resolution পথটি নিজে অনুসরণ করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — root থেকে authoritative পর্যন্ত প্রকৃত delegation শৃঙ্খল, নিজের চোখে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># সম্পূর্ণ পথটি ধাপে ধাপে দেখুন
+dig +trace example.com
+
+# শুধু উত্তর
+dig +short example.com
+
+# নির্দিষ্ট record type
+dig example.com MX
+dig example.com NS
+dig example.com TXT
+dig example.com AAAA
+
+# একটি নির্দিষ্ট resolver ব্যবহার করে
+dig @1.1.1.1 example.com
+dig @8.8.8.8 example.com
+
+# Authoritative server-কে সরাসরি জিজ্ঞেস করুন (cache এড়িয়ে)
+dig @$(dig +short NS example.com | head -1) example.com
+
+# Reverse lookup
+dig -x 93.184.215.14</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>+trace</code>-এ দেখবেন প্রথমে ১৩টি root server-এর তালিকা, তারপর <code>.com</code>-এর NS record গুলো, তারপর <code>example.com</code>-এর NS, এবং সবশেষে প্রকৃত A record। প্রতিটি ধাপে "Received X bytes from ..." লাইনে দেখবেন কোন server উত্তর দিয়েছে। ভিন্ন resolver (<code>@1.1.1.1</code> বনাম <code>@8.8.8.8</code>) কখনো কখনো <em>ভিন্ন IP</em> ফেরত দেবে — CDN-এর geographic routing-এর কারণে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Delegation শৃঙ্খলটি বাস্তব — প্রতিটি স্তর সত্যিই বলছে "আমি জানি না, ওখানে যাও"। আর একই নামের জন্য বিভিন্ন resolver ভিন্ন উত্তর দেওয়া স্বাভাবিক ও উদ্দেশ্যপ্রণোদিত।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>চারটি ভূমিকা: stub resolver (OS), recursive resolver (সব কাজ করে), root/TLD (referral দেয়), authoritative (উত্তর জানে)।</li>
+      <li>আপনার machine একটি <strong>recursive</strong> query পাঠায়; resolver <strong>iterative</strong> query দিয়ে ধাপে ধাপে খোঁজে।</li>
+      <li>Root ও TLD কখনো প্রকৃত IP দেয় না — শুধু "পরে কার কাছে যাবে" বলে।</li>
+      <li>Glue record ছাড়া nameserver খোঁজা একটি অসীম চক্রে পড়ত।</li>
+      <li>Record type: A, AAAA, CNAME, NS, MX, TXT, SRV, PTR, SOA, CAA।</li>
+      <li>CNAME-এর সাথে অন্য record থাকতে পারে না, তাই zone apex-এ CNAME অসম্ভব।</li>
+      <li>DNSSEC = সত্যতা যাচাই; DoH/DoT = গোপনীয়তা। দুটি আলাদা সমস্যা।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Root server কি কখনো একটি website-এর IP address জানে?</summary>
+    <div class="ans"><p>না, এবং এটিই নকশা। Root server শুধু TLD-দের (<code>.com</code>, <code>.org</code>, <code>.bd</code>) nameserver-এর তথ্য রাখে। সে সবসময় একটি <em>referral</em> দেয়, কখনো প্রকৃত উত্তর নয়। এই সীমিত দায়িত্বের কারণেই মাত্র ১৩টি root server "নাম" দিয়ে পুরো Internet চলে — তাদের data খুব ছোট এবং প্রায় কখনো বদলায় না।</p></div>
+  </details>
+  <details class="qa"><summary>Glue record কী এবং না থাকলে কী হতো?</summary>
+    <div class="ans"><p>Glue record হলো একটি nameserver-এর নামের সাথে তার IP-ও একসাথে দেওয়া। <code>example.com</code>-এর nameserver যদি <code>ns1.example.com</code> হয়, তাহলে তার IP জানতে <code>example.com</code>-এ query করতে হতো — কিন্তু সেটি জানতে আবার <code>ns1.example.com</code>-এর IP লাগত। অসীম চক্র। TLD server তাই nameserver-এর নামের সাথে IP-ও (glue) দিয়ে দেয়।</p></div>
+  </details>
+  <details class="qa"><summary><code>example.com</code>-কে সরাসরি CDN-এর নামে CNAME করা যায় না কেন?</summary>
+    <div class="ans"><p>কারণ CNAME record-এর সাথে অন্য কোনো record সহাবস্থান করতে পারে না, আর zone apex-এ (<code>example.com</code>) SOA ও NS record বাধ্যতামূলক। ফলে apex-এ CNAME বসানো protocol-বিরুদ্ধ। DNS provider-রা ALIAS/ANAME/CNAME-flattening নামে অ-প্রমিত সমাধান দেয় — তারা নিজেরাই target resolve করে A record হিসেবে ফেরত দেয়।</p></div>
+  </details>
+  <details class="qa"><summary><code>dig</code>-এর output-এ TTL 285 দেখাচ্ছে অথচ record-এ 300 সেট করা। কেন?</summary>
+    <div class="ans"><p>উত্তরটি cache থেকে আসছে। Resolver ১৫ সেকেন্ড আগে এটি authoritative server থেকে পেয়েছিল (তখন TTL ছিল 300), এবং এখন সে অবশিষ্ট সময় দেখাচ্ছে। এটি cache শনাক্ত করার সবচেয়ে সহজ উপায় — বারবার query করে দেখুন TTL কমছে কিনা। শূন্যে নামলে পরের query আবার authoritative server পর্যন্ত যাবে।</p></div>
+  </details>
+  <details class="qa"><summary>DNSSEC থাকলে কি আপনার DNS query গোপন থাকে?</summary>
+    <div class="ans"><p>না। DNSSEC শুধু <strong>সত্যতা</strong> (authenticity ও integrity) নিশ্চিত করে — উত্তরটি প্রকৃত মালিকের দেওয়া এবং পথে বদলানো হয়নি। কিন্তু query ও response তখনো plaintext, তাই পথের যে কেউ দেখতে পায় আপনি কোন domain খুঁজছেন। গোপনীয়তার জন্য দরকার DoH বা DoT, যা সম্পূর্ণ ভিন্ন একটি সমাধান।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch25"><div class="d">পূর্ববর্তী</div><div class="t">Ch 25 — Why DNS Exists</div></a>
+    <a class="nx" href="#ch27"><div class="d">পরবর্তী</div><div class="t">Ch 27 — DNS Caching</div></a>
+  </div>
+</section>

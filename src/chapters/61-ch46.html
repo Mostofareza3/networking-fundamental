@@ -1,0 +1,235 @@
+<section class="chapter" id="ch46">
+  <div class="ch-eyebrow">Chapter 46</div>
+  <h1>CDN — Content Delivery Network</h1>
+  <p class="ch-lede">Chapter 36-এ আমরা দেখেছি latency-র বড় অংশ ভৌত দূরত্ব থেকে আসে, এবং সেটি কমানো যায় না। CDN-এর ধারণাটি তাই বিপরীত দিক থেকে: <em>দূরত্ব কমাও না, বরং content-কে কাছে নিয়ে এসো।</em></p>
+
+  <h2>46.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>Origin server ভার্জিনিয়ায়। ব্যবহারকারী ঢাকায়।
+
+  প্রতিটি request:
+    ঢাকা ──────────────────────▶ ভার্জিনিয়া
+                 RTT ≈ 250ms
+
+  একটি page-এ ৫০টি resource
+  Connection reuse সত্ত্বেও কয়েকটি round trip
+  → ব্যবহারকারী কয়েক সেকেন্ড অপেক্ষা করেন
+
+  আর logo.png প্রতিটি ব্যবহারকারীর জন্য
+  ★ একই ★ — তবু প্রতিবার ১২,০০০ km পাড়ি দিচ্ছে।
+
+CDN-এর প্রশ্ন:
+  "যদি একই জিনিস বারবার একই পথে যায়,
+   সেটি গন্তব্যের কাছে রেখে দিলেই তো হয়?"</pre></div>
+
+  <h2>46.2 কীভাবে কাজ করে</h2>
+
+  <div class="cb diagram"><pre>                    ORIGIN
+                 (ভার্জিনিয়া)
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+    ┌───▼───┐      ┌───▼───┐      ┌───▼───┐
+    │ Edge  │      │ Edge  │      │ Edge  │
+    │ ঢাকা   │      │ লন্ডন  │      │ টোকিও  │
+    └───┬───┘      └───┬───┘      └───┬───┘
+        │              │              │
+   ঢাকার ব্যবহারকারী  লন্ডনের      টোকিওর
+     (8 ms)          (5 ms)       (6 ms)
+
+Cache HIT:
+  User ──▶ Edge ──▶ "আমার কাছে আছে" ──▶ User
+                     ★ 8 ms ★
+
+Cache MISS:
+  User ──▶ Edge ──▶ (নেই) ──▶ Origin ──▶ Edge
+                                    │      │
+                              cache-এ রাখল  │
+  User ◀────────────────────────────────────┘
+        ★ 260 ms — কিন্তু শুধু প্রথম ব্যবহারকারীর জন্য ★
+        পরের সবাই 8 ms পাবেন</pre></div>
+
+  <h2>46.3 ব্যবহারকারী কীভাবে নিকটতম edge-এ পৌঁছান</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>পদ্ধতি</th><th>কীভাবে</th><th>সীমাবদ্ধতা</th></tr></thead>
+    <tbody>
+      <tr><td><strong>GeoDNS</strong></td><td>DNS query-র উৎস দেখে ভিন্ন IP ফেরত দেওয়া</td><td>Resolver-এর অবস্থান দেখে, ব্যবহারকারীর নয় (৮.৮.৮.৮ ব্যবহার করলে ভুল হতে পারে; EDNS Client Subnet কিছুটা সমাধান করে)</td></tr>
+      <tr><td><strong>Anycast</strong></td><td>একই IP বহু জায়গায় ঘোষণা; BGP নিকটতমটিতে পাঠায় (Ch 27, 42)</td><td>"নিকটতম" BGP-র হিসাবে, ভৌগোলিকভাবে নয় — কখনো কখনো অপ্রত্যাশিত</td></tr>
+      <tr><td><strong>দুটোর সমন্বয়</strong></td><td>বেশিরভাগ বড় CDN দুটোই ব্যবহার করে</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>46.4 কী cache করা যায়</h2>
+
+  <div class="cb diagram"><pre>সহজে cache-যোগ্য:
+  ✓ Image, video, font
+  ✓ CSS, JavaScript (hash-যুক্ত নামে হলে আদর্শ)
+  ✓ Static HTML
+  ✓ API-র public, অপরিবর্তনশীল response
+
+কঠিন বা অসম্ভব:
+  ✗ ব্যবহারকারী-নির্দিষ্ট content (dashboard, cart)
+  ✗ প্রতিবার বদলায় এমন data
+  ✗ POST/PUT/DELETE-এর response
+  ✗ Authentication-নির্ভর content
+
+
+Cache-এর নিয়ন্ত্রণ HTTP header দিয়ে (Ch 28, 29):
+
+  Cache-Control: public, max-age=31536000, immutable
+                 │       │                 │
+          যেকেউ cache   ১ বছর         "কখনো বদলাবে না,
+          করতে পারে                    যাচাইও করো না"
+
+  Cache-Control: private, max-age=0, must-revalidate
+                 │
+          শুধু browser, CDN নয়
+
+  Cache-Control: no-store
+          কোথাও রাখা যাবে না (সংবেদনশীল data)
+
+  Vary: Accept-Encoding, Accept-Language
+          এই header-এর ভিন্ন মানে ভিন্ন cache entry</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Cache-busting-এর সঠিক pattern</div>
+    <div class="cb diagram"><pre>✗ ভুল পদ্ধতি:
+   /app.js  +  Cache-Control: max-age=300
+   → প্রতি ৫ মিনিটে যাচাই (অপ্রয়োজনীয় request)
+   → deploy করলেও ৫ মিনিট পুরনো version চলবে
+
+✓ সঠিক পদ্ধতি — content hash সহ নাম:
+   /app.a3f9c2.js  +  max-age=31536000, immutable
+   → এক বছর cache, কখনো যাচাই করার দরকার নেই
+   → deploy করলে ★নতুন নাম★ → নতুন URL → স্বয়ংক্রিয়ভাবে
+     নতুন ফাইল নামবে
+
+   আর HTML (যা এই নামগুলো উল্লেখ করে):
+   /index.html  +  Cache-Control: no-cache
+   → সবসময় যাচাই (কিন্তু 304 হলে সস্তা, Ch 29)
+
+★ এটাই আধুনিক frontend build tool-এর default —
+  এবং এর কারণ ঠিক এই caching কৌশল।</pre></div>
+  </div>
+
+  <h2>46.5 CDN শুধু cache নয়</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>সুবিধা</th><th>ব্যাখ্যা</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Latency</strong></td><td>Content ব্যবহারকারীর কাছে — মূল উদ্দেশ্য</td></tr>
+      <tr><td><strong>TLS termination কাছে</strong></td><td>Handshake-এর RTT গুলো ৮ms-এ, ২৫০ms-এ নয় — এমনকি cache miss হলেও এটি বড় জয়</td></tr>
+      <tr><td><strong>Origin-এর load কমে</strong></td><td>৯৫%+ request edge-এই মেটে</td></tr>
+      <tr><td><strong>Bandwidth খরচ</strong></td><td>Origin-এর egress bandwidth অনেক কম</td></tr>
+      <tr><td><strong>DDoS শোষণ</strong></td><td>আক্রমণ শত শত edge-এ ছড়িয়ে যায়, origin অক্ষত থাকে</td></tr>
+      <tr><td><strong>উন্নত network path</strong></td><td>Edge → origin পথে CDN-এর নিজস্ব optimized backbone, public Internet নয়</td></tr>
+      <tr><td><strong>স্বয়ংক্রিয় HTTP/3, Brotli</strong></td><td>Origin পুরনো হলেও edge আধুনিক protocol দেয়</td></tr>
+      <tr><td><strong>Edge compute</strong></td><td>Cloudflare Workers, Lambda@Edge — logic-ও ব্যবহারকারীর কাছে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — একটি অবমূল্যায়িত সুবিধা</div>
+    <p>অনেকে ভাবেন CDN শুধু static ফাইলের জন্য। কিন্তু <strong>সম্পূর্ণ dynamic, কখনো cache না হওয়া API-র জন্যও CDN মূল্যবান</strong>। কারণ:</p>
+    <div class="cb diagram"><pre>CDN ছাড়া (ঢাকা → ভার্জিনিয়া, RTT 250ms):
+  TCP handshake  : 250 ms
+  TLS handshake  : 250 ms
+  Request/response: 250 ms
+  ─────────────────────────
+                 : 750 ms
+
+CDN সহ (edge ঢাকায়, RTT 8ms; edge→origin optimized):
+  TCP handshake  :   8 ms   ← edge-এর সাথে
+  TLS handshake  :   8 ms   ← edge-এর সাথে
+  Request        :   8 ms
+  Edge → origin  : ~180 ms  ← CDN-এর নিজস্ব backbone,
+                              এবং connection ইতিমধ্যে গরম
+  ─────────────────────────
+                 : ~204 ms  ★ ৭৩% কম ★</pre></div>
+    <p>handshake গুলো কাছে হওয়াতেই বড় সাশ্রয় — cache-এর কোনো ভূমিকা ছাড়াই।</p>
+  </div>
+
+  <h2>46.6 Cache invalidation</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ "Computer science-এর দুটি কঠিন সমস্যা"</div>
+    <p>একটি পুরনো কৌতুক: "কম্পিউটার বিজ্ঞানে মাত্র দুটি কঠিন সমস্যা — cache invalidation এবং নামকরণ।" CDN-এ প্রথমটি বাস্তব ও দৈনন্দিন।</p>
+    <div class="cb diagram"><pre>কৌশল ১ — TTL-এর মেয়াদ শেষ হতে দিন
+  সরল, কিন্তু ধীর। জরুরি সংশোধনে অকার্যকর।
+
+কৌশল ২ — Purge / invalidate
+  API দিয়ে edge-দের বলুন "এই URL মুছে ফেলো"
+  বেশিরভাগ CDN-এ সেকেন্ডের মধ্যে হয়
+  কিন্তু হাজারো URL একসাথে purge করা ধীর
+
+কৌশল ৩ — Cache tag / surrogate key ★ সবচেয়ে ভালো ★
+  Response-এ tag দিন:
+      Surrogate-Key: product-123 category-shoes
+  পরে একটি tag purge করলেই সব সংশ্লিষ্ট URL যাবে
+  → "product 123 বদলেছে" = একটি API call
+
+কৌশল ৪ — Content hash সহ নাম ★ সবচেয়ে নির্ভরযোগ্য ★
+  invalidation-এর দরকারই নেই — নতুন content = নতুন URL
+  পুরনোটা কেউ চাইবে না, ধীরে ধীরে মুছে যাবে</pre></div>
+    <p>কৌশল ৪ সম্ভব হলে সেটিই বেছে নিন — invalidation-এর সমস্যাটাই তখন অস্তিত্বহীন হয়ে যায়।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 46 — CDN-এর আচরণ পর্যবেক্ষণ</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি CDN-এর cache hit/miss, edge-এর অবস্থান, এবং তার প্রভাব।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># CDN-এর header দেখুন
+curl -sI https://www.cloudflare.com | grep -iE "cf-|cache|age|server"
+
+# Cache HIT vs MISS
+URL=https://www.cloudflare.com/favicon.ico
+echo "১ম:"; curl -sI $URL | grep -i "cf-cache-status\|age"
+echo "২য়:"; curl -sI $URL | grep -i "cf-cache-status\|age"
+
+# আপনি কোন edge-এ পৌঁছাচ্ছেন
+curl -s https://www.cloudflare.com/cdn-cgi/trace | grep -E "colo|ip|loc"
+#  colo = data center-এর কোড (DAC = ঢাকা, SIN = সিঙ্গাপুর)
+
+# একই hostname বিভিন্ন resolver থেকে (GeoDNS-এর প্রমাণ)
+for r in 8.8.8.8 1.1.1.1; do
+  echo "$r → $(dig @$r +short www.cloudflare.com | head -1)"
+done
+
+# CDN-এ এবং origin-এ latency তুলনা
+curl -w "CDN:    %{time_total}s\n" -o /dev/null -s https://www.cloudflare.com</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>cf-cache-status: HIT</code> বা <code>MISS</code>; <code>age: 3421</code> মানে এই copy টি ৩৪২১ সেকেন্ড ধরে cache-এ আছে। <code>/cdn-cgi/trace</code>-এর <code>colo=</code> মান দেখাবে আপনি কোন data center-এ পৌঁছেছেন — বাংলাদেশ থেকে সাধারণত <code>DAC</code>, <code>SIN</code> বা <code>BOM</code>। প্রথম request MISS, দ্বিতীয়টি HIT হওয়ার কথা।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> CDN কোনো বিমূর্ততা নয় — আপনি ঠিক কোন শহরের কোন যন্ত্রে পৌঁছাচ্ছেন তা দেখতে পাচ্ছেন, এবং cache-এর অবস্থাও header-এ স্পষ্ট। এই header গুলোই CDN-সংক্রান্ত সমস্যা নির্ণয়ের প্রধান হাতিয়ার।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>CDN দূরত্ব কমায় না — content-কে ব্যবহারকারীর কাছে নিয়ে আসে।</li>
+      <li>Cache HIT = edge থেকে সরাসরি (মিলিসেকেন্ড); MISS = origin থেকে এনে cache করা।</li>
+      <li>ব্যবহারকারী edge-এ পৌঁছান GeoDNS ও Anycast-এর মাধ্যমে।</li>
+      <li><strong>Dynamic API-র জন্যও CDN মূল্যবান</strong> — TLS handshake কাছে হওয়ায় বড় সাশ্রয়।</li>
+      <li>Cache-busting-এর সঠিক pattern: content hash সহ নাম + <code>immutable</code>; HTML-এ <code>no-cache</code>।</li>
+      <li>CDN আরও দেয়: DDoS শোষণ, origin-এর load ও bandwidth সাশ্রয়, আধুনিক protocol, edge compute।</li>
+      <li>Cache invalidation-এর সেরা সমাধান হলো invalidation-এর প্রয়োজন না রাখা (hash-যুক্ত নাম)।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>কখনো cache না হওয়া একটি dynamic API-তেও CDN কেন সাহায্য করে?</summary>
+    <div class="ans"><p>কারণ TCP ও TLS handshake ব্যবহারকারীর কাছের edge-এর সাথে হয় (৮ms), origin-এর সাথে নয় (২৫০ms)। এতেই দুটি RTT সাশ্রয় হয়। উপরন্তু edge থেকে origin-এ CDN-এর নিজস্ব optimized backbone ব্যবহৃত হয় এবং সেই connection সাধারণত ইতিমধ্যে গরম (keep-alive)। ফলে মোট সময় ৭৫০ms থেকে ২০০ms-এ নামতে পারে, কোনো caching ছাড়াই।</p></div>
+  </details>
+  <details class="qa"><summary><code>app.js</code>-এ এক বছরের <code>max-age</code> দিলে নতুন deploy কীভাবে পৌঁছাবে?</summary>
+    <div class="ans"><p>ফাইলের নামে content hash রাখুন: <code>app.a3f9c2.js</code>। Deploy করলে content বদলায় → hash বদলায় → <em>নতুন URL</em> তৈরি হয়। HTML (যা <code>no-cache</code> দিয়ে সবসময় যাচাই হয়) নতুন নামটি উল্লেখ করে, তাই browser স্বয়ংক্রিয়ভাবে নতুন ফাইল নামায়। পুরনো URL-টি কেউ আর চায় না বলে ধীরে ধীরে cache থেকে মুছে যায়। এতে invalidation-এর প্রয়োজনই থাকে না।</p></div>
+  </details>
+  <details class="qa"><summary>GeoDNS কখন ভুল edge-এ পাঠাতে পারে?</summary>
+    <div class="ans"><p>যখন ব্যবহারকারী তার নিজের এলাকার বাইরের resolver ব্যবহার করেন — যেমন ঢাকা থেকে <code>8.8.8.8</code>। CDN তখন resolver-এর অবস্থান (যা হয়তো সিঙ্গাপুর) দেখে সিদ্ধান্ত নেয়, ব্যবহারকারীর নয়। <strong>EDNS Client Subnet</strong> এটি কিছুটা সমাধান করে — resolver ব্যবহারকারীর subnet-এর একটি সংক্ষিপ্ত অংশ query-র সাথে পাঠায়। Anycast-এ এই সমস্যা নেই, কারণ routing নিজেই প্রকৃত packet-এর উৎস অনুযায়ী কাজ করে।</p></div>
+  </details>
+  <details class="qa"><summary><code>Vary: Accept-Encoding</code> header কেন দরকার?</summary>
+    <div class="ans"><p>এটি cache-কে বলে যে <code>Accept-Encoding</code> header-এর ভিন্ন মানের জন্য <em>ভিন্ন cache entry</em> রাখতে হবে। ছাড়া দিলে cache একটি gzip-compressed response এমন একটি client-কে দিয়ে দিতে পারে যে gzip বোঝে না — ফলে ভাঙা content। একইভাবে <code>Vary: Accept-Language</code> ভিন্ন ভাষার version আলাদা রাখে। তবে সতর্কতা: অতিরিক্ত <code>Vary</code> (যেমন <code>User-Agent</code>) cache-এর কার্যকারিতা প্রায় শূন্য করে দেয়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch45"><div class="d">পূর্ববর্তী</div><div class="t">Ch 45 — HTTP/3 and QUIC</div></a>
+    <a class="nx" href="#ch47"><div class="d">পরবর্তী</div><div class="t">Ch 47 — Load Balancing</div></a>
+  </div>
+</section>

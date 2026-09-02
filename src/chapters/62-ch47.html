@@ -1,0 +1,272 @@
+<section class="chapter" id="ch47">
+  <div class="ch-eyebrow">Chapter 47</div>
+  <h1>Load Balancing</h1>
+  <p class="ch-lede">একটি server যথেষ্ট নয় — capacity-র জন্যও নয়, নির্ভরযোগ্যতার জন্যও নয়। কিন্তু একাধিক server মানেই একটি নতুন প্রশ্ন: কে সিদ্ধান্ত নেবে কোন request কোথায় যাবে?</p>
+
+  <h2>47.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>একটি server-এর সমস্যা:
+
+  ১. Capacity — একটি machine-এর সীমা আছে
+  ২. ★ Availability ★ — সেটি বন্ধ হলে সব বন্ধ
+  ৩. Deployment — update করতে হলে downtime
+  ৪. ভূগোল — সবার কাছাকাছি থাকা অসম্ভব
+
+সমাধান — একাধিক server:
+
+              ব্যবহারকারীরা
+                    │
+            ┌───────▼────────┐
+            │ LOAD BALANCER  │
+            └───┬────┬───┬───┘
+                │    │   │
+          ┌─────▼┐ ┌─▼──┐ ┌▼────┐
+          │Srv 1 │ │Srv2│ │Srv 3│
+          └──────┘ └────┘ └─────┘
+
+কিন্তু এখন নতুন প্রশ্ন:
+  • কোন server-এ পাঠাব?
+  • একটি মরে গেলে কীভাবে জানব?
+  • Session state কোথায় থাকবে?
+  • Load balancer নিজেই তো এখন একক ব্যর্থতা-বিন্দু!</pre></div>
+
+  <h2>47.2 Layer 4 বনাম Layer 7</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th></th><th>Layer 4 (Transport)</th><th>Layer 7 (Application)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>কী দেখে</strong></td><td>IP, port, TCP flag</td><td>HTTP method, path, header, cookie</td></tr>
+      <tr><td><strong>বণ্টনের একক</strong></td><td>Connection</td><td>প্রতিটি request</td></tr>
+      <tr><td><strong>TLS</strong></td><td>Pass-through (দেখতে পায় না)</td><td>সাধারণত terminate করে</td></tr>
+      <tr><td><strong>Path-ভিত্তিক routing</strong></td><td>সম্ভব নয়</td><td>সম্ভব (<code>/api → backend-A</code>)</td></tr>
+      <tr><td><strong>গতি</strong></td><td>অত্যন্ত দ্রুত (kernel/hardware)</td><td>ধীর (parse করতে হয়)</td></tr>
+      <tr><td><strong>উদাহরণ</strong></td><td>AWS NLB, LVS/IPVS, HAProxy (tcp mode)</td><td>nginx, Envoy, AWS ALB, Traefik</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="cb diagram"><pre>L4 — connection-স্তরে:
+
+  Client ──[TCP conn]──▶ LB ──[TCP conn]──▶ Backend 2
+  এই connection-এর ★সব★ request Backend 2-তে যাবে
+
+  ⚠️ HTTP/2 বা gRPC-তে এটি সমস্যা: একটি connection-এ
+     হাজারো request, সবই একটি backend-এ (Ch 44)
+
+
+L7 — request-স্তরে:
+
+  Client ──[TCP conn]──▶ LB
+                         ├─ GET /api/users  ──▶ Backend 1
+                         ├─ GET /images/x   ──▶ Backend 3
+                         └─ POST /orders    ──▶ Backend 2
+
+  একই connection-এর ভিন্ন request ভিন্ন backend-এ
+  → অনেক ভালো load বণ্টন
+  → path-ভিত্তিক routing, header rewrite, caching সম্ভব</pre></div>
+
+  <h2>47.3 বণ্টনের কৌশল</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>কৌশল</th><th>কীভাবে</th><th>কখন উপযুক্ত</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Round Robin</strong></td><td>পালা করে ১, ২, ৩, ১, ২, ৩...</td><td>সব server সমান, সব request সমান</td></tr>
+      <tr><td><strong>Weighted RR</strong></td><td>শক্তিশালী server বেশি পায়</td><td>ভিন্ন ক্ষমতার server</td></tr>
+      <tr><td><strong>Least Connections</strong></td><td>যার সবচেয়ে কম সক্রিয় connection</td><td>★ request-এর সময়কাল ভিন্ন হলে — সাধারণত সেরা default</td></tr>
+      <tr><td><strong>Least Response Time</strong></td><td>যে দ্রুততম উত্তর দিচ্ছে</td><td>ভিন্ন কর্মক্ষমতার server</td></tr>
+      <tr><td><strong>IP Hash</strong></td><td>Client IP-র hash দিয়ে নির্বাচন</td><td>Session affinity দরকার হলে</td></tr>
+      <tr><td><strong>Consistent Hashing</strong></td><td>Hash ring — server যোগ/বিয়োগে ন্যূনতম পুনর্বণ্টন</td><td>★ Cache server, sharded data</td></tr>
+      <tr><td><strong>Power of Two Choices</strong></td><td>এলোমেলোভাবে দুটি বেছে নিয়ে কম ব্যস্তটিকে দাও</td><td>বড় distributed system — চমৎকার ভারসাম্য, কম সমন্বয়</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Consistent Hashing কেন গুরুত্বপূর্ণ</div>
+    <div class="cb diagram"><pre>সাধারণ modulo hashing: server = hash(key) % N
+
+  N = 4 → key "abc" যায় server 2-তে
+  একটি server যোগ করলাম, N = 5
+  → hash(key) % 5 ★প্রায় সব key-র জন্য ভিন্ন★
+  → ~৮০% cache entry ভুল জায়গায়
+  → সব cache miss, origin-এ হঠাৎ বন্যা
+
+
+Consistent hashing:
+
+       server-দের একটি বৃত্তে বসানো হয়
+       প্রতিটি key ঘড়ির কাঁটার দিকে পরবর্তী server-এ
+
+       একটি server যোগ করলে শুধু ★তার প্রতিবেশীর★
+       কিছু key সরে যায়
+       → ~1/N key পুনর্বণ্টিত, ৮০% নয়
+
+★ এজন্যই Redis cluster, Cassandra, CDN-এর cache,
+  এবং consistent hashing-নির্ভর প্রায় সব
+  distributed system এটি ব্যবহার করে।</pre></div>
+  </div>
+
+  <h2>47.4 Health Check</h2>
+
+  <div class="cb diagram"><pre>Load balancer নিয়মিত প্রতিটি backend পরীক্ষা করে:
+
+  প্রতি 5 সেকেন্ডে: GET /health
+    200 → সুস্থ
+    অন্য কিছু বা timeout → ব্যর্থ গণনা +1
+    3 বার ব্যর্থ → pool থেকে সরিয়ে দাও
+    2 বার সফল → আবার ফিরিয়ে আনো
+
+
+দুই ধরনের check (Kubernetes-এর পরিভাষায়ও একই):
+
+  LIVENESS — "process কি জীবিত?"
+    সরল, দ্রুত। ব্যর্থ হলে → restart
+    ★ Dependency পরীক্ষা করবেন না ★
+
+  READINESS — "এখন কি traffic নিতে পারব?"
+    Database সংযোগ আছে? Cache গরম? Migration শেষ?
+    ব্যর্থ হলে → traffic পাঠানো বন্ধ (কিন্তু restart নয়)</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Health check-এ database পরীক্ষা করার ফাঁদ</div>
+    <p>একটি অতি পরিচিত ভুল: liveness check-এ database connection পরীক্ষা করা।</p>
+    <div class="cb diagram"><pre>Database সাময়িকভাবে ধীর হলো
+    ↓
+সব server-এর health check ব্যর্থ
+    ↓
+Load balancer ★সব★ server pool থেকে সরাল
+    ↓
+১০০% outage — যদিও server গুলো ঠিকই ছিল
+    ↓
+Kubernetes সব pod restart করল
+    ↓
+Restart-এর ঝাঁক database-এ আরও চাপ ফেলল
+    ↓
+পরিস্থিতি আরও খারাপ (cascading failure)</pre></div>
+    <p><strong>সঠিক পদ্ধতি:</strong> liveness check শুধু "process সাড়া দিচ্ছে কি" দেখুক (একটি সরল <code>200 OK</code>)। Dependency-র অবস্থা readiness check-এ রাখুন, এবং সেখানেও সতর্কভাবে — যাতে একটি সাময়িক database সমস্যা পুরো fleet-কে অকেজো না করে। Graceful degradation-এর নীতি: dependency ছাড়াও যতটুকু সেবা দেওয়া সম্ভব, ততটুকু দিন।</p>
+  </div>
+
+  <h2>47.5 Session এবং state</h2>
+
+  <div class="cb diagram"><pre>সমস্যা: ব্যবহারকারী login করল server 1-এ।
+        পরের request গেল server 2-তে।
+        Server 2 তাকে চেনে না। → logout!
+
+সমাধান ১ — Sticky session (session affinity)
+  Cookie বা IP hash দিয়ে একই server-এ পাঠানো
+  ✓ সহজ
+  ✗ Load অসম হয়ে পড়ে
+  ✗ Server মরলে ওই ব্যবহারকারীদের session হারায়
+  ✗ Scaling ও deployment কঠিন
+
+সমাধান ২ — ★ Stateless server ★ (পছন্দনীয়)
+  Session state বাইরে রাখুন:
+    • Redis / Memcached-এ session store
+    • অথবা JWT — token-এই সব তথ্য (Ch 28)
+  ✓ যেকোনো server যেকোনো request নিতে পারে
+  ✓ Scaling ও deployment তুচ্ছ ব্যাপার
+  ✓ Server মরলেও কিছু হারায় না
+
+★ HTTP-র statelessness (Ch 28) এখানে সরাসরি
+  স্থাপত্যগত সুবিধায় রূপান্তরিত হচ্ছে।</pre></div>
+
+  <h2>47.6 Load balancer-এর নিজের redundancy</h2>
+
+  <div class="cb diagram"><pre>Load balancer নিজেই একক ব্যর্থতা-বিন্দু হয়ে গেল?
+
+সমাধান গুলো:
+
+১. DNS round-robin
+   একাধিক A record → client যেকোনো একটি বেছে নেয়
+   ✗ DNS cache-এর কারণে failover ধীর (Ch 27)
+
+২. Anycast
+   একই IP বহু জায়গায় ঘোষণা (Ch 42)
+   ✓ BGP নিকটতম ও জীবিত টিতে পাঠায়
+   ✓ CDN ও বড় provider এটাই ব্যবহার করে
+
+৩. VRRP / keepalived
+   দুটি LB, একটি virtual IP
+   একটি মরলে অন্যটি gratuitous ARP পাঠিয়ে
+   VIP দখল করে (Ch 8)
+   ✓ সেকেন্ডের মধ্যে failover
+
+৪. Cloud-managed LB
+   Provider-ই redundancy সামলায়
+   (AWS ALB/NLB, GCP LB) — সাধারণত সেরা পছন্দ</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 47 — একটি load balancer চালান</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — বণ্টন বাস্তবে কীভাবে ঘটে, এবং একটি backend মরে গেলে কী হয়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># তিনটি backend চালু করুন
+for p in 8001 8002 8003; do
+  mkdir -p /tmp/srv$p && echo "আমি server $p" > /tmp/srv$p/index.html
+  (cd /tmp/srv$p && python3 -m http.server $p >/dev/null 2>&1 &)
+done
+
+# একটি সরল nginx config
+cat > /tmp/lb.conf <<'EOF'
+events {}
+http {
+  upstream backend {
+    least_conn;                    # বা: ip_hash;
+    server 127.0.0.1:8001;
+    server 127.0.0.1:8002;
+    server 127.0.0.1:8003;
+  }
+  server {
+    listen 8080;
+    location / {
+      proxy_pass http://backend;
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_next_upstream error timeout http_502;
+    }
+  }
+}
+EOF
+
+nginx -c /tmp/lb.conf -p /tmp 2>/dev/null || echo "nginx দরকার"
+
+# বণ্টন দেখুন
+for i in $(seq 1 12); do curl -s http://localhost:8080/; done | sort | uniq -c
+
+# একটি backend মেরে ফেলুন এবং আবার দেখুন
+pkill -f "http.server 8002"
+for i in $(seq 1 12); do curl -s http://localhost:8080/; done | sort | uniq -c
+
+# পরিষ্কার
+pkill -f "http.server 800"; nginx -s stop 2>/dev/null</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রথমে তিনটি server প্রায় সমানভাবে request পাচ্ছে। 8002 মেরে ফেলার পর nginx সেটি শনাক্ত করে বাকি দুটিতে বণ্টন করবে — কোনো error ছাড়াই, কারণ <code>proxy_next_upstream</code> ব্যর্থ চেষ্টাকে অন্য backend-এ পাঠিয়ে দেয়। <code>least_conn</code>-এর বদলে <code>ip_hash</code> দিয়ে চালালে দেখবেন সব request একটি server-এ যাচ্ছে (কারণ আপনার IP একটিই)।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Load balancing-এর মূল সুবিধা শুধু ক্ষমতা বাড়ানো নয় — একটি backend মরে গেলেও সেবা অব্যাহত থাকা। এবং কৌশলের পছন্দ (round-robin vs ip_hash) সরাসরি বণ্টনের ধরন বদলে দেয়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Load balancer capacity, availability, deployment ও ভৌগোলিক সমস্যার সমাধান দেয়।</li>
+      <li><strong>L4</strong> connection বণ্টন করে (দ্রুত); <strong>L7</strong> প্রতিটি request (নমনীয়, path-ভিত্তিক routing)।</li>
+      <li>HTTP/2 ও gRPC-তে L4 খারাপ ভারসাম্য দেয় — L7 বা client-side LB দরকার।</li>
+      <li>কৌশল: round-robin, least connections (সাধারণত সেরা default), consistent hashing (cache-এর জন্য)।</li>
+      <li><strong>Liveness check-এ dependency পরীক্ষা করবেন না</strong> — cascading failure-এর ঝুঁকি।</li>
+      <li>Sticky session-এর বদলে <strong>stateless server</strong> — session বাইরে (Redis/JWT) রাখুন।</li>
+      <li>Load balancer নিজেও redundant হওয়া দরকার: anycast, VRRP, বা cloud-managed LB।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>gRPC-র জন্য L4 load balancer কেন খারাপ পছন্দ?</summary>
+    <div class="ans"><p>L4 LB <em>connection</em> বণ্টন করে, কিন্তু gRPC একটি long-lived HTTP/2 connection-এ হাজারো RPC পাঠায়। ফলে একটি client-এর সব request একটিই backend-এ যায় — ভারসাম্য নষ্ট, এবং নতুন backend যোগ করলেও পুরনো connection সেখানে যায় না। সমাধান: L7/gRPC-সচেতন proxy (Envoy), বা client-side load balancing যেখানে client নিজেই একাধিক backend-এ connection রাখে।</p></div>
+  </details>
+  <details class="qa"><summary>Health check-এ database পরীক্ষা করলে কী বিপদ?</summary>
+    <div class="ans"><p>Database সাময়িকভাবে ধীর হলে <em>সব</em> server-এর health check একসাথে ব্যর্থ হবে, এবং load balancer সবগুলোকে pool থেকে সরিয়ে দেবে — ১০০% outage, যদিও server গুলো নিজেরা ঠিকই ছিল। Kubernetes-এ liveness হলে সব pod restart হবে, এবং restart-এর ঝাঁক database-এ আরও চাপ ফেলে পরিস্থিতি আরও খারাপ করবে (cascading failure)। Liveness শুধু "process সাড়া দিচ্ছে কি" দেখুক।</p></div>
+  </details>
+  <details class="qa"><summary>Consistent hashing সাধারণ modulo hashing-এর চেয়ে ভালো কেন?</summary>
+    <div class="ans"><p><code>hash(key) % N</code>-এ N বদলালে (একটি server যোগ বা বিয়োগ) প্রায় সব key-র গন্তব্য বদলে যায় — cache server-এ এর মানে ~৮০% cache miss এবং origin-এ হঠাৎ বন্যা। Consistent hashing-এ server-রা একটি বৃত্তে বসে; একটি যোগ করলে শুধু তার প্রতিবেশীর কিছু key সরে, অর্থাৎ প্রায় <code>1/N</code> অংশ। এজন্যই Redis cluster, Cassandra ও CDN cache এটি ব্যবহার করে।</p></div>
+  </details>
+  <details class="qa"><summary>Sticky session-এর বদলে stateless server কেন পছন্দনীয়?</summary>
+    <div class="ans"><p>Sticky session load-কে অসম করে, একটি server মরলে ওই ব্যবহারকারীদের session হারায়, এবং scaling ও rolling deployment জটিল করে তোলে। Stateless server-এ session বাইরে থাকে (Redis, বা JWT-তে এমবেড করা) — তাই <em>যেকোনো</em> server <em>যেকোনো</em> request নিতে পারে। এতে load বণ্টন নিখুঁত হয়, server মরলে কিছু হারায় না, এবং deployment তুচ্ছ ব্যাপার হয়ে যায়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch46"><div class="d">পূর্ববর্তী</div><div class="t">Ch 46 — CDN</div></a>
+    <a class="nx" href="#ch48"><div class="d">পরবর্তী</div><div class="t">Ch 48 — What Happens When You Type a URL?</div></a>
+  </div>
+</section>

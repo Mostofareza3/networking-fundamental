@@ -1,0 +1,205 @@
+<section class="chapter" id="ch14">
+  <div class="ch-eyebrow">Chapter 14</div>
+  <h1>ICMP — Network-এর নিজস্ব বার্তাবাহক</h1>
+  <p class="ch-lede">IP নিজে কিছু বলে না — সে শুধু packet পাঠায়, আর কিছু ভুল হলে চুপচাপ ফেলে দেয়। ICMP হলো সেই protocol যা এই নীরবতা ভাঙে এবং জানায় "কী ভুল হলো"। <code>ping</code> এবং <code>traceroute</code> — দুটোই এর উপর দাঁড়িয়ে।</p>
+
+  <h2>14.1 Why does this exist?</h2>
+  <p>IP-এর নকশা "best effort" — সে চেষ্টা করে, কিন্তু নিশ্চয়তা দেয় না। Packet হারালে IP কিছু বলে না। কিন্তু বাস্তবে কিছু তথ্য জানা অপরিহার্য:</p>
+  <ul>
+    <li>"গন্তব্যে পৌঁছানো যাচ্ছে না" — নাহলে sender চিরকাল অপেক্ষা করত</li>
+    <li>"Packet খুব বড়, ভাঙতে হবে" — PMTUD এর উপর নির্ভরশীল (Ch 5)</li>
+    <li>"TTL শেষ হয়ে গেছে" — routing loop শনাক্ত করতে</li>
+    <li>"তুমি কি বেঁচে আছ?" — সংযোগ পরীক্ষা করতে</li>
+  </ul>
+
+  <div class="box why">
+    <div class="bt">💡 Why একটি আলাদা protocol</div>
+    <p>ICMP (Internet Control Message Protocol) হলো IP-এর <em>নিয়ন্ত্রণ ও ত্রুটি-বার্তার</em> ব্যবস্থা। এটি IP-এর <strong>ভেতরে</strong> বহন করা হয় (protocol number 1), কিন্তু এটি কোনো transport protocol নয় — এতে port নেই, connection নেই, application data নেই। এটি network-এর নিজের সাথে নিজের কথা বলা।</p>
+    <p>একটি গুরুত্বপূর্ণ সূক্ষ্মতা: ICMP নির্ভরযোগ্য নয় এবং <em>বাধ্যতামূলক নয়</em>। একটি router চাইলে ICMP পাঠানো বন্ধ করে দিতে পারে। এজন্যই ICMP-র উপর ভিত্তি করে সিদ্ধান্ত নেওয়ার সময় সতর্ক থাকতে হয়।</p>
+  </div>
+
+  <h2>14.2 গুরুত্বপূর্ণ ICMP message গুলো</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Type</th><th>নাম</th><th>কখন পাঠানো হয়</th><th>কে ব্যবহার করে</th></tr></thead>
+    <tbody>
+      <tr><td>8</td><td><strong>Echo Request</strong></td><td>"তুমি কি আছ?"</td><td><code>ping</code></td></tr>
+      <tr><td>0</td><td><strong>Echo Reply</strong></td><td>"হ্যাঁ, আছি"</td><td><code>ping</code></td></tr>
+      <tr><td>11</td><td><strong>Time Exceeded</strong></td><td>TTL শূন্য হয়ে গেছে</td><td><code>traceroute</code></td></tr>
+      <tr><td>3/0</td><td>Destination Unreachable — <em>Network</em></td><td>ওই network-এ কোনো route নেই</td><td>routing সমস্যা</td></tr>
+      <tr><td>3/1</td><td>Destination Unreachable — <em>Host</em></td><td>Network পাওয়া গেছে, host সাড়া দিচ্ছে না (ARP ব্যর্থ)</td><td>host বন্ধ</td></tr>
+      <tr><td>3/3</td><td>Destination Unreachable — <em>Port</em></td><td>UDP port-এ কেউ শুনছে না</td><td>UDP-র "connection refused"</td></tr>
+      <tr><td>3/4</td><td><strong>Fragmentation Needed</strong></td><td>Packet বড়, কিন্তু DF সেট</td><td><strong>PMTUD</strong> (Ch 5)</td></tr>
+      <tr><td>3/13</td><td>Administratively Prohibited</td><td>Firewall আটকে দিয়েছে</td><td>firewall নীতি</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ TCP-র ক্ষেত্রে ICMP লাগে না</div>
+    <p>একটি বন্ধ TCP port-এ connect করলে আপনি ICMP পান না — আপনি পান একটি <strong>TCP RST</strong> packet, যা TCP-র নিজস্ব ব্যবস্থা। কিন্তু UDP-তে কোনো connection বা RST নেই, তাই বন্ধ UDP port-এর খবর দিতে <strong>ICMP Port Unreachable</strong> ব্যবহৃত হয়। এই পার্থক্যটি মনে রাখলে <code>connection refused</code> vs timeout-এর ব্যাখ্যা পরিষ্কার হয়।</p>
+  </div>
+
+  <h2>14.3 ping কীভাবে কাজ করে</h2>
+
+  <div class="cb diagram"><pre>┌────────┐                                   ┌────────┐
+│ Client │                                   │ Server │
+└───┬────┘                                   └───┬────┘
+    │  ICMP Echo Request (type 8)               │
+    │  id=4521, seq=1, timestamp, payload       │
+    ├──────────────────────────────────────────▶│
+    │                                           │  kernel সরাসরি
+    │                                           │  উত্তর দেয় —
+    │                                           │  কোনো application
+    │  ICMP Echo Reply (type 0)                 │  জড়িত নয়
+    │  একই id, seq, timestamp ফেরত               │
+    │◀──────────────────────────────────────────┤
+    │                                           │
+    ▼
+RTT = এখনকার সময় − payload-এ পাঠানো timestamp
+
+
+$ ping -c 4 example.com
+PING example.com (93.184.215.14) 56(84) bytes of data.
+64 bytes from 93.184.215.14: icmp_seq=1 ttl=56 time=142 ms
+64 bytes from 93.184.215.14: icmp_seq=2 ttl=56 time=139 ms
+64 bytes from 93.184.215.14: icmp_seq=4 ttl=56 time=145 ms
+       ↑                        ↑        ↑         ↑
+   packet size            IP     TTL    RTT
+                                (56 → ~8 hop দূরে)
+
+--- example.com ping statistics ---
+4 packets transmitted, 3 received, 25% packet loss
+rtt min/avg/max/mdev = 139/142/145/2.4 ms
+                                        ↑
+                                    jitter-এর ইঙ্গিত (Ch 38)</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ ping-এর output যেভাবে পড়বেন</div>
+    <ul>
+      <li><strong>icmp_seq এড়িয়ে যাওয়া</strong> (1,2,4 — 3 নেই) = packet loss</li>
+      <li><strong>time-এর বড় ওঠানামা</strong> (10ms, 200ms, 15ms) = jitter, সাধারণত congestion বা wireless সমস্যা</li>
+      <li><strong>ttl</strong> থেকে hop সংখ্যা অনুমান</li>
+      <li><strong>mdev</strong> (mean deviation) = কতটা অস্থির — real-time application-এর জন্য এটি গুরুত্বপূর্ণ</li>
+      <li><strong>DUP!</strong> লেখা থাকলে duplicate packet — সাধারণত routing loop বা ভুল configure করা network</li>
+    </ul>
+  </div>
+
+  <h2>14.4 traceroute — TTL-এর চতুর ব্যবহার</h2>
+  <p>Traceroute-এর কৌশলটি অসাধারণ সরল: <strong>ইচ্ছাকৃতভাবে TTL কম দিয়ে packet পাঠাও, এবং যে router অভিযোগ করে তার ঠিকানা নোট করো।</strong></p>
+
+  <div class="cb diagram"><pre>Round 1 — TTL = 1
+  Host ──[TTL=1]──▶ R1
+                    R1: TTL 1→0! ফেলে দাও।
+  Host ◀──[ICMP Time Exceeded, from 192.168.1.1]── R1
+  ⇒ Hop 1 = 192.168.1.1
+
+Round 2 — TTL = 2
+  Host ──[TTL=2]──▶ R1 (2→1, ঠিক আছে) ──▶ R2
+                                          R2: 1→0! ফেলে দাও।
+  Host ◀──[ICMP Time Exceeded, from 10.1.0.1]────── R2
+  ⇒ Hop 2 = 10.1.0.1
+
+Round 3 — TTL = 3
+  ... একইভাবে R3-এর ঠিকানা পাওয়া গেল
+
+Round N — TTL যথেষ্ট বড়
+  Packet গন্তব্যে পৌঁছাল।
+  গন্তব্য উত্তর দেয় Echo Reply (ICMP মোডে) বা
+  ICMP Port Unreachable (UDP মোডে — কারণ traceroute
+  ইচ্ছাকৃতভাবে একটি অব্যবহৃত উঁচু port-এ পাঠায়)
+  ⇒ যাত্রা শেষ</pre></div>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ traceroute example.com
+traceroute to example.com (93.184.215.14), 30 hops max, 60 byte packets
+ 1  192.168.0.1 (192.168.0.1)  2.1 ms  1.9 ms  2.0 ms
+ 2  10.20.30.1 (10.20.30.1)  8.4 ms  8.2 ms  8.9 ms
+ 3  * * *
+ 4  103.85.12.9 (103.85.12.9)  24.1 ms  23.8 ms  24.5 ms
+ 5  ae-1.r02.sngpsi07.sg.bb.example (203.0.113.9)  68.2 ms ...
+ ...
+12  93.184.215.14 (93.184.215.14)  141.2 ms  140.8 ms  141.5 ms</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ <code>* * *</code> মানে কী নয়</div>
+    <p><code>* * *</code> দেখলে অনেকে ভাবেন "এখানে packet আটকে গেছে"। <strong>এটি প্রায় সবসময় ভুল ব্যাখ্যা।</strong> এর মানে হলো ওই hop-এর router ICMP Time Exceeded পাঠায়নি — কারণ:</p>
+    <ul>
+      <li>সে ICMP পাঠানো বন্ধ করে রেখেছে (নিরাপত্তা নীতি, খুব সাধারণ),</li>
+      <li>বা তার ICMP তৈরির হার সীমিত (rate limiting),</li>
+      <li>বা কোনো firewall মাঝপথে ICMP আটকাচ্ছে।</li>
+    </ul>
+    <p><strong>মাঝখানে <code>* * *</code> থাকলেও শেষ লাইনে গন্তব্য দেখা গেলে পথটি ঠিকই কাজ করছে।</strong> traffic দিব্যি যাচ্ছে, শুধু ওই router নিজের পরিচয় দিতে রাজি নয়।</p>
+  </div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ traceroute-এর সীমাবদ্ধতা</div>
+    <ul>
+      <li><strong>শুধু একদিকের পথ দেখায়।</strong> ফেরার পথ সম্পূর্ণ ভিন্ন হতে পারে (asymmetric routing, Ch 12)। একটি hop-এ বেশি latency দেখলে সেটি ওই hop-এর সমস্যা নাও হতে পারে — ফেরার পথের সমস্যা হতে পারে।</li>
+      <li><strong>Router-রা নিজেদের উদ্দেশ্যে আসা packet-কে কম অগ্রাধিকার দেয়।</strong> তাই মাঝের একটি hop-এ ২০০ms দেখেও পরের hop-এ ৫০ms হতে পারে — এটি স্বাভাবিক, এবং এর মানে ওই router ব্যস্ত, পথটি ধীর নয়।</li>
+      <li>Load balancing-এর কারণে প্রতিটি probe ভিন্ন পথে যেতে পারে। <code>mtr</code> (my traceroute) এই সমস্যাগুলো ভালোভাবে সামলায়।</li>
+    </ul>
+  </div>
+
+  <h2>14.5 Developer Perspective</h2>
+
+  <div class="box dev">
+    <div class="bt">⚙️ ICMP আর application-এর সম্পর্ক</div>
+    <p><strong>ping কাজ করে কিন্তু website খোলে না</strong> — খুবই সাধারণ পরিস্থিতি, এবং এতে অবাক হওয়ার কিছু নেই। ping পরীক্ষা করে Layer 3 (host পৌঁছানো যায় কিনা)। Website-এর জন্য দরকার Layer 4 (port 443 খোলা) এবং Layer 7 (server চলছে ও সাড়া দিচ্ছে)। Host সচল থাকতেই পারে যখন nginx বন্ধ।</p>
+    <p><strong>উল্টোটাও সত্য</strong> — website খোলে কিন্তু ping যায় না। কারণ বহু server ও CDN নীতিগতভাবে ICMP Echo-র উত্তর দেয় না, অথচ TCP 443 দিব্যি খোলা। <strong>ping ব্যর্থ হওয়া মানেই host down নয়।</strong></p>
+    <p>তাই আধুনিক health check-এ ICMP ping-এর বদলে প্রকৃত protocol-level check ব্যবহার করা হয়: <code>curl -sf https://host/health</code> — কারণ এটিই আসল প্রশ্নের উত্তর দেয়: "service টি কাজ করছে কি?"</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 14 — ICMP-র তিনটি রূপ দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — Echo, Time Exceeded এবং Port Unreachable — তিন ধরনের ICMP বার্তা বাস্তবে তৈরি করে দেখা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Terminal 1 — সব ICMP দেখুন
+sudo tcpdump -i any -n icmp
+
+# Terminal 2 — তিনটি পরীক্ষা:
+
+# 1. Echo request/reply
+ping -c 2 1.1.1.1
+
+# 2. Time Exceeded (TTL ইচ্ছাকৃতভাবে কম)
+ping -c 1 -t 1 1.1.1.1
+
+# 3. Port Unreachable (একটি বন্ধ UDP port-এ পাঠান)
+echo "test" | nc -u -w1 127.0.0.1 9999
+
+# 4. পুরো পথ
+traceroute -n 1.1.1.1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> tcpdump-এ দেখবেন <code>ICMP echo request</code> / <code>echo reply</code> জোড়ায় জোড়ায়। <code>-t 1</code>-এ দেখবেন <code>ICMP time exceeded in-transit</code> এবং সেই বার্তা পাঠানো router-এর IP। UDP-র ক্ষেত্রে <code>ICMP udp port 9999 unreachable</code>। Traceroute চালালে পরপর অনেকগুলো time exceeded বার্তা দেখবেন — প্রতিটি ভিন্ন router থেকে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> ICMP কোনো আলাদা "diagnostic tool" নয় — এটি network-এর স্বাভাবিক কাজের অংশ, প্রতিনিয়ত ঘটছে। <code>ping</code> এবং <code>traceroute</code> নতুন কিছু আবিষ্কার করে না, তারা শুধু এই বিদ্যমান আচরণকে চতুরভাবে কাজে লাগায়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>ICMP হলো IP-এর নিয়ন্ত্রণ ও ত্রুটি-বার্তার protocol — port নেই, connection নেই।</li>
+      <li><code>ping</code> = Echo Request/Reply; kernel সরাসরি উত্তর দেয়, কোনো application লাগে না।</li>
+      <li><code>traceroute</code> = ক্রমবর্ধমান TTL দিয়ে ইচ্ছাকৃতভাবে প্রতিটি router-কে অভিযোগ করানো।</li>
+      <li><code>* * *</code> মানে ওই router ICMP পাঠায় না — পথ ভাঙা নয়।</li>
+      <li>ICMP Fragmentation Needed ছাড়া PMTUD ভেঙে পড়ে — তাই ICMP পুরোপুরি block করা ক্ষতিকর।</li>
+      <li>TCP-তে বন্ধ port-এর উত্তর RST; UDP-তে ICMP Port Unreachable।</li>
+      <li><strong>ping ব্যর্থ ≠ host down</strong>; <strong>ping সফল ≠ service কাজ করছে</strong>। ping শুধু Layer 3 পরীক্ষা করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>traceroute-এর মূল কৌশলটি এক বাক্যে ব্যাখ্যা করুন।</summary>
+    <div class="ans"><p>TTL = 1, 2, 3... করে ক্রমাগত packet পাঠানো হয়; প্রতিটি TTL মান ঠিক ততটি hop পরে শূন্য হয়ে যায়, ফলে ওই hop-এর router ICMP Time Exceeded পাঠায় এবং সেই বার্তার source IP থেকেই router-টির পরিচয় পাওয়া যায়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি site-এ ping যাচ্ছে না কিন্তু browser-এ খুলছে। ব্যাখ্যা করুন।</summary>
+    <div class="ans"><p>Server বা পথের কোনো firewall ICMP Echo Request-এর উত্তর দেওয়া বন্ধ রেখেছে — এটি খুবই সাধারণ নীতি (Cloudflare, AWS ALB ইত্যাদিতে প্রায়ই default)। কিন্তু TCP port 443 খোলা এবং web server চলছে, তাই HTTPS দিব্যি কাজ করছে। ping পরীক্ষা করে ICMP-র প্রাপ্যতা, service-এর নয়।</p></div>
+  </details>
+  <details class="qa"><summary>traceroute-এর ৫ নম্বর hop-এ ৩০০ms দেখাচ্ছে, কিন্তু ১২ নম্বর hop-এ ৮০ms। এটা কীভাবে সম্ভব?</summary>
+    <div class="ans"><p>সম্পূর্ণ স্বাভাবিক। ৫ নম্বর router-টি <em>নিজের উদ্দেশ্যে আসা</em> packet (TTL expiry) কম অগ্রাধিকারে process করে — ICMP তৈরি করা তার control plane-এর কাজ, যা ধীর। কিন্তু <em>মধ্য দিয়ে যাওয়া</em> packet সে hardware-এ (data plane) দ্রুত forward করে। তাই তার ICMP-র বিলম্ব প্রকৃত forwarding-এর বিলম্বের প্রতিনিধিত্ব করে না। এছাড়া ফেরার পথ ভিন্ন হওয়াও একটি কারণ হতে পারে।</p></div>
+  </details>
+  <details class="qa"><summary>ICMP সম্পূর্ণ block করলে কী কী ভাঙে?</summary>
+    <div class="ans"><p>(১) <strong>PMTUD ভেঙে পড়ে</strong> — বড় packet নীরবে হারায়, "ছোট request কাজ করে বড়টা hang করে" সমস্যা (Ch 5)। (২) ping ও traceroute দিয়ে সমস্যা নির্ণয় অসম্ভব হয়। (৩) UDP-র "port unreachable" সংকেত না আসায় client দীর্ঘ timeout পর্যন্ত অপেক্ষা করে। নিরাপত্তার জন্য ICMP সীমিত করা যেতে পারে, কিন্তু অন্তত <code>type 3 code 4</code> (Fragmentation Needed) সবসময় অনুমোদিত থাকা উচিত।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch13"><div class="d">পূর্ববর্তী</div><div class="t">Ch 13 — Packet Journey</div></a>
+    <a class="nx" href="#ch15"><div class="d">পরবর্তী</div><div class="t">Ch 15 — Why Transport Layer?</div></a>
+  </div>
+</section>

@@ -1,0 +1,235 @@
+<section class="chapter" id="ch21">
+  <div class="ch-eyebrow">Chapter 21</div>
+  <h1>Congestion Control — Network-কে ডুবতে না দেওয়া</h1>
+  <p class="ch-lede">Receiver বলে দেয় সে কতটুকু নিতে পারবে। কিন্তু <em>network</em> তো কিছু বলে না — কোনো router আপনাকে ফোন করে বলে না "আমার queue ভরে গেছে, একটু আস্তে"। তাহলে sender কীভাবে জানবে কত দ্রুত পাঠানো নিরাপদ?</p>
+
+  <h2>21.1 Why does this exist? — একটি ঐতিহাসিক বিপর্যয়</h2>
+  <p>১৯৮৬ সালে Internet-এর একটি অংশে throughput হঠাৎ ৩২ Kbps থেকে নেমে <strong>৪০ bps</strong>-এ পৌঁছাল — এক হাজার গুণ কম। কারণটি ছিল <em>congestion collapse</em>।</p>
+
+  <div class="cb diagram"><pre>দুষ্টচক্রটি এভাবে চলে:
+
+  Router-এর queue ভরে গেল
+        ↓
+  Packet ফেলে দিতে হলো
+        ↓
+  Sender-রা timeout দেখল, retransmit করল
+        ↓
+  আরও বেশি packet network-এ ঢুকল
+        ↓
+  Queue আরও ভরল, আরও বেশি ফেলে দিতে হলো
+        ↓
+  আরও retransmission...
+        ↓
+  Network কার্যত সম্পূর্ণ retransmission-এ ভরে গেল
+  কিন্তু প্রকৃত কাজ প্রায় শূন্য</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why Congestion Control</div>
+    <p>Van Jacobson-এর ১৯৮৮ সালের কাজ TCP-তে congestion control যোগ করে এবং Internet-কে রক্ষা করে। মূল ধারণাটি বৈপ্লবিক ছিল: <strong>প্রতিটি sender স্বেচ্ছায় নিজেকে সংযত করবে, কোনো কেন্দ্রীয় নিয়ন্ত্রক ছাড়াই।</strong></p>
+    <p>এটি একটি distributed cooperative algorithm — লক্ষ লক্ষ স্বাধীন sender একে অপরের সাথে কোনো যোগাযোগ ছাড়াই একটি ভাগ করা সম্পদ ন্যায্যভাবে ভাগ করে নেয়। Internet আজও কাজ করছে মূলত এই সহযোগিতার কারণে।</p>
+  </div>
+
+  <h2>21.2 কোনো সংকেত না পেলে কীভাবে অনুমান?</h2>
+  <p>Router congestion-এর কথা জানায় না। তাহলে TCP কী দেখে বুঝবে?</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>সংকেত</th><th>ব্যাখ্যা</th><th>কে ব্যবহার করে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Packet loss</strong></td><td>Router-এর queue ভরে গেলে সে packet ফেলে দেয়। তাই loss ≈ congestion।</td><td>Reno, CUBIC</td></tr>
+      <tr><td><strong>বর্ধিত RTT</strong></td><td>Queue ভরতে থাকলে packet-দের অপেক্ষা বাড়ে — loss-এর <em>আগেই</em> সংকেত।</td><td>Vegas, BBR</td></tr>
+      <tr><td><strong>ECN</strong></td><td>Router packet না ফেলে header-এ একটি bit সেট করে দেয় — স্পষ্ট সংকেত।</td><td>ECN-সক্ষম stack</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ "Loss = congestion" অনুমানটি সবসময় সঠিক নয়</div>
+    <p>এই অনুমানটি wired network-এর জন্য যুক্তিসঙ্গত — সেখানে bit error বিরল, তাই packet হারানোর প্রধান কারণ queue overflow।</p>
+    <p>কিন্তু <strong>wireless network-এ packet হারায় radio interference, দুর্বল signal, বা fading-এর কারণে</strong> — congestion-এর সাথে যার কোনো সম্পর্ক নেই। তবু loss-ভিত্তিক TCP তখনো গতি অর্ধেক করে দেয়। ফলে খারাপ Wi-Fi বা mobile network-এ TCP অপ্রয়োজনীয়ভাবে ধীর হয়ে যায়।</p>
+    <p>এটিই <strong>BBR</strong>-এর মতো আধুনিক algorithm-এর জন্মের কারণ — তারা loss-এর বদলে প্রকৃত bandwidth ও RTT মেপে সিদ্ধান্ত নেয়।</p>
+  </div>
+
+  <h2>21.3 Congestion Window (cwnd)</h2>
+  <p><code>cwnd</code> হলো sender-এর নিজের অনুমান: <em>"network এই মুহূর্তে কত bytes একসাথে সামলাতে পারবে?"</em></p>
+
+  <div class="cb diagram"><pre>এটি receive window-এর মতোই একটি সীমা, কিন্তু:
+
+  rwnd  — receiver ঘোষণা করে       (স্পষ্ট, নির্ভরযোগ্য)
+  cwnd  — sender নিজে অনুমান করে   (পরীক্ষামূলক, অনিশ্চিত)
+
+  প্রকৃত সীমা = min(rwnd, cwnd)
+
+cwnd-এর জীবনচক্র:
+  • শুরুতে খুব ছোট (সাধারণত 10 × MSS ≈ 14 KB)
+  • সফল হলে বাড়ে
+  • loss দেখলে হঠাৎ কমে
+  • আবার বাড়তে শুরু করে</pre></div>
+
+  <h2>21.4 Slow Start — দ্রুত অনুসন্ধান</h2>
+  <p>নাম "slow" হলেও এটি আসলে <strong>exponential</strong> — অত্যন্ত দ্রুত।</p>
+
+  <div class="cb diagram"><pre>প্রতিটি ACK-এ cwnd এক MSS করে বাড়ে।
+এক RTT-তে cwnd-সংখ্যক segment-এর ACK আসে,
+তাই প্রতি RTT-তে cwnd দ্বিগুণ হয়।
+
+RTT 1:  cwnd = 10  ██████████
+RTT 2:  cwnd = 20  ████████████████████
+RTT 3:  cwnd = 40  ████████████████████████████████████████
+RTT 4:  cwnd = 80  ...
+RTT 5:  cwnd = 160
+RTT 6:  cwnd = 320
+
+10 → 320 MSS (≈ 460 KB) মাত্র ৬ RTT-তে।
+RTT 50ms হলে ০.৩ সেকেন্ড।
+
+নাম "slow" কেন?
+  কারণ তুলনাটা ছিল আগের আচরণের সাথে — যেখানে sender
+  শুরুতেই receiver-এর পুরো window ভরে দিত। তার তুলনায়
+  ১০ segment দিয়ে শুরু করা "ধীর"।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — Initial Window কেন গুরুত্বপূর্ণ</div>
+    <p>Initial cwnd = 10 MSS ≈ <strong>14 KB</strong>। অর্থাৎ একটি নতুন connection-এ প্রথম RTT-তে সর্বোচ্চ ১৪ KB পাঠানো যায়।</p>
+    <ul>
+      <li>আপনার HTML যদি ১৪ KB-র নিচে হয় — এক RTT-তেই পুরোটা যাবে।</li>
+      <li>১৫ KB হলে দুই RTT লাগবে — প্রায় দ্বিগুণ সময়।</li>
+    </ul>
+    <p>এজন্যই performance-সচেতন দল <strong>critical CSS inline করে ১৪ KB-র নিচে রাখার</strong> চেষ্টা করে। এটি একটি বাস্তব, পরিমাপযোগ্য প্রভাব — এবং এর মূল কারণ TCP-র initial congestion window।</p>
+    <p>একই কারণে <strong>connection reuse এত মূল্যবান</strong>: একটি চলমান connection-এর cwnd ইতিমধ্যে বড় হয়ে আছে; নতুন connection আবার ১০ থেকে শুরু করবে।</p>
+  </div>
+
+  <h2>21.5 পুরো চক্র — Slow Start থেকে Congestion Avoidance</h2>
+
+  <div class="cb diagram"><pre>cwnd
+ │
+ │                            ╱│  ← loss! cwnd অর্ধেক
+ │                          ╱  │
+ │        ssthresh ─ ─ ─ ─╱ ─ ─│─ ─ ─ ─ ─ ─ ─
+ │                      ╱      │      ╱
+ │                    ╱        └─────╱  ← আবার linear
+ │                  ╱ ← linear       ╱
+ │                ╱  (congestion    ╱
+ │              ╱    avoidance)    ╱
+ │            ╱                   ╱
+ │        ╱ ╱ ← exponential      ╱
+ │    ╱ ╱     (slow start)      ╱
+ │ ╱╱                          ╱
+ └────────────────────────────────────────────▶ সময়
+
+দুটি পর্যায়:
+
+1. SLOW START (exponential)
+   cwnd < ssthresh
+   প্রতি RTT-তে দ্বিগুণ — দ্রুত সীমা খুঁজে বের করা
+
+2. CONGESTION AVOIDANCE (linear)
+   cwnd ≥ ssthresh
+   প্রতি RTT-তে +1 MSS — সাবধানে এগোনো
+   "additive increase"
+
+Loss হলে:
+   ssthresh = cwnd / 2
+   cwnd = ssthresh   (fast recovery)
+   বা cwnd = 1       (RTO timeout — গুরুতর)
+   "multiplicative decrease"
+
+একে বলে AIMD: Additive Increase, Multiplicative Decrease
+ধীরে বাড়াও, দ্রুত কমাও — কারণ ভুল করলে ক্ষতি বেশি।</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — অন্ধকার ঘরে হাঁটা</div>
+    <p>আপনি একটি অচেনা অন্ধকার ঘরে হাঁটছেন। কোথায় দেয়াল জানেন না।</p>
+    <ul>
+      <li><strong>Slow start</strong> — প্রথমে দ্রুত পা ফেলে এগোচ্ছেন, কারণ শুরুতে দেয়াল দূরে থাকার সম্ভাবনা বেশি।</li>
+      <li><strong>দেয়ালে ধাক্কা (loss)</strong> — এখন আপনি জানেন সীমা কোথায়। অর্ধেক পিছিয়ে আসুন।</li>
+      <li><strong>Congestion avoidance</strong> — এবার খুব সাবধানে, এক পা করে এগোচ্ছেন — কারণ দেয়াল কাছেই।</li>
+      <li><strong>দেয়াল সরতেও পারে</strong> — অন্য একটি download শেষ হলে বেশি bandwidth মুক্ত হয়। তাই TCP কখনো থামে না, ধীরে ধীরে বাড়াতেই থাকে।</li>
+    </ul>
+    <p>TCP কখনো "সঠিক" গতি জানে না। সে চিরকাল সীমা খুঁজে বেড়ায়, ধাক্কা খায়, পিছিয়ে আসে, আবার এগোয়। এই দোলাচলই স্বাভাবিক এবং কাম্য।</p>
+  </div>
+
+  <h2>21.6 আধুনিক algorithm গুলো</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Algorithm</th><th>ভিত্তি</th><th>কোথায় ব্যবহৃত</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Reno / NewReno</strong></td><td>Loss। ধ্রুপদী AIMD।</td><td>ঐতিহাসিক, শিক্ষার জন্য</td></tr>
+      <tr><td><strong>CUBIC</strong></td><td>Loss, কিন্তু cubic function-এ বৃদ্ধি — উচ্চ-BDP পথে দ্রুত পুনরুদ্ধার</td><td><strong>Linux-এর default</strong>, Android</td></tr>
+      <tr><td><strong>BBR</strong></td><td>প্রকৃত bandwidth ও সর্বনিম্ন RTT মেপে — loss-কে সংকেত হিসেবে ব্যবহার করে না</td><td>Google, YouTube, অনেক CDN</td></tr>
+      <tr><td><strong>Vegas</strong></td><td>RTT বৃদ্ধি (delay-based) — loss-এর আগেই সংযত হয়</td><td>গবেষণা, বিশেষ ক্ষেত্র</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ BBR কেন আলাদা</div>
+    <p>Loss-ভিত্তিক algorithm গুলোর একটি অনিচ্ছাকৃত পার্শ্বপ্রতিক্রিয়া আছে: তারা <em>ইচ্ছাকৃতভাবে</em> router-এর queue ভরে ফেলে, কারণ loss না হওয়া পর্যন্ত তারা জানে না সীমা কোথায়। ফলে queue-তে জমে থাকা packet সবার latency বাড়িয়ে দেয় — একে বলে <strong>bufferbloat</strong>। আপনি যখন বড় download চালানোর সময় ভিডিও কল খারাপ হতে দেখেন, তখন এটিই ঘটছে।</p>
+    <p>BBR ভিন্নভাবে কাজ করে: সে queue ভরার <em>আগেই</em> সর্বোচ্চ bandwidth ও সর্বনিম্ন RTT-র বিন্দুটি খুঁজে বের করে সেখানে থাকার চেষ্টা করে। ফলে উচ্চ throughput এবং কম latency — দুটোই। এজন্যই YouTube ও অনেক CDN এটি ব্যবহার করে।</p>
+  </div>
+
+  <h2>21.7 Congestion control এবং আপনার application</h2>
+
+  <div class="box dev">
+    <div class="bt">⚙️ যা থেকে বাস্তব সিদ্ধান্ত আসে</div>
+    <ul>
+      <li><strong>নতুন connection ধীর</strong> — cwnd ১০ থেকে শুরু। তাই connection pooling ও keep-alive শুধু handshake নয়, cwnd-ও বাঁচায়।</li>
+      <li><strong>একটি loss মানে অর্ধেক গতি</strong> — এবং পুনরুদ্ধারে বহু RTT। ০.১% loss-ও উচ্চ-RTT পথে throughput ধ্বংস করতে পারে।</li>
+      <li><strong>সমান্তরাল connection বেশি bandwidth পায়</strong> — n টি connection মানে n গুণ cwnd। এজন্যই download manager-রা ৮টি connection খোলে। (এটি অন্যদের প্রতি কিছুটা অন্যায্য, এবং এজন্যই HTTP/2 একটি connection-এ multiplexing-এর পক্ষে।)</li>
+      <li><strong>Wireless-এ TCP অপ্রয়োজনীয়ভাবে ধীর</strong> হতে পারে, কারণ radio-জনিত loss-কে সে congestion ভাবে।</li>
+      <li><strong>Bufferbloat</strong> — বড় download চলাকালীন সবকিছুর latency বেড়ে যাওয়া। Router-এ AQM (fq_codel, CAKE) এটি সমাধান করে।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 21 — cwnd বাড়তে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি চলমান download-এ congestion window বাস্তবেই বাড়ছে কিনা, এবং কোন algorithm ব্যবহৃত হচ্ছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># কোন algorithm ব্যবহৃত হচ্ছে?
+sysctl net.ipv4.tcp_congestion_control        # Linux
+sysctl net.ipv4.tcp_available_congestion_control
+
+# একটি বড় download চালান
+curl -s -o /dev/null https://speed.hetzner.de/100MB.bin &
+
+# cwnd-এর বৃদ্ধি দেখুন (Linux)
+for i in $(seq 1 20); do
+  ss -ti 2>/dev/null | grep -o 'cwnd:[0-9]*' | head -1
+  sleep 0.5
+done</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> শুরুতে <code>cwnd:10</code>, তারপর দ্রুত বাড়ে — 20, 40, 80 (slow start)। একটি সীমার কাছে পৌঁছে বৃদ্ধি ধীর ও রৈখিক হয়ে যায় (congestion avoidance)। মাঝেমধ্যে সংখ্যাটি হঠাৎ কমতে দেখবেন — সেটি একটি loss event। <code>tcp_congestion_control</code> সাধারণত <code>cubic</code> দেখাবে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Congestion control একটি জীবন্ত, চলমান প্রক্রিয়া — প্রতিটি connection নিজের মতো করে সীমা খুঁজছে, ধাক্কা খাচ্ছে, মানিয়ে নিচ্ছে। "Bandwidth" কোনো স্থির সংখ্যা নয়; এটি প্রতি মুহূর্তে আলোচনার ফল।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Congestion control network-কে collapse থেকে রক্ষা করে — ১৯৮৬-র বিপর্যয়ের পর এটি যোগ হয়।</li>
+      <li>Network স্পষ্ট সংকেত দেয় না; TCP <strong>packet loss</strong> (বা RTT বৃদ্ধি) দেখে অনুমান করে।</li>
+      <li><code>cwnd</code> = sender-এর অনুমান; প্রকৃত সীমা <code>min(rwnd, cwnd)</code>।</li>
+      <li><strong>Slow start</strong> exponential (প্রতি RTT-তে দ্বিগুণ); <strong>congestion avoidance</strong> linear (+1 MSS প্রতি RTT)।</li>
+      <li><strong>AIMD:</strong> ধীরে বাড়াও, loss হলে অর্ধেক করো।</li>
+      <li>Initial cwnd ≈ 14 KB — এজন্যই ছোট first response দ্রুত।</li>
+      <li>CUBIC আজকের default; BBR loss-এর বদলে bandwidth ও RTT মাপে এবং bufferbloat কমায়।</li>
+      <li>Wireless-এ loss ≠ congestion — এখানে loss-ভিত্তিক TCP অন্যায্যভাবে ধীর হয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>"Slow start" আসলে দ্রুত — নামটি বিভ্রান্তিকর কেন?</summary>
+    <div class="ans"><p>Slow start-এ cwnd প্রতি RTT-তে <strong>দ্বিগুণ</strong> হয় — এটি exponential বৃদ্ধি, congestion avoidance-এর linear বৃদ্ধির চেয়ে অনেক দ্রুত। নামটি এসেছে ঐতিহাসিক তুলনা থেকে: এর আগে sender শুরুতেই receiver-এর পুরো window ভরে দিত। সেই আচরণের তুলনায় ১০ segment দিয়ে শুরু করা "ধীর"।</p></div>
+  </details>
+  <details class="qa"><summary>একটি packet loss-এর প্রকৃত মূল্য কত?</summary>
+    <div class="ans"><p>শুধু একটি packet পুনরায় পাঠানোর খরচ নয়। (১) Fast retransmit হলে ~১ RTT বিলম্ব, timeout হলে ২০০ms–১s। (২) <code>cwnd</code> অর্ধেক (বা RTO হলে ১-এ) নেমে যায়। (৩) সেখান থেকে আবার উঠতে বহু RTT লাগে (linear বৃদ্ধি)। ফলে একটি loss পরবর্তী কয়েক সেকেন্ডের throughput-কেই প্রভাবিত করতে পারে — বিশেষ করে উচ্চ-RTT পথে।</p></div>
+  </details>
+  <details class="qa"><summary>Web performance-এ "প্রথম ১৪ KB" নিয়ে এত কথা কেন?</summary>
+    <div class="ans"><p>Initial congestion window সাধারণত ১০ × MSS ≈ ১৪ KB। অর্থাৎ নতুন connection-এ প্রথম RTT-তে সর্বোচ্চ ১৪ KB পাঠানো যায়। আপনার critical HTML+CSS যদি এর মধ্যে থাকে, browser এক RTT-তেই render শুরু করতে পারে। ১৫ KB হলে দ্বিতীয় RTT-র জন্য অপেক্ষা — উচ্চ-latency সংযোগে এটি লক্ষণীয় পার্থক্য।</p></div>
+  </details>
+  <details class="qa"><summary>খারাপ Wi-Fi-তে TCP কেন অপ্রয়োজনীয়ভাবে ধীর হয়ে যায়?</summary>
+    <div class="ans"><p>Loss-ভিত্তিক congestion control (CUBIC, Reno) ধরে নেয় packet loss মানেই congestion। কিন্তু Wi-Fi-তে loss হয় radio interference, দুর্বল signal বা fading থেকে — network-এ ভিড়ের কারণে নয়। তবু TCP cwnd অর্ধেক করে দেয়, যদিও bandwidth মুক্তই ছিল। BBR-এর মতো delay/bandwidth-ভিত্তিক algorithm এই ভুল অনুমান করে না।</p></div>
+  </details>
+  <details class="qa"><summary>Bufferbloat কী এবং কেন হয়?</summary>
+    <div class="ans"><p>Router ও modem-এ অতিরিক্ত বড় buffer থাকলে, loss-ভিত্তিক TCP সেই buffer পুরো ভরে ফেলে (কারণ loss না হলে সে জানে না সীমা কোথায়)। ফলে queue-তে জমা packet-দের অপেক্ষা করতে হয় এবং <em>সব</em> traffic-এর latency বেড়ে যায় — একটি download চলাকালীন ping ২০ms থেকে ৫০০ms হয়ে যেতে পারে। সমাধান: router-এ AQM (fq_codel, CAKE) যা queue ছোট রাখে, এবং BBR-এর মতো algorithm যা queue ভরায় না।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch20"><div class="d">পূর্ববর্তী</div><div class="t">Ch 20 — Flow Control</div></a>
+    <a class="nx" href="#ch22"><div class="d">পরবর্তী</div><div class="t">Ch 22 — Connection Termination</div></a>
+  </div>
+</section>

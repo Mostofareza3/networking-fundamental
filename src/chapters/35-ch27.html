@@ -1,0 +1,241 @@
+<section class="chapter" id="ch27">
+  <div class="ch-eyebrow">Chapter 27</div>
+  <h1>DNS Caching এবং TTL</h1>
+  <p class="ch-lede">DNS প্রতিদিন কোটি কোটি query সামলায় মাত্র কয়েকশ authoritative server দিয়ে। কীভাবে? উত্তর একটাই শব্দ — cache। কিন্তু cache মানেই পুরনো তথ্য, এবং সেখান থেকেই "DNS বদলেছি কিন্তু কাজ করছে না" সমস্যার জন্ম।</p>
+
+  <h2>27.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>Caching না থাকলে:
+
+  প্রতিটি HTTP request-এর আগে একটি পূর্ণ resolution
+      = root + TLD + authoritative
+      = ৩টি round trip
+      = হয়তো ২০০–৫০০ms
+
+  একটি web page-এ ৫০টি resource, ১০টি ভিন্ন domain
+      = ১০টি পূর্ণ resolution = কয়েক সেকেন্ড শুধু DNS-এ
+
+  আর root server-দের অবস্থা:
+      পৃথিবীর প্রতিটি DNS query তাদের কাছে যেত
+      = কার্যত অসম্ভব একটি load
+
+Caching সহ:
+  ৯০%+ query কোনো না কোনো cache থেকেই মিটে যায়
+  Root server-রা কার্যত ফাঁকা বসে থাকে</pre></div>
+
+  <h2>27.2 Cache-এর স্তরগুলো</h2>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ 1. Browser cache                                     │
+│    Chrome/Firefox নিজেরাই DNS cache রাখে             │
+│    সাধারণত ৬০ সেকেন্ড (TTL উপেক্ষা করেও!)             │
+│    chrome://net-internals/#dns                       │
+└────────────────────┬─────────────────────────────────┘
+                     ▼ miss
+┌──────────────────────────────────────────────────────┐
+│ 2. Application / runtime cache                       │
+│    JVM (পুরনো version-এ চিরকালীন!), Node-এর কিছু      │
+│    library, connection pool                          │
+└────────────────────┬─────────────────────────────────┘
+                     ▼ miss
+┌──────────────────────────────────────────────────────┐
+│ 3. OS cache                                          │
+│    systemd-resolved, nscd, dnsmasq, Windows-এর        │
+│    DNS Client service                                │
+│    resolvectl statistics / ipconfig /displaydns      │
+└────────────────────┬─────────────────────────────────┘
+                     ▼ miss
+┌──────────────────────────────────────────────────────┐
+│ 4. Recursive resolver cache  ★ সবচেয়ে গুরুত্বপূর্ণ    │
+│    ISP-র resolver, 8.8.8.8, 1.1.1.1                  │
+│    লক্ষ লক্ষ ব্যবহারকারীর জন্য একই cache               │
+│    এখানেই বেশিরভাগ hit হয়                             │
+└────────────────────┬─────────────────────────────────┘
+                     ▼ miss
+        Root → TLD → Authoritative
+        (এবং পথের প্রতিটি referral-ও cache হয়)</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Referral-ও cache হয়</div>
+    <p>একটি গুরুত্বপূর্ণ কিন্তু কম আলোচিত বিষয়: resolver শুধু চূড়ান্ত উত্তর নয়, <em>পথের প্রতিটি referral-ও</em> cache করে। <code>.com</code>-এর nameserver-এর তথ্য (TTL ২ দিন) একবার জানার পর সে আর কখনো root-এ যায় না। তাই দ্বিতীয় query-তে root এবং TLD দুটোই বাদ পড়ে — সরাসরি authoritative server-এ যায়।</p>
+  </div>
+
+  <h2>27.3 TTL — cache-এর আয়ু</h2>
+
+  <div class="cb diagram"><pre>example.com.    300    IN    A    93.184.215.14
+                 │
+                 └─ TTL: এই উত্তর ৩০০ সেকেন্ড বৈধ
+
+সময়ের সাথে:
+  t=0    resolver authoritative থেকে পেল, TTL=300
+  t=60   cache থেকে দিল, TTL দেখাল 240
+  t=200  cache থেকে দিল, TTL দেখাল 100
+  t=300  cache expire, পরের query আবার authoritative-এ
+
+★ TTL একটি ★প্রতিশ্রুতি★, একটি সুপারিশ নয়।
+  আপনি TTL=300 দিলে ধরে নিতে হবে পুরনো উত্তর
+  ৩০০ সেকেন্ড পর্যন্ত ব্যবহৃত হবে।</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>TTL</th><th>কখন উপযুক্ত</th><th>ট্রেড-অফ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>60s বা কম</strong></td><td>দ্রুত failover দরকার, ঘন ঘন IP বদলায়</td><td>বেশি query, বেশি latency, resolver-এ চাপ</td></tr>
+      <tr><td><strong>300s (৫ মিনিট)</strong></td><td>সক্রিয় পরিবর্তনশীল service — সাধারণ পছন্দ</td><td>ভারসাম্যপূর্ণ</td></tr>
+      <tr><td><strong>3600s (১ ঘণ্টা)</strong></td><td>স্থিতিশীল service</td><td>পরিবর্তন ছড়াতে ১ ঘণ্টা</td></tr>
+      <tr><td><strong>86400s (১ দিন)</strong></td><td>NS record, MX record — যা প্রায় বদলায় না</td><td>জরুরি পরিবর্তন কঠিন</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — migration-এর নিয়ম</div>
+    <p>Server migrate করার আগে <strong>অন্তত পুরনো TTL-এর সমান সময় আগে</strong> TTL কমিয়ে দিন:</p>
+    <div class="cb diagram"><pre>বর্তমান: TTL = 86400 (২৪ ঘণ্টা)
+
+দিন 1  : TTL কমিয়ে 300 করুন (কিন্তু IP অপরিবর্তিত)
+         → পুরনো ২৪ ঘণ্টার cache expire হতে ২৪ ঘণ্টা লাগবে
+
+দিন 2  : এখন সবার cache-এ TTL=300
+         → এবার IP বদলান
+         → ৫ মিনিটে সবাই নতুন IP পেয়ে যাবে
+
+দিন 3  : স্থিতিশীল হলে TTL আবার বাড়িয়ে দিন</pre></div>
+    <p>এই ধাপ এড়িয়ে সরাসরি IP বদললে কিছু ব্যবহারকারী ২৪ ঘণ্টা পর্যন্ত পুরনো server-এ যেতে থাকবে। এজন্য পুরনো server-কে অন্তত পুরনো TTL-এর সময়কাল পর্যন্ত চালু রাখতে হয় (বা redirect করতে হয়)।</p>
+  </div>
+
+  <h2>27.4 Negative Caching</h2>
+  <p>"এই নাম নেই" (NXDOMAIN) — এই উত্তরটিও cache হয়। নাহলে একটি typo বা ভুল configure করা client বারবার একই ব্যর্থ query পাঠিয়ে authoritative server-এ চাপ ফেলত।</p>
+
+  <div class="cb diagram"><pre>Negative caching-এর TTL আসে SOA record-এর শেষ field থেকে:
+
+  example.com. IN SOA ns1.example.com. admin.example.com. (
+      2026090201  ; serial
+      7200        ; refresh
+      3600        ; retry
+      1209600     ; expire
+      300 )       ; ★ minimum = negative cache TTL
+
+এর মানে: "example.com-এ নেই" এই তথ্যটি ৩০০ সেকেন্ড cache হবে।
+
+⚠️ বাস্তব সমস্যা:
+   একটি নতুন subdomain তৈরি করার আগে কেউ যদি সেটি
+   query করে ফেলে, NXDOMAIN cache হয়ে যাবে।
+   তারপর record তৈরি করলেও negative TTL শেষ না হওয়া
+   পর্যন্ত সেটি "নেই" দেখাবে।
+
+   এজন্যই negative TTL কম রাখা ভালো (৩০০ বা তার কম),
+   এবং নতুন record তৈরির আগে query না করাই বুদ্ধিমানের কাজ।</pre></div>
+
+  <h2>27.5 Cache-জনিত সমস্যা যা সবাই দেখে</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">সমস্যা</span><p>"DNS record বদলেছি, কিন্তু আমার machine পুরনো IP-তেই যাচ্ছে।"</p></div>
+    <div class="m-row r"><span class="lbl">কারণ ও সমাধান</span><p>চারটি স্তরের যেকোনো একটিতে পুরনো উত্তর আটকে আছে। ক্রম অনুযায়ী পরীক্ষা করুন:</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># 1. Authoritative server কী বলছে (cache সম্পূর্ণ এড়িয়ে)?
+dig @$(dig +short NS example.com | head -1) example.com
+# এখানে পুরনো হলে → আপনার DNS provider-এ পরিবর্তন হয়নি
+
+# 2. Public resolver কী বলছে?
+dig @8.8.8.8 example.com
+dig @1.1.1.1 example.com
+# পুরনো হলে → TTL শেষ হওয়ার অপেক্ষা করুন
+
+# 3. আপনার OS cache পরিষ্কার করুন
+sudo resolvectl flush-caches        # systemd
+sudo dscacheutil -flushcache        # macOS
+ipconfig /flushdns                  # Windows
+
+# 4. Browser cache
+# chrome://net-internals/#dns → "Clear host cache"</pre></div>
+    </div>
+  </div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ যেসব জায়গায় TTL উপেক্ষিত হয়</div>
+    <ul>
+      <li><strong>Java (পুরনো JVM):</strong> default <code>networkaddress.cache.ttl</code> ছিল <code>-1</code> — অর্থাৎ <em>চিরকালীন</em> cache। একটি দীর্ঘচলমান JVM application DNS পরিবর্তন কখনো দেখত না। আধুনিক JDK-তে এটি ৩০ সেকেন্ড, কিন্তু legacy system-এ এখনো এই সমস্যা দেখা যায়।</li>
+      <li><strong>Connection pool:</strong> একটি চলমান TCP connection তার IP ধরে রাখে — DNS বদলালেও সেটি বদলায় না। শুধু <em>নতুন</em> connection নতুন IP পাবে।</li>
+      <li><strong>Browser:</strong> Chrome নিজের cache-এ ~৬০ সেকেন্ড রাখে, TTL কম হলেও।</li>
+      <li><strong>Kubernetes:</strong> CoreDNS-এর নিজস্ব cache, এবং pod-এর <code>ndots</code> configuration অপ্রত্যাশিত আচরণ তৈরি করতে পারে।</li>
+    </ul>
+    <p><strong>উপসংহার:</strong> DNS-ভিত্তিক failover-কে "তাৎক্ষণিক" ধরে নেবেন না। প্রকৃত দ্রুত failover-এর জন্য load balancer, anycast, বা application-স্তরের retry দরকার।</p>
+  </div>
+
+  <h2>27.6 Anycast — একটি IP, বহু server</h2>
+
+  <div class="cb diagram"><pre>1.1.1.1 — এই একটি IP পৃথিবীর ২৫০+ শহরে ঘোষিত হয়
+
+    ঢাকার ব্যবহারকারী  ──▶ 1.1.1.1 ──▶ সিঙ্গাপুরের server
+    লন্ডনের ব্যবহারকারী ──▶ 1.1.1.1 ──▶ লন্ডনের server
+    নিউইয়র্কের          ──▶ 1.1.1.1 ──▶ নিউইয়র্কের server
+
+কীভাবে? BGP (Ch 42)। একাধিক জায়গা থেকে একই prefix
+ঘোষণা করা হয়, এবং routing স্বাভাবিকভাবেই প্রত্যেককে
+নিকটতম টিতে পাঠায়।
+
+সুবিধা:
+  • কম latency (সবাই কাছের server পায়)
+  • স্বয়ংক্রিয় failover (একটি site বন্ধ হলে route
+    পরের নিকটতম টিতে চলে যায়)
+  • DDoS প্রতিরোধ (আক্রমণ বহু site-এ ছড়িয়ে যায়)
+
+এজন্যই root server "১৩টি" হলেও বাস্তবে ১৫০০+ যন্ত্র —
+প্রতিটি নাম একটি anycast গুচ্ছ।</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 27 — Cache-এর আচরণ পরিমাপ করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — cache hit এবং miss-এর মধ্যে সময়ের প্রকৃত পার্থক্য, এবং TTL-এর ক্ষয়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># প্রথম query (সম্ভবত cache miss)
+dig example.com | grep -E "Query time|ANSWER SECTION" -A1
+
+# সঙ্গে সঙ্গে আবার (cache hit)
+dig example.com | grep -E "Query time|IN.*A"
+
+# TTL কমতে দেখুন
+for i in 1 2 3; do
+  dig +short +ttlunits example.com A | head -1
+  dig example.com | grep "^example.com" | awk '{print "TTL:", $2}'
+  sleep 5
+done
+
+# একটি খুব কম TTL-এর domain (CDN-এর হয়)
+dig www.cloudflare.com | grep "^www"
+
+# NXDOMAIN-এর negative caching দেখুন
+dig thisdoesnotexist12345.example.com | grep -E "status|SOA"</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রথম query-তে <code>Query time: 45 msec</code>, দ্বিতীয়টিতে <code>Query time: 0 msec</code> — প্রায় ৫০ গুণ পার্থক্য, এবং এটি শুধু cache। TTL-এর সংখ্যাটি ৫ সেকেন্ড পরপর ৫ করে কমবে। NXDOMAIN-এর ক্ষেত্রে <code>status: NXDOMAIN</code> এবং AUTHORITY section-এ SOA record দেখবেন — সেই SOA-র শেষ সংখ্যাটিই negative cache TTL।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Cache DNS-এর একটি বৈশিষ্ট্য নয়, এটি DNS-এর কার্যক্ষমতার <em>ভিত্তি</em>। এবং TTL কোনো নিছক সংখ্যা নয় — এটি আপনার পরিবর্তন কত দ্রুত পৃথিবীতে ছড়াবে তার সরাসরি নিয়ন্ত্রক।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Caching ছাড়া DNS scale করত না — ৯০%+ query কোনো না কোনো cache থেকে মেটে।</li>
+      <li>চারটি স্তর: browser → application/runtime → OS → recursive resolver।</li>
+      <li>Referral-ও cache হয়, তাই দ্বিতীয় query-তে root ও TLD সম্পূর্ণ বাদ পড়ে।</li>
+      <li>TTL একটি প্রতিশ্রুতি: পুরনো উত্তর ততক্ষণ পর্যন্ত ব্যবহৃত হতে পারে।</li>
+      <li>Migration-এর আগে TTL কমান, পুরনো TTL-এর সময় অপেক্ষা করুন, তারপর IP বদলান।</li>
+      <li>NXDOMAIN-ও cache হয় (negative caching), TTL আসে SOA-র minimum field থেকে।</li>
+      <li>JVM, connection pool, browser — অনেক জায়গায় TTL উপেক্ষিত হয়; DNS failover তাৎক্ষণিক নয়।</li>
+      <li>Anycast একই IP-কে বহু জায়গায় ঘোষণা করে — কম latency ও স্বয়ংক্রিয় failover দেয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>DNS record বদলানোর ৫ মিনিট পরেও কিছু ব্যবহারকারী পুরনো server-এ যাচ্ছে। কেন?</summary>
+    <div class="ans"><p>পুরনো record-এর TTL এখনো শেষ হয়নি। যদি আগে TTL ছিল ৩৬০০ সেকেন্ড, তাহলে যারা পরিবর্তনের ঠিক আগে query করেছিল তাদের cache ১ ঘণ্টা পর্যন্ত পুরনো IP রাখবে। এছাড়া browser cache, JVM-এর চিরকালীন cache, বা চলমান TCP connection — সব মিলিয়ে বিলম্ব আরও বাড়তে পারে। সমাধান: পরিবর্তনের আগে TTL কমানো।</p></div>
+  </details>
+  <details class="qa"><summary>Negative caching কী এবং কোন সমস্যা তৈরি করতে পারে?</summary>
+    <div class="ans"><p>"এই নাম নেই" (NXDOMAIN) — এই উত্তরটিও নির্দিষ্ট সময়ের জন্য cache করা হয়, TTL আসে SOA record-এর minimum field থেকে। সমস্যা: একটি নতুন subdomain তৈরির <em>আগে</em> কেউ সেটি query করলে NXDOMAIN cache হয়ে যায়; তারপর record তৈরি করলেও negative TTL শেষ না হওয়া পর্যন্ত সেটি "নেই" দেখাবে। এজন্যই negative TTL কম রাখা এবং নতুন record তৈরির আগে query না করা ভালো।</p></div>
+  </details>
+  <details class="qa"><summary>Server migration-এর পরিকল্পনায় TTL কীভাবে ব্যবহার করবেন?</summary>
+    <div class="ans"><p>(১) Migration-এর অন্তত পুরনো TTL-এর সমান সময় আগে TTL কমিয়ে ৩০০ বা ৬০ করুন, IP অপরিবর্তিত রেখে। (২) পুরনো TTL-এর সমান সময় অপেক্ষা করুন যাতে সব cache নতুন কম TTL গ্রহণ করে। (৩) এবার IP বদলান — পরিবর্তন কয়েক মিনিটে ছড়াবে। (৪) পুরনো server অন্তত কয়েক ঘণ্টা চালু রাখুন। (৫) স্থিতিশীল হলে TTL আবার বাড়ান।</p></div>
+  </details>
+  <details class="qa"><summary>Anycast কীভাবে একই IP-কে বহু জায়গায় থাকতে দেয়?</summary>
+    <div class="ans"><p>একাধিক ভৌগোলিক অবস্থান থেকে BGP-র মাধ্যমে <em>একই IP prefix</em> ঘোষণা করা হয়। প্রতিটি router স্বাভাবিক routing নিয়ম অনুযায়ী নিকটতম ঘোষণাকারীর দিকে packet পাঠায় — কোনো বিশেষ ব্যবস্থা লাগে না, এটি routing-এর স্বাভাবিক আচরণেরই ব্যবহার। ফলে ব্যবহারকারীরা স্বয়ংক্রিয়ভাবে কাছের server পান, এবং একটি site বন্ধ হলে route পরেরটিতে চলে যায়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch26"><div class="d">পূর্ববর্তী</div><div class="t">Ch 26 — DNS Resolution</div></a>
+    <a class="nx" href="#ch28"><div class="d">পরবর্তী</div><div class="t">Ch 28 — HTTP Fundamentals</div></a>
+  </div>
+</section>

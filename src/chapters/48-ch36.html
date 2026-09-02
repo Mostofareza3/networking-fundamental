@@ -1,0 +1,206 @@
+<section class="chapter" id="ch36">
+  <div class="ch-eyebrow">Chapter 36</div>
+  <h1>Latency</h1>
+  <p class="ch-lede">"আরও bandwidth কিনলে দ্রুত হবে" — এই ধারণাটি বেশিরভাগ web application-এর জন্য ভুল। কারণ বাধাটি সাধারণত bandwidth নয়, latency — এবং latency টাকা দিয়ে কেনা যায় না, কারণ তার একটি অংশ আলোর গতি দিয়ে নির্ধারিত।</p>
+
+  <h2>36.1 Latency-এর চারটি উপাদান</h2>
+
+  <div class="cb diagram"><pre>একটি packet A থেকে B-তে যেতে যে সময় লাগে
+তা চারটি অংশের যোগফল:
+
+┌────────────────────────────────────────────────────┐
+│ ১. PROPAGATION DELAY                               │
+│    Signal-এর ভৌত দূরত্ব পাড়ি দেওয়ার সময়              │
+│    = দূরত্ব / signal-এর গতি                          │
+│                                                    │
+│    Fiber-এ আলোর গতি ≈ 200,000 km/s                 │
+│    (শূন্যে 300,000, কিন্তু কাচে ধীর)                 │
+│                                                    │
+│    ★ এটি ভৌত সীমা — টাকা দিয়ে কমানো যায় না ★        │
+├────────────────────────────────────────────────────┤
+│ ২. TRANSMISSION DELAY                              │
+│    Packet-এর সব bit তারে "ঠেলে দেওয়ার" সময়          │
+│    = packet size / link bandwidth                  │
+│                                                    │
+│    1500 bytes @ 1 Gbps = 12 microseconds           │
+│    1500 bytes @ 1 Mbps = 12 milliseconds           │
+│                                                    │
+│    ★ এখানেই bandwidth কাজে লাগে ★                   │
+├────────────────────────────────────────────────────┤
+│ ৩. PROCESSING DELAY                                │
+│    Router-এর header পড়া, lookup, সিদ্ধান্ত নেওয়া     │
+│    আধুনিক hardware-এ microsecond-এর হিসাবে           │
+├────────────────────────────────────────────────────┤
+│ ৪. QUEUEING DELAY                                  │
+│    Router-এর queue-তে অপেক্ষা                       │
+│    ★ সবচেয়ে পরিবর্তনশীল ★ — ০ থেকে শত মিলিসেকেন্ড    │
+│    Congestion-এর সময় এটিই প্রধান হয়ে ওঠে            │
+│    (এবং bufferbloat-এর কারণে অস্বাভাবিক বাড়ে, Ch 21) │
+└────────────────────────────────────────────────────┘</pre></div>
+
+  <h2>36.2 Propagation delay — আলোর গতির সীমা</h2>
+
+  <div class="cb diagram"><pre>হিসাব: ঢাকা → নিউইয়র্ক
+
+  সরলরেখায় দূরত্ব  : ~12,800 km
+  বাস্তব fiber পথ    : ~16,000 km (সমুদ্রের নিচের cable
+                       সোজা যায় না)
+
+  একমুখী সময় = 16,000 / 200,000 = 0.08 s = 80 ms
+  RTT         = 160 ms
+
+  ★ এটি ★তাত্ত্বিক সর্বনিম্ন★ ★
+  কোনো technology, কোনো টাকা এটি কমাতে পারবে না
+  (যতক্ষণ না আমরা fiber-এর বদলে অন্য কিছু পাই)
+
+  বাস্তবে router hop, queue, processing যোগ হয়ে
+  আপনি পাবেন ~200–250 ms।
+
+
+কিছু বাস্তব RTT (আনুমানিক):
+
+  একই machine (loopback)      : 0.05 ms
+  একই data center             : 0.5 ms
+  একই শহর                     : 5 ms
+  ঢাকা → সিঙ্গাপুর             : 60 ms
+  ঢাকা → ইউরোপ                : 130 ms
+  ঢাকা → US West Coast        : 230 ms
+  Satellite (geostationary)   : 600 ms
+  Starlink (low orbit)        : 30–50 ms</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — পাইপের উপমা</div>
+    <p>Network-কে একটি পানির পাইপ ভাবুন:</p>
+    <ul>
+      <li><strong>Latency</strong> = পাইপের <em>দৈর্ঘ্য</em>। এক ফোঁটা পানি এক প্রান্ত থেকে অন্য প্রান্তে যেতে কত সময় লাগে।</li>
+      <li><strong>Bandwidth</strong> = পাইপের <em>ব্যাস</em>। প্রতি সেকেন্ডে কত পানি যেতে পারে।</li>
+    </ul>
+    <p>পাইপ চওড়া করলে (bandwidth বাড়ালে) এক ফোঁটা দ্রুত পৌঁছায় না। শুধু একসাথে বেশি পানি যেতে পারে।</p>
+    <p><strong>এজন্যই:</strong> একটি ছোট API response-এর জন্য ১০০ Mbps আর ১ Gbps-এর মধ্যে কোনো পার্থক্য নেই। কিন্তু একটি ১০ GB ফাইল download-এ বিশাল পার্থক্য। প্রথমটি latency-bound, দ্বিতীয়টি bandwidth-bound।</p>
+  </div>
+
+  <h2>36.3 RTT এবং কেন এটি গুণিতক হয়ে যায়</h2>
+
+  <div class="cb diagram"><pre>RTT (Round Trip Time) = যাওয়া + আসা
+
+কিন্তু আসল সমস্যা হলো — একটি সাধারণ HTTPS request-এ
+কতগুলো round trip লাগে:
+
+  DNS (cache miss হলে)      : 1–2 RTT
+  TCP handshake             : 1 RTT
+  TLS 1.3 handshake         : 1 RTT
+  HTTP request/response     : 1 RTT
+  ──────────────────────────────────
+  সর্বনিম্ন                  : 4 RTT
+
+RTT 200ms হলে → ★ ৮০০ ms ★ কোনো data পাওয়ার আগেই
+
+তারপর যদি HTML-এ CSS ও JS থাকে, এবং সেগুলো
+ভিন্ন origin-এ হয়:
+  + DNS + TCP + TLS প্রতিটির জন্য
+  = আরও ৮০০ ms
+
+★ এজন্যই দূরবর্তী ব্যবহারকারীর কাছে সবকিছু ধীর মনে হয়,
+  যতই bandwidth থাকুক।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — Latency কমানোর প্রকৃত উপায়</div>
+    <p>Latency কমানো যায় না, কিন্তু <strong>round trip-এর সংখ্যা</strong> কমানো যায় — এবং <strong>দূরত্ব</strong> কমানো যায়:</p>
+    <ul>
+      <li><strong>CDN</strong> — সবচেয়ে বড় জয়। ২০০ms-এর বদলে ৫ms, কারণ content আপনার শহরেই (Ch 46)।</li>
+      <li><strong>Connection reuse (keep-alive)</strong> — handshake-এর RTT গুলো একবারই।</li>
+      <li><strong>HTTP/2, HTTP/3</strong> — multiplexing মানে সমান্তরাল request, ধারাবাহিক নয়।</li>
+      <li><strong>TLS 1.3 ও 0-RTT</strong> — একটি RTT সরাসরি বাঁচে।</li>
+      <li><strong>DNS prefetch, preconnect</strong> — <code>&lt;link rel="preconnect"&gt;</code> দিয়ে দরকারের আগেই connection প্রস্তুত।</li>
+      <li><strong>একাধিক ছোট request-কে একত্র করা</strong> — ১০টি API call মানে ১০ × RTT (যদি ধারাবাহিক হয়)। GraphQL বা একটি aggregate endpoint সেটি ১-এ নামায়।</li>
+      <li><strong>Edge computing</strong> — শুধু static নয়, logic-ও ব্যবহারকারীর কাছে সরানো।</li>
+    </ul>
+    <p><strong>সবচেয়ে গুরুত্বপূর্ণ:</strong> ধারাবাহিক (sequential) নির্ভরতার শৃঙ্খল ভাঙুন। "A-র উত্তর পেয়ে B, B-র উত্তর পেয়ে C" — এই ধরনের waterfall প্রতিটি ধাপে একটি RTT যোগ করে। সমান্তরাল করা গেলে করুন।</p>
+  </div>
+
+  <h2>36.4 Queueing delay এবং congestion</h2>
+
+  <div class="cb diagram"><pre>স্বাভাবিক অবস্থা:
+  Router-এর queue প্রায় খালি
+  Packet এল → সঙ্গে সঙ্গে forward
+  Queueing delay ≈ 0
+
+Congestion-এর সময়:
+  ┌──────────────────────────────────┐
+  │ ████████████████████████░░░░░░░░ │  queue প্রায় ভরা
+  └──────────────────────────────────┘
+  আপনার packet পেছনে দাঁড়াল
+  ১০০০টি packet সামনে, প্রতিটি ১২ μs
+  → 12 ms অতিরিক্ত delay
+
+  Queue সম্পূর্ণ ভরে গেলে → packet ফেলে দেওয়া
+  → TCP-র retransmission → আরও দেরি
+
+★ এজন্যই latency এবং packet loss একসাথে বাড়ে —
+  দুটোই একই কারণের (queue overflow) লক্ষণ।
+
+★ এবং এজন্যই bufferbloat (Ch 21) এত ক্ষতিকর:
+  অতিরিক্ত বড় buffer মানে packet ফেলে দেওয়ার
+  বদলে দীর্ঘ queue — loss কম, কিন্তু latency ভয়াবহ।</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 36 — Latency-র উপাদান আলাদা করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — দূরত্ব অনুযায়ী RTT কীভাবে বাড়ে, এবং একটি request-এর কোন অংশে কত সময় যাচ্ছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># বিভিন্ন দূরত্বে RTT
+ping -c 5 127.0.0.1                    # loopback ~0.05ms
+ping -c 5 192.168.0.1                  # gateway ~1-5ms
+ping -c 5 1.1.1.1                      # কাছাকাছি ~10-50ms
+
+# একটি request-এর সময়ের সম্পূর্ণ ভাগ
+curl -w "
+DNS lookup      : %{time_namelookup}s
+TCP connect     : %{time_connect}s
+TLS handshake   : %{time_appconnect}s
+Request পাঠানো   : %{time_pretransfer}s
+প্রথম byte       : %{time_starttransfer}s
+মোট             : %{time_total}s
+─────────────────────────
+Server think time: (starttransfer − pretransfer)
+" -o /dev/null -s https://example.com
+
+# একই request দ্বিতীয়বার (DNS ও TLS session cache সহ)
+curl -w "মোট: %{time_total}s\n" -o /dev/null -s https://example.com
+
+# Latency-র স্থিতিশীলতা (jitter-এর ইঙ্গিত)
+ping -c 20 1.1.1.1 | tail -2</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> Loopback-এর RTT প্রায় শূন্য (কোনো ভৌত দূরত্ব নেই)। curl-এর breakdown-এ দেখুন প্রতিটি ধাপ ক্রমবর্ধমান — <code>time_connect − time_namelookup</code> = TCP handshake, <code>time_appconnect − time_connect</code> = TLS। <code>time_starttransfer − time_pretransfer</code> = server-এর প্রকৃত processing time। শেষ লাইনের <code>mdev</code> হলো jitter।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Site ধীর" একটি অর্থহীন বক্তব্য যতক্ষণ না আপনি জানেন কোন ধাপে সময় যাচ্ছে। DNS ধীর হলে সমাধান এক রকম, TLS ধীর হলে অন্য রকম, server ধীর হলে সম্পূর্ণ ভিন্ন। curl-এর এই breakdown প্রথম diagnostic tool হওয়া উচিত।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Latency = propagation + transmission + processing + queueing।</li>
+      <li><strong>Propagation delay ভৌত সীমা</strong> — আলোর গতি; টাকা দিয়ে কমানো যায় না।</li>
+      <li>Transmission delay = packet size / bandwidth — এখানেই bandwidth কাজে লাগে।</li>
+      <li>Queueing delay সবচেয়ে পরিবর্তনশীল এবং congestion-এ প্রধান হয়ে ওঠে।</li>
+      <li>একটি সাধারণ HTTPS request-এ সর্বনিম্ন ৪ RTT লাগে (DNS + TCP + TLS + HTTP)।</li>
+      <li>Latency কমানোর উপায়: দূরত্ব কমান (CDN) এবং round trip-এর সংখ্যা কমান।</li>
+      <li>Bandwidth = পাইপের ব্যাস, latency = পাইপের দৈর্ঘ্য।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Bandwidth দ্বিগুণ করলে latency কি অর্ধেক হয়?</summary>
+    <div class="ans"><p>না। Bandwidth শুধু <strong>transmission delay</strong>-কে প্রভাবিত করে (packet-এর bit গুলো তারে ঠেলে দেওয়ার সময়), যা ছোট packet-এর ক্ষেত্রে নগণ্য। Propagation delay (দূরত্ব ÷ আলোর গতি) সম্পূর্ণ অপরিবর্তিত থাকে। একটি ছোট API request-এ ১০০ Mbps আর ১ Gbps-এর মধ্যে কার্যত কোনো পার্থক্য নেই।</p></div>
+  </details>
+  <details class="qa"><summary>ঢাকা থেকে নিউইয়র্কে RTT-র তাত্ত্বিক সর্বনিম্ন কত এবং কেন?</summary>
+    <div class="ans"><p>Fiber পথে দূরত্ব ~১৬,০০০ km, fiber-এ আলোর গতি ~২,০০,০০০ km/s। একমুখী: 16000/200000 = ০.০৮ সেকেন্ড = ৮০ms। RTT = <strong>~১৬০ms</strong>। এটি ভৌত সীমা — কোনো technology বা বিনিয়োগ দিয়ে কমানো যাবে না। বাস্তবে router hop ও queueing যোগ হয়ে ~২০০–২৫০ms হয়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি page-এ ১০টি ধারাবাহিক API call আছে, RTT ২০০ms। শুধু network-এই কত সময়?</summary>
+    <div class="ans"><p>কমপক্ষে ১০ × ২০০ms = <strong>২ সেকেন্ড</strong>, এবং এটি server-এর processing time বাদ দিয়ে। যদি প্রতিটি নতুন connection হয়, তাহলে প্রতিটিতে TCP + TLS handshake যোগ হয়ে সময় তিন-চার গুণ হবে। সমাধান: call গুলো সমান্তরাল করুন, একটি aggregate endpoint বানান, বা connection reuse নিশ্চিত করুন।</p></div>
+  </details>
+  <details class="qa"><summary>Congestion-এর সময় latency এবং packet loss একসাথে বাড়ে কেন?</summary>
+    <div class="ans"><p>দুটোই একই কারণের লক্ষণ — router-এর queue ভরে যাওয়া। Queue ভরতে থাকলে packet-দের বেশিক্ষণ অপেক্ষা করতে হয় (queueing delay বাড়ে, latency বাড়ে)। Queue সম্পূর্ণ ভরে গেলে নতুন packet ফেলে দিতে হয় (packet loss)। তাই একটি বাড়লে সাধারণত অন্যটিও বাড়ে, এবং দুটোই congestion-এর সংকেত।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch35"><div class="d">পূর্ববর্তী</div><div class="t">Ch 35 — Firewalls</div></a>
+    <a class="nx" href="#ch37"><div class="d">পরবর্তী</div><div class="t">Ch 37 — Bandwidth vs Throughput</div></a>
+  </div>
+</section>

@@ -1,0 +1,176 @@
+<section class="chapter" id="ch4">
+  <div class="ch-eyebrow">Chapter 4</div>
+  <h1>Bits, Bytes, Frames, Packets, and Segments</h1>
+  <p class="ch-lede">Networking-এর terminology নতুনদের কাছে এলোমেলো মনে হয় কারণ একই জিনিসের পাঁচটি নাম। আসলে নাম গুলো এলোমেলো নয় — প্রতিটি নাম বলে দেয় আপনি এই মুহূর্তে <em>কোন layer-এর দৃষ্টিকোণ</em> থেকে তাকাচ্ছেন।</p>
+
+  <h2>4.1 Why does this exist?</h2>
+  <p>একটি HTTP request তারের ভেতর দিয়ে যাওয়ার সময় সেটি একই সাথে:</p>
+  <ul>
+    <li>একটি <strong>message</strong> (application-এর চোখে),</li>
+    <li>একটি <strong>segment</strong> (TCP-এর চোখে),</li>
+    <li>একটি <strong>packet</strong> (IP-এর চোখে),</li>
+    <li>একটি <strong>frame</strong> (Ethernet-এর চোখে),</li>
+    <li>এবং একগুচ্ছ <strong>bit</strong> (তারের চোখে)।</li>
+  </ul>
+  <p>পাঁচটি নাম কারণ পাঁচটি layer, এবং প্রতিটি layer তার নিজের header যোগ করার পরে জিনিসটাকে নিজের নামে ডাকে। <strong>নামটি বলে দেয় কোন header গুলো এই মুহূর্তে জোড়া আছে।</strong></p>
+
+  <div class="box why">
+    <div class="bt">💡 Why এই নামগুলো গুরুত্বপূর্ণ</div>
+    <p>যখন কেউ বলে "packet loss হচ্ছে" — সে Layer 3-এর কথা বলছে। "Frame error" মানে Layer 2, সাধারণত cable বা NIC-এর সমস্যা। "Segment retransmission" মানে TCP-এর ব্যাপার। ভুল শব্দ ব্যবহার করলে ভুল জায়গায় debugging শুরু হয়। শব্দগুলোর মধ্যে দিয়েই আসলে layer-এর ধারণা ঢুকে যায়।</p>
+  </div>
+
+  <h2>4.2 নিচ থেকে উপরে — প্রতিটি একক</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>একক</th><th>Layer</th><th>কী থাকে</th><th>কে এটি নিয়ে কাজ করে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bit</strong></td><td>Physical</td><td>একটি 0 বা 1 — voltage, আলোর pulse, radio state</td><td>তার, NIC-এর transceiver</td></tr>
+      <tr><td><strong>Byte / Octet</strong></td><td>—</td><td>৮টি bit। Networking RFC-তে "octet" বলা হয় (কিছু পুরনো architecture-এ byte ≠ ৮ bit ছিল)</td><td>সব layer</td></tr>
+      <tr><td><strong>Frame</strong></td><td>Link (L2)</td><td>Ethernet/Wi-Fi header + payload + FCS। MAC address এখানে।</td><td>NIC, switch</td></tr>
+      <tr><td><strong>Packet</strong></td><td>Network (L3)</td><td>IP header + payload। IP address, TTL এখানে।</td><td>Router, host-এর IP stack</td></tr>
+      <tr><td><strong>Segment</strong></td><td>Transport (L4)</td><td>TCP header + data। Port, sequence, ACK এখানে।</td><td>শুধু দুই প্রান্তের kernel</td></tr>
+      <tr><td><strong>Datagram</strong></td><td>L4 (UDP) বা L3</td><td>UDP header + data। "স্বয়ংসম্পূর্ণ, স্বাধীন" বোঝাতে ব্যবহৃত।</td><td>UDP stack</td></tr>
+      <tr><td><strong>Message</strong></td><td>Application (L7)</td><td>একটি সম্পূর্ণ HTTP request, একটি JSON body, একটি DNS query</td><td>আপনার code</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ "Datagram" শব্দটি নিয়ে বিভ্রান্তি</div>
+    <p>"Datagram" শব্দের মানে হলো — <em>একটি স্বয়ংসম্পূর্ণ, স্বাধীন একক, যার delivery-র কোনো নিশ্চয়তা নেই এবং যে অন্যদের সাথে সম্পর্কহীন</em>। তাই এটি দুই জায়গায় ব্যবহৃত হয়: <strong>UDP datagram</strong> (L4) এবং <strong>IP datagram</strong> (L3, যেটাকে আমরা সাধারণত packet বলি)। প্রসঙ্গ থেকে বুঝে নিতে হয়। মূল কথা — শব্দটি "সংযোগহীন ও অনিশ্চিত" এই বৈশিষ্ট্যটাই বোঝাচ্ছে, TCP segment-এর ঠিক উল্টো।</p>
+  </div>
+
+  <h2>4.3 একটি end-to-end উদাহরণ</h2>
+  <p>ধরা যাক আপনার code লিখল:</p>
+  <div class="cb"><span class="cb-lang">js</span><pre>socket.write("Hello, World!");   // 13 bytes</pre></div>
+
+  <p>এবার প্রতিটি স্তরে এই ১৩টি byte-এর কী নাম, এবং মোট আকার কত:</p>
+
+  <div class="cb diagram"><pre>┌─ APPLICATION ─────────────────────────────────────────────┐
+│  MESSAGE: "Hello, World!"                     13 bytes    │
+└───────────────────────────────────────────────────────────┘
+                          ↓ socket.write() → kernel buffer
+┌─ TRANSPORT (TCP) ─────────────────────────────────────────┐
+│  SEGMENT                                      33 bytes    │
+│  ┌──────────────────┬──────────────────┐                  │
+│  │ TCP Header 20 B  │ "Hello, World!"  │                  │
+│  │ srcPort: 51234   │                  │                  │
+│  │ dstPort: 8080    │                  │                  │
+│  │ seq: 1001        │                  │                  │
+│  └──────────────────┴──────────────────┘                  │
+└───────────────────────────────────────────────────────────┘
+                          ↓
+┌─ NETWORK (IP) ────────────────────────────────────────────┐
+│  PACKET                                       53 bytes    │
+│  ┌─────────────────┬─────────────────────────┐            │
+│  │ IP Header 20 B  │      SEGMENT 33 B       │            │
+│  │ src: 192.168.1.5│                         │            │
+│  │ dst: 93.184.x.x │                         │            │
+│  │ ttl: 64         │                         │            │
+│  │ proto: 6 (TCP)  │                         │            │
+│  └─────────────────┴─────────────────────────┘            │
+└───────────────────────────────────────────────────────────┘
+                          ↓
+┌─ LINK (Ethernet) ─────────────────────────────────────────┐
+│  FRAME                                        71 bytes    │
+│  ┌──────────────┬──────────────────┬─────┐                │
+│  │ Eth Hdr 14 B │   PACKET 53 B    │FCS 4│                │
+│  │ dst: gateway │                  │     │                │
+│  │      MAC     │                  │     │                │
+│  │ src: my MAC  │                  │     │                │
+│  └──────────────┴──────────────────┴─────┘                │
+│  (Ethernet-এর সর্বনিম্ন 64 B — এখানে পূরণ হয়েছে)            │
+└───────────────────────────────────────────────────────────┘
+                          ↓
+┌─ PHYSICAL ────────────────────────────────────────────────┐
+│  BITS: 71 × 8 = 568 bits                                  │
+│  0101101000110101110100101101...                          │
+└───────────────────────────────────────────────────────────┘
+
+আপনার data:  13 bytes
+তারে গেল:    71 bytes
+Overhead:    58 bytes (82%!)</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <p>এই ৮২% overhead-এর হিসাবটাই ব্যাখ্যা করে কেন chatty protocol ধীর। আপনি যদি একটি loop-এ ১০০০ বার <code>socket.write()</code> করে ১৩ bytes করে পাঠান, তারে যাবে ৭১ KB — অথচ data মাত্র ১৩ KB। একবারে buffer করে পাঠালে যেত প্রায় ১৩.৩ KB। <strong>এটাই buffering এবং batching-এর মূল যুক্তি</strong> — শুধু syscall বাঁচানো নয়, header overhead বাঁচানোও।</p>
+  </div>
+
+  <h2>4.4 TCP-এর ক্ষেত্রে একটি সূক্ষ্ম কিন্তু গুরুত্বপূর্ণ কথা</h2>
+  <p>উপরের ছবিটি একটি ভুল ধারণা দিতে পারে — যেন আপনার একটি <code>write()</code> সমান একটি segment। <strong>এটি সত্য নয়</strong>, এবং এই ভুল বোঝাবুঝি বাস্তবে বহু bug-এর কারণ।</p>
+
+  <p>TCP হলো একটি <strong>byte stream</strong>, message stream নয়। Kernel আপনার লেখা bytes-গুলো একটি buffer-এ জমা করে এবং <em>নিজের সুবিধামতো</em> সেগুলো segment-এ ভাগ করে:</p>
+
+  <div class="cb diagram"><pre>আপনি লিখলেন:
+    write("Hello, ")      7 bytes
+    write("World!")       6 bytes
+    write("How are you?") 12 bytes
+
+Network-এ যেতে পারে:
+    Segment 1: "Hello, World!How ar"     ← তিনটি write একসাথে, কাটা পড়েছে
+    Segment 2: "e you?"
+
+Receiver-এ read() দিতে পারে:
+    read() → "Hello, Wor"               ← যা পাওয়া গেছে তাই
+    read() → "ld!How are you?"</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ সবচেয়ে সাধারণ networking bug</div>
+    <p>নতুন developer-রা ধরে নেন একটি <code>write()</code>-এর বিপরীতে একটি <code>read()</code> ঠিক সেই bytes ফেরত দেবে। TCP-তে এই নিশ্চয়তা <strong>নেই</strong>। TCP শুধু নিশ্চয়তা দেয়: <em>bytes গুলো সঠিক ক্রমে, একটিও না হারিয়ে পৌঁছাবে</em> — কিন্তু কোন read()-এ কতটুকু আসবে তার কোনো নিশ্চয়তা নেই।</p>
+    <p>এজন্যই প্রতিটি TCP-ভিত্তিক protocol-কে নিজের <strong>message framing</strong> ঠিক করতে হয়: HTTP ব্যবহার করে <code>Content-Length</code> বা chunked encoding; অনেক binary protocol প্রতিটি message-এর আগে ৪-byte length লেখে; কিছু protocol delimiter (<code>\n</code>) ব্যবহার করে। <strong>UDP-তে এই সমস্যা নেই</strong> — সেখানে একটি datagram মানেই একটি সম্পূর্ণ message (Ch 23)।</p>
+  </div>
+
+  <h2>4.5 Bandwidth-এর একক নিয়ে সতর্কতা</h2>
+  <p>Networking-এ প্রায় সব কিছু <strong>bit</strong>-এ মাপা হয়, কিন্তু file-এর আকার <strong>byte</strong>-এ। এটি ধারাবাহিক বিভ্রান্তির উৎস।</p>
+
+  <div class="cb diagram"><pre>100 Mbps  =  100 megabits per second       ← ISP এভাবে বিজ্ঞাপন দেয়
+          =  100 / 8 = 12.5 MB/s           ← download manager এভাবে দেখায়
+
+তাই "100 Mbps" line-এ 1 GB file নামাতে:
+    1024 MB ÷ 12.5 MB/s ≈ 82 সেকেন্ড (তাত্ত্বিক সর্বোচ্চ)
+
+বাস্তবে protocol overhead-এর কারণে ~90-94% পাওয়া যায় → ~90 সেকেন্ড</pre></div>
+
+  <p>লিখিত রূপে পার্থক্যটি ছোট হাতের/বড় হাতের 'b'-তে: <strong>Mb</strong> = megabit, <strong>MB</strong> = megabyte। <code>Mbps</code> vs <code>MB/s</code> — আট গুণ পার্থক্য।</p>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 4 — Frame-এর আকার নিজে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একই application data ভিন্ন ভিন্ন আকারের frame তৈরি করে, এবং header overhead বাস্তবে কতটা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># ছোট packet: ICMP ping, 1 byte payload
+ping -c 1 -s 1 1.1.1.1
+
+# বড় packet: 1400 bytes payload
+ping -c 1 -s 1400 1.1.1.1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> ping output বলে <code>9 bytes from ...</code> এবং <code>1408 bytes from ...</code>। খেয়াল করুন: আপনি <code>-s 1</code> দিলেন, ping দেখাল ৯ bytes — কারণ ৮ bytes ICMP header যুক্ত হয়েছে। আর এই ৯ bytes-এর সাথে ২০ bytes IP header এবং ১৪+৪ bytes Ethernet যুক্ত হয়ে তারে যাচ্ছে ~৪৭ bytes (padding সহ ৬৪)। <strong>১ byte পাঠাতে ৬৪ bytes।</strong></p>
+    <p><strong>আমরা কী শিখলাম:</strong> Header overhead কোনো তাত্ত্বিক ব্যাপার নয় — ছোট payload-এ এটি data-র চেয়ে বহু গুণ বড়। বড় payload-এ overhead-এর অনুপাত নগণ্য (1400-এ ~4%)। এটিই MTU-এর গুরুত্বের ভিত্তি, যা পরের chapter-এর বিষয়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>একই data-এর পাঁচটি নাম কারণ পাঁচটি layer — নামটি বলে দেয় কোন header গুলো যুক্ত।</li>
+      <li>Bit → Byte → Segment (L4) → Packet (L3) → Frame (L2) → Bits (L1)।</li>
+      <li>"Datagram" মানে স্বয়ংসম্পূর্ণ ও অনিশ্চিত একক — UDP এবং IP দুই জায়গাতেই ব্যবহৃত।</li>
+      <li><strong>TCP একটি byte stream</strong> — এক <code>write()</code> ≠ এক <code>read()</code>। Message framing application-এর দায়িত্ব।</li>
+      <li>Bandwidth bit-এ (Mbps), file byte-এ (MB) — ৮ গুণ পার্থক্য।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একই HTTP request-কে কখন packet এবং কখন frame বলা উচিত?</summary>
+    <div class="ans"><p>IP header যুক্ত হওয়ার পর এবং Ethernet header যুক্ত হওয়ার আগে সেটি <strong>packet</strong>। Ethernet header ও FCS যুক্ত হওয়ার পর সেটি <strong>frame</strong>। অর্থাৎ frame হলো packet-এর মোড়ক। Router-এর সিদ্ধান্ত নিয়ে কথা বললে "packet", cable/switch/NIC নিয়ে কথা বললে "frame"।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার server তিনবার <code>write()</code> করল। Client কি ঠিক তিনবার <code>read()</code>-এ সেই তিনটি অংশ পাবে?</summary>
+    <div class="ans"><p>না — এটি TCP-তে সম্পূর্ণ অনিশ্চিত। TCP byte stream; kernel আপনার write গুলো জোড়া লাগাতে বা ভাগ করতে পারে। Client এক read()-এ তিনটাই পেতে পারে, বা পাঁচ read()-এ ভাঙা অবস্থায় পেতে পারে। তাই application-কে নিজেই message-এর সীমানা নির্ধারণ করতে হয় (length prefix, delimiter, বা <code>Content-Length</code>)।</p></div>
+  </details>
+  <details class="qa"><summary>একটি 50 Mbps connection-এ 500 MB file নামাতে তাত্ত্বিকভাবে কত সময় লাগে?</summary>
+    <div class="ans"><p>50 Mbps = 50/8 = 6.25 MB/s। 500 MB ÷ 6.25 MB/s = <strong>80 সেকেন্ড</strong>। বাস্তবে protocol overhead ও TCP-এর ramp-up-এর কারণে কিছুটা বেশি — সাধারণত ৮৫–৯৫ সেকেন্ড।</p></div>
+  </details>
+  <details class="qa"><summary>কেন UDP-তে message framing-এর সমস্যা নেই?</summary>
+    <div class="ans"><p>কারণ UDP <em>datagram</em>-ভিত্তিক, stream নয়। আপনি একটি <code>sendto()</code>-তে যত bytes দেবেন, receiver ঠিক একটি <code>recvfrom()</code>-এ সেই পুরো datagram-টিই পাবে (বা কিছুই পাবে না — কারণ datagram হারাতে পারে)। সীমানা সংরক্ষিত থাকে। বিনিময়ে আপনি reliability হারান।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch3"><div class="d">পূর্ববর্তী</div><div class="t">Ch 3 — Network Layers</div></a>
+    <a class="nx" href="#ch5"><div class="d">পরবর্তী</div><div class="t">Ch 5 — MTU and Packet Size</div></a>
+  </div>
+</section>

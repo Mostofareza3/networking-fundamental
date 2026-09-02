@@ -1,0 +1,261 @@
+<section class="chapter" id="ch13">
+  <div class="ch-eyebrow">Chapter 13</div>
+  <h1>Packet Journey — একটি packet-এর পুরো যাত্রা</h1>
+  <p class="ch-lede">এটি Part 5-এর সবচেয়ে গুরুত্বপূর্ণ chapter। এখানে আমরা একটি packet-কে প্রতিটি hop-এ থামিয়ে দেখব — ঠিক কোন field বদলাল, কোনটি অপরিবর্তিত থাকল, এবং কেন। এই একটি ছবি পরিষ্কার হলে networking-এর অর্ধেক বিভ্রান্তি দূর হয়ে যায়।</p>
+
+  <h2>13.1 দৃশ্যপট</h2>
+  <p>একটি host তিনটি router পেরিয়ে একটি server-এ packet পাঠাচ্ছে। আসুন প্রতিটি যন্ত্রের পরিচয় ঠিক করে নিই:</p>
+
+  <div class="cb diagram"><pre>┌──────────┐   ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐
+│   HOST   │───│   R1   │───│   R2   │───│   R3   │───│ SERVER │
+│          │   │        │   │        │   │        │   │        │
+│192.168.1.5   │.1  10.1.0.1  .2  10.2.0.1  .2  203.0.113.1  .50│
+│ MAC AA   │   │MAC B1/B2   │MAC C1/C2   │MAC D1/D2   │MAC EE  │
+└──────────┘   └────────┘   └────────┘   └────────┘   └────────┘
+   LAN 1          LINK 1       LINK 2       LINK 3      LAN 2
+192.168.1.0/24  10.1.0.0/30 10.2.0.0/30  203.0.113.0/24
+
+লক্ষ্য করুন: প্রতিটি router-এর দুটি করে interface, দুটি করে MAC,
+দুটি করে IP — কারণ সে দুটি ভিন্ন network-এ একই সাথে আছে।
+
+গন্তব্য: 203.0.113.50 (SERVER)</pre></div>
+
+  <h2>13.2 Hop by hop — কী বদলায়</h2>
+  <p>নিচের stepper-এ প্রতিটি hop-এ packet-এর অবস্থা দেখুন। বিশেষ মনোযোগ দিন কোন লাইনগুলো বদলাচ্ছে।</p>
+
+  <div class="stepper" data-steps="5" id="st-journey">
+    <div class="sp-head"><strong>একটি packet-এর যাত্রা</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+
+      <div class="sp-step" data-i="0">
+        <h4>Hop 0 — HOST থেকে বেরোচ্ছে</h4>
+        <p>Host-এর সিদ্ধান্ত: <code>203.0.113.50</code> কি <code>192.168.1.0/24</code>-এ? না। তাই default gateway (<code>192.168.1.1</code> = R1) কে দিতে হবে। ARP করে R1-এর MAC (<code>B1</code>) বের করল।</p>
+        <div class="cb diagram"><pre>┌─── ETHERNET (LAN 1) ────────────────────┐
+│ dst MAC : B1        ← R1-এর MAC          │  ★ বদলাবে
+│ src MAC : AA        ← আমার MAC           │  ★ বদলাবে
+├─── IP ──────────────────────────────────┤
+│ src IP  : 192.168.1.5                   │  ✓ কখনো বদলাবে না
+│ dst IP  : 203.0.113.50                  │  ✓ কখনো বদলাবে না
+│ TTL     : 64                            │  ↓ প্রতি hop-এ কমবে
+├─── TCP ─────────────────────────────────┤
+│ src port: 51234   dst port: 443         │  ✓ কখনো বদলাবে না
+├─── DATA ────────────────────────────────┤
+│ "GET /api/users ..."                    │  ✓ কখনো বদলাবে না
+└─────────────────────────────────────────┘</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="1">
+        <h4>Hop 1 — R1 → R2</h4>
+        <p>R1 frame পেল, dst MAC নিজের বলে গ্রহণ করল। Ethernet header ফেলে দিল। Routing table-এ <code>203.0.113.0/24 via 10.1.0.2</code> পেল। TTL কমাল। নতুন frame বানাল।</p>
+        <div class="cb diagram"><pre>┌─── ETHERNET (LINK 1) ───────────────────┐
+│ dst MAC : C1        ← R2-এর MAC   ★নতুন │
+│ src MAC : B2        ← R1-এর MAC   ★নতুন │
+├─── IP ──────────────────────────────────┤
+│ src IP  : 192.168.1.5           ✓ একই   │
+│ dst IP  : 203.0.113.50          ✓ একই   │
+│ TTL     : 63                    ↓ 64→63 │
+├─── TCP ─────────────────────────────────┤
+│ src port: 51234   dst port: 443  ✓ একই  │
+├─── DATA ────────────────────────────────┤
+│ "GET /api/users ..."            ✓ একই   │
+└─────────────────────────────────────────┘
+
+R1 TCP header বা data ছুঁয়েও দেখেনি —
+তার কাছে ওগুলো নিছক bytes।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="2">
+        <h4>Hop 2 — R2 → R3</h4>
+        <p>একই প্রক্রিয়ার পুনরাবৃত্তি। লক্ষ্য করুন — R2-এর সিদ্ধান্ত সম্পূর্ণ স্বাধীন। সে জানে না packet টি R1 থেকে এসেছে, জানে না আগে কোন পথে গেছে। শুধু dst IP দেখে নিজের table-এ lookup করল।</p>
+        <div class="cb diagram"><pre>┌─── ETHERNET (LINK 2) ───────────────────┐
+│ dst MAC : D1        ← R3-এর MAC   ★নতুন │
+│ src MAC : C2        ← R2-এর MAC   ★নতুন │
+├─── IP ──────────────────────────────────┤
+│ src IP  : 192.168.1.5           ✓ একই   │
+│ dst IP  : 203.0.113.50          ✓ একই   │
+│ TTL     : 62                    ↓ 63→62 │
+└─────────────────────────────────────────┘</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="3">
+        <h4>Hop 3 — R3 → SERVER (শেষ hop)</h4>
+        <p>এখানে একটি গুরুত্বপূর্ণ পার্থক্য: R3 দেখল <code>203.0.113.0/24</code> তার <em>নিজেরই</em> সরাসরি সংযুক্ত network। তাই এবার সে আর কোনো router-কে দেবে না — সরাসরি server-কে দেবে। এজন্য তার server-এর MAC দরকার, তাই সে ARP করল: <em>"203.0.113.50 কার?"</em></p>
+        <div class="cb diagram"><pre>┌─── ETHERNET (LAN 2) ────────────────────┐
+│ dst MAC : EE     ← SERVER-এর MAC  ★নতুন │
+│ src MAC : D2     ← R3-এর MAC      ★নতুন │
+├─── IP ──────────────────────────────────┤
+│ src IP  : 192.168.1.5           ✓ একই   │
+│ dst IP  : 203.0.113.50          ✓ একই   │
+│ TTL     : 61                    ↓ 62→61 │
+├─── TCP ─────────────────────────────────┤
+│ src port: 51234   dst port: 443  ✓ একই  │
+├─── DATA ────────────────────────────────┤
+│ "GET /api/users ..."            ✓ একই   │
+└─────────────────────────────────────────┘
+
+এই পুরো যাত্রায় Ethernet header লেখা হলো ৪ বার।
+IP address বদলাল ০ বার।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="4">
+        <h4>গন্তব্য — Server-এর ভেতরে</h4>
+        <div class="cb diagram"><pre>SERVER-এর NIC frame পেল
+    │
+    ├─ dst MAC == EE == আমার? ✓ গ্রহণ করো
+    ├─ FCS ঠিক আছে? ✓
+    ├─ Ethernet header ফেলে দাও
+    ▼
+IP layer
+    ├─ dst IP == 203.0.113.50 == আমার? ✓
+    ├─ header checksum ঠিক? ✓
+    ├─ protocol = 6 → TCP layer-কে দাও
+    ├─ IP header ফেলে দাও
+    ▼
+TCP layer
+    ├─ dst port 443 → কোন socket?
+    ├─ (src IP, src port, dst IP, dst port)
+    │   এই ৪-টুপল দিয়ে socket খুঁজে বের করো
+    ├─ sequence number দেখে ঠিক জায়গায় বসাও
+    ├─ ACK পাঠানোর জন্য নোট রাখো
+    ├─ TCP header ফেলে দাও
+    ▼
+Socket receive buffer
+    ▼
+nginx process-এর read() এই bytes পায়:
+    "GET /api/users ..."</pre></div>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <h2>13.3 সারসংক্ষেপ টেবিল — কী বদলায়, কী বদলায় না</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Field</th><th>Layer</th><th>প্রতি hop-এ</th><th>কেন</th></tr></thead>
+    <tbody>
+      <tr><td>Destination MAC</td><td>2</td><td><strong>বদলায়</strong></td><td>পরের hop-এর যন্ত্রকে নির্দেশ করে — hop-local</td></tr>
+      <tr><td>Source MAC</td><td>2</td><td><strong>বদলায়</strong></td><td>বর্তমান পাঠানো interface-এর MAC</td></tr>
+      <tr><td>Destination IP</td><td>3</td><td>অপরিবর্তিত</td><td>চূড়ান্ত গন্তব্য — end-to-end</td></tr>
+      <tr><td>Source IP</td><td>3</td><td>অপরিবর্তিত</td><td>মূল উৎস — উত্তর ফেরত পাঠাতে দরকার</td></tr>
+      <tr><td>TTL</td><td>3</td><td><strong>১ কমে</strong></td><td>অসীম loop থেকে রক্ষা</td></tr>
+      <tr><td>IP checksum</td><td>3</td><td><strong>পুনর্গণিত</strong></td><td>TTL বদলেছে বলে</td></tr>
+      <tr><td>TCP header</td><td>4</td><td>অপরিবর্তিত</td><td>router L4 পড়েই না</td></tr>
+      <tr><td>Payload</td><td>7</td><td>অপরিবর্তিত</td><td>router-এর কাছে অস্বচ্ছ bytes</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box model">
+    <div class="bt">🧠 এক বাক্যে পুরো chapter</div>
+    <p style="font-size:1.05rem"><strong>Layer 2 (MAC) হলো "পরের যন্ত্র"; Layer 3 (IP) হলো "চূড়ান্ত গন্তব্য"। তাই MAC প্রতি hop-এ নতুন করে লেখা হয়, IP পুরো যাত্রায় অপরিবর্তিত থাকে।</strong></p>
+    <p>এই একটি বাক্য মনে থাকলে "router কি IP বদলায়?", "packet-এ কার MAC থাকে?", "কেন NAT বিশেষ?" — এই সব প্রশ্নের উত্তর আপনি নিজেই বের করতে পারবেন।</p>
+  </div>
+
+  <h2>13.4 TTL — একটি সরল কিন্তু গুরুত্বপূর্ণ প্রহরী</h2>
+  <p><strong>TTL</strong> (Time To Live) IP header-এর একটি ৮-bit সংখ্যা। নাম "time" হলেও এটি আসলে <em>hop</em> গোনে।</p>
+
+  <div class="cb diagram"><pre>কেন দরকার — একটি routing loop কল্পনা করুন:
+
+    R1 ভাবে: "X-এর জন্য R2-কে দাও"
+    R2 ভাবে: "X-এর জন্য R1-কে দাও"
+
+    Packet → R1 → R2 → R1 → R2 → R1 → ... অনন্তকাল
+
+    TTL ছাড়া এই packet চিরকাল ঘুরত এবং
+    ধীরে ধীরে link-টি সম্পূর্ণ ভরে যেত।
+
+TTL থাকায়:
+    64 → 63 → 62 → ... → 1 → 0
+                              ↓
+                    Router packet ফেলে দেয় এবং
+                    sender-কে ICMP "Time Exceeded" পাঠায়
+
+সাধারণ প্রাথমিক TTL:
+    Linux / macOS  : 64
+    Windows        : 128
+    কিছু router     : 255
+
+মজার প্রয়োগ: ping-এর উত্তরে TTL দেখে অনুমান করা যায়
+গন্তব্য কোন OS এবং কত hop দূরে।
+উত্তরে TTL=57 এলে: সম্ভবত শুরু ছিল 64, মানে 7 hop দূরে।</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ TTL-এর সবচেয়ে চতুর ব্যবহার</div>
+    <p>TTL শেষ হলে router ICMP Time Exceeded পাঠায় — <em>এবং সেই ICMP-তে router-এর নিজের IP থাকে</em>। এই একটি আচরণকে কাজে লাগিয়েই <code>traceroute</code> পুরো পথটি আবিষ্কার করে। বিস্তারিত পরের chapter-এ।</p>
+  </div>
+
+  <h2>13.5 NAT থাকলে ছবিটা কীভাবে বদলায়</h2>
+  <p>উপরের ছবিতে আমরা বলেছি "IP কখনো বদলায় না" — এটি সত্য <em>যতক্ষণ NAT নেই</em>। কিন্তু আপনার বাসা থেকে যাওয়া প্রতিটি packet NAT পেরোয়। সংক্ষিপ্ত পূর্বাভাস (বিস্তারিত Ch 34):</p>
+
+  <div class="cb diagram"><pre>বাসার ভেতরে:
+    src IP  : 192.168.1.5     ← private, Internet-এ অচল
+    src port: 51234
+    dst IP  : 203.0.113.50
+
+                    ↓ NAT router (আপনার বাসার বাক্স)
+                      src কে নিজের public IP দিয়ে বদলে দেয়
+
+Internet-এ:
+    src IP  : 103.55.20.7     ★ বদলে গেল!
+    src port: 42001           ★ এটিও বদলাতে পারে
+    dst IP  : 203.0.113.50    ✓ একই
+
+Router একটি table-এ মনে রাখে:
+    103.55.20.7:42001  ↔  192.168.1.5:51234
+
+উত্তর এলে এই table দেখে আবার আসল address বসিয়ে দেয়।</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ NAT layering ভাঙে</div>
+    <p>NAT একটি Layer 3 যন্ত্র হয়েও Layer 4 header (port) বদলায় — এটি layering-এর নীতির লঙ্ঘন। এবং এই লঙ্ঘনেরই মূল্য দিতে হয়: NAT router-কে <strong>state রাখতে হয়</strong> (কোন internal connection কোন external port-এ), যেখানে সাধারণ router সম্পূর্ণ stateless। এই state-ই NAT-এর সব জটিলতার উৎস — কেন বাইরে থেকে ভেতরে connection করা কঠিন, কেন peer-to-peer application-এ NAT traversal দরকার, কেন idle connection মরে যায়।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 13 — TTL কমতে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — প্রতিটি hop বাস্তবেই TTL কমাচ্ছে কিনা, এবং সেই তথ্য থেকে দূরত্বের অনুমান করা যায় কিনা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># বিভিন্ন দূরত্বের গন্তব্যে ping করে ফেরত আসা TTL দেখুন
+ping -c 1 192.168.0.1      # আপনার gateway — TTL 64 (0 hop)
+ping -c 1 1.1.1.1          # কাছাকাছি — TTL 55-60?
+ping -c 1 example.com      # দূরে — TTL আরও কম?
+
+# TTL নিজে নির্ধারণ করে দেখুন কী হয়
+ping -c 1 -t 1 1.1.1.1     # TTL=1 → প্রথম router-ই ফেলে দেবে
+ping -c 1 -t 2 1.1.1.1     # TTL=2 → দ্বিতীয় router</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> Gateway-এর উত্তরে TTL সাধারণত 64 (কোনো router পেরোয়নি)। দূরের গন্তব্যে কম — যেমন 57 মানে ৭টি hop পেরিয়ে এসেছে। আর <code>-t 1</code> দিলে পাবেন <code>Time to live exceeded</code> এবং সেই বার্তা যে পাঠিয়েছে সেই router-এর IP। <code>-t 2</code> দিলে পরের router-এর IP। <strong>এভাবে একটি একটি করে বাড়ালেই পুরো পথ পাওয়া যায় — এটাই traceroute।</strong></p>
+    <p><strong>আমরা কী শিখলাম:</strong> TTL শুধু নিরাপত্তা-প্রহরী নয়, এটি একটি পরিমাপযোগ্য সংকেত। প্রতিটি router সত্যিই এটি কমাচ্ছে, এবং শূন্য হলে সত্যিই নিজের পরিচয় জানিয়ে দিচ্ছে। এই আচরণটিই আমাদের Internet-এর ভেতর দেখার একমাত্র সহজ জানালা।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>প্রতিটি hop-এ Ethernet header সম্পূর্ণ নতুন করে লেখা হয় (দুটি MAC-ই বদলায়)।</li>
+      <li>Source ও Destination IP পুরো যাত্রায় অপরিবর্তিত থাকে (NAT ব্যতিক্রম)।</li>
+      <li>TTL প্রতি hop-এ ১ কমে; শূন্য হলে packet মরে যায় এবং ICMP Time Exceeded ফেরে।</li>
+      <li>Router L4 (TCP/UDP) header বা payload কখনো পড়ে না — তার কাছে সেগুলো অস্বচ্ছ।</li>
+      <li>শেষ router গন্তব্যের জন্য ARP করে — সে-ই প্রথম যে আসল destination MAC জানে।</li>
+      <li><strong>MAC = পরের hop, IP = চূড়ান্ত গন্তব্য</strong> — এটিই routing-এর কেন্দ্রীয় সত্য।</li>
+      <li>NAT এই নিয়ম ভাঙে: সে source IP ও port বদলায় এবং তার জন্য state রাখতে বাধ্য হয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি packet ৭টি router পেরোল। Ethernet header কতবার লেখা হলো?</summary>
+    <div class="ans"><p>৮ বার। মূল host একবার লিখল, তারপর প্রতিটি router নিজের বেরোনোর interface-এ একবার করে (৭ বার)। প্রতিবারই দুটি MAC address সম্পূর্ণ নতুন। IP address লেখা হলো একবার এবং সেটিই টিকে রইল।</p></div>
+  </details>
+  <details class="qa"><summary>শেষ router কেন গন্তব্যের জন্য ARP করে, কিন্তু আগের router-রা করে না?</summary>
+    <div class="ans"><p>কারণ শুধু শেষ router-ই গন্তব্য network-এর সাথে <em>সরাসরি সংযুক্ত</em>। আগের router-দের কাছে গন্তব্য একটি দূরবর্তী prefix — তাদের সিদ্ধান্ত "পরের router-কে দাও", তাই তারা পরের router-এর MAC জানে (ARP বা ইতিমধ্যে cache-এ)। শেষ router-এর routing table বলে "এটি আমার নিজের connected network" — তাই তাকেই সরাসরি host-এর MAC বের করতে হয়।</p></div>
+  </details>
+  <details class="qa"><summary>TTL না থাকলে কী ঘটত?</summary>
+    <div class="ans"><p>Routing loop (ভুল configuration বা protocol convergence-এর সময় সাময়িকভাবে যা হতেই পারে) তৈরি হলে packet চিরকাল দুই router-এর মাঝে ঘুরত। নতুন packet যোগ হতে থাকত, এবং কিছুক্ষণের মধ্যে link গুলো সম্পূর্ণ ভরে গিয়ে সেই অংশের network অচল হয়ে পড়ত। TTL হলো এই ব্যর্থতার বিরুদ্ধে একটি সরল, স্বয়ংক্রিয় নিরাপত্তা-বেষ্টনী।</p></div>
+  </details>
+  <details class="qa"><summary>একটি ping-এর উত্তরে TTL=57 এলে গন্তব্য সম্পর্কে কী অনুমান করা যায়?</summary>
+    <div class="ans"><p>সম্ভবত গন্তব্যের প্রাথমিক TTL ছিল 64 (Linux/macOS/BSD-র সাধারণ মান), তাই 64 − 57 = <strong>৭টি router</strong> পেরিয়ে উত্তর এসেছে। যদি প্রাথমিক মান 128 হতো (Windows), তাহলে ৭১ hop — যা অস্বাভাবিক, তাই 64-ই সম্ভাব্য। এটি একটি অনুমান, প্রমাণ নয় — কিছু system ভিন্ন প্রাথমিক TTL ব্যবহার করে।</p></div>
+  </details>
+  <details class="qa"><summary>NAT কেন সাধারণ router-এর চেয়ে জটিল?</summary>
+    <div class="ans"><p>সাধারণ router <strong>stateless</strong> — প্রতিটি packet স্বাধীনভাবে বিচার করে, কিছু মনে রাখে না। NAT-কে <strong>state রাখতেই হয়</strong>: কোন internal (IP, port) কোন external port-এ mapped, সেই mapping কতক্ষণ বাঁচবে, উত্তর এলে কাকে দিতে হবে। এই state memory খায়, timeout-এ মুছে যায় (ফলে idle connection মরে), এবং বাইরে থেকে ভেতরে সংযোগ শুরু করা অসম্ভব করে তোলে (কারণ mapping-টি তখনো তৈরিই হয়নি)।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch12"><div class="d">পূর্ববর্তী</div><div class="t">Ch 12 — What Is Routing?</div></a>
+    <a class="nx" href="#ch14"><div class="d">পরবর্তী</div><div class="t">Ch 14 — ICMP</div></a>
+  </div>
+</section>

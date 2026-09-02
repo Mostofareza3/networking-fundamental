@@ -1,0 +1,205 @@
+<section class="chapter" id="ch18">
+  <div class="ch-eyebrow">Chapter 18</div>
+  <h1>TCP Three-Way Handshake</h1>
+  <p class="ch-lede">তিনটি packet — এবং তার পরেই দুটি machine "connected"। কিন্তু connection বলে বাস্তবে কিছু নেই; তার-এ কোনো circuit তৈরি হয় না। তাহলে এই তিনটি packet ঠিক কী প্রতিষ্ঠা করে?</p>
+
+  <h2>18.1 Why three packets?</h2>
+  <p>প্রশ্নটা যুক্তিসঙ্গত: একটি "connect করো" packet আর একটি "ঠিক আছে" packet — দুটোই কি যথেষ্ট নয়?</p>
+
+  <div class="box why">
+    <div class="bt">💡 কেন দুটি যথেষ্ট নয়</div>
+    <p>Handshake-এর মূল উদ্দেশ্য দুটি জিনিস প্রতিষ্ঠা করা, <strong>দুই দিকেই</strong>:</p>
+    <ol>
+      <li>উভয় পক্ষ নিশ্চিত হয়েছে যে অপর পক্ষ বেঁচে আছে ও প্রস্তুত।</li>
+      <li>উভয় পক্ষ অপরের <em>Initial Sequence Number</em> জেনেছে।</li>
+    </ol>
+    <p>দুটি packet-এ শুধু client-এর ISN server-এর কাছে পৌঁছাত এবং client জানত server সাড়া দিয়েছে। কিন্তু <strong>server জানত না যে তার নিজের ISN client পেয়েছে</strong>। তৃতীয় packet (ACK) ঠিক সেই ফাঁকটি পূরণ করে।</p>
+    <p>এটি computer science-এর একটি সাধারণ সমস্যা — <em>mutual agreement</em> প্রতিষ্ঠা করতে ন্যূনতম তিনটি বার্তা লাগে (দুটি স্বাধীন one-way তথ্য + একটি নিশ্চিতকরণ)।</p>
+  </div>
+
+  <h2>18.2 তিনটি ধাপ</h2>
+
+  <div class="cb diagram"><pre>   CLIENT                                      SERVER
+      │                                           │
+      │                                    (LISTEN অবস্থায়)
+      │                                           │
+   ┌──┴────────────────────────────────────────┐  │
+   │ ধাপ ১ — SYN                                │  │
+   │   SYN=1                                   │  │
+   │   seq = 1000  (client-এর random ISN)       │  │
+   │   window = 64240                          │  │
+   │   options: MSS=1460, SACK ok, wscale=7    │  │
+   └──┬────────────────────────────────────────┘  │
+      ├──────────────────────────────────────────▶│
+      │                                           │
+  SYN_SENT                                   SYN_RCVD
+      │                                           │
+      │  ┌────────────────────────────────────────┴──┐
+      │  │ ধাপ ২ — SYN + ACK                          │
+      │  │   SYN=1, ACK=1                            │
+      │  │   seq = 5000  (server-এর নিজস্ব random ISN)│
+      │  │   ack = 1001  ("তোমার 1000 পেয়েছি")        │
+      │  │   window = 65535                          │
+      │  │   options: MSS=1460, SACK ok, wscale=7    │
+      │  └────────────────────────────────────────┬──┘
+      │◀──────────────────────────────────────────┤
+      │                                           │
+      │                                           │
+   ┌──┴────────────────────────────────────────┐  │
+   │ ধাপ ৩ — ACK                                │  │
+   │   ACK=1                                   │  │
+   │   seq = 1001                              │  │
+   │   ack = 5001  ("তোমার 5000 পেয়েছি")        │  │
+   └──┬────────────────────────────────────────┘  │
+      ├──────────────────────────────────────────▶│
+      │                                           │
+ ESTABLISHED                                 ESTABLISHED
+      │                                           │
+      │ ────── এখন data পাঠানো যাবে ──────▶        │</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ লক্ষণীয় খুঁটিনাটি</div>
+    <ul>
+      <li><strong>ISN দুটি স্বাধীন</strong> — client 1000, server 5000। দুই দিকের byte stream সম্পূর্ণ আলাদাভাবে গোনা হয়। TCP full-duplex, তাই দুটি স্বাধীন stream।</li>
+      <li><strong>SYN নিজেই একটি sequence number খায়</strong> — এজন্যই ack 1000-এর বদলে 1001। FIN-ও একইভাবে একটি খায়।</li>
+      <li><strong>Options এখানেই আলোচিত হয়</strong> — MSS, window scaling, SACK, timestamp। Handshake-এর পরে এগুলো বদলানো যায় না।</li>
+      <li><strong>তৃতীয় packet-এর সাথে data পাঠানো যায়</strong> — অনেক implementation ACK-এর সাথেই প্রথম request জুড়ে দেয় (piggyback)।</li>
+    </ul>
+  </div>
+
+  <h2>18.3 Handshake-এর প্রকৃত মূল্য — RTT</h2>
+
+  <div class="cb diagram"><pre>Data পাঠানোর আগেই ব্যয় হয় ১ RTT:
+
+  Client                          Server
+    │──── SYN ───────────────────▶│   0.5 RTT
+    │◀─── SYN-ACK ────────────────│   1.0 RTT
+    │──── ACK + প্রথম request ────▶│   1.5 RTT
+                                       ↑
+                     এখানেই প্রথম byte data পৌঁছাল
+
+Dhaka → Singapore, RTT ≈ 60ms:
+    TCP handshake            : 60ms
+    + TLS 1.3 handshake      : 60ms
+    + HTTP request/response  : 60ms
+    ────────────────────────────────
+    প্রথম byte পেতে           : ~180ms
+    (এখনো কোনো প্রকৃত content আসেনি!)
+
+এজন্যই connection reuse (keep-alive) এত গুরুত্বপূর্ণ —
+পরের request-গুলোতে শুধু ৬০ms লাগে, ১৮০ নয়।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <p>এই হিসাবটিই ব্যাখ্যা করে কেন:</p>
+    <ul>
+      <li><strong>HTTP keep-alive এত গুরুত্বপূর্ণ</strong> — একই connection পুনর্ব্যবহার করলে handshake-এর খরচ একবারই।</li>
+      <li><strong>Connection pool দরকার</strong> — database driver-এ প্রতিটি query-র জন্য নতুন connection মানে প্রতিবার handshake।</li>
+      <li><strong>CDN latency কমায়</strong> — handshake কাছের edge-এর সাথে হয়, ৬০ms-এর বদলে ৫ms (Ch 46)।</li>
+      <li><strong>QUIC তৈরি হয়েছে</strong> — সে transport ও crypto handshake একসাথে করে, ফলে ১ RTT (বা পুনঃসংযোগে ০ RTT) সাশ্রয় (Ch 45)।</li>
+    </ul>
+    <p>একটি সাধারণ ভুল: microservice-এ প্রতিটি internal call-এ নতুন TCP connection খোলা। ১০০০ call = ১০০০ handshake = অপ্রয়োজনীয় সেকেন্ডের পর সেকেন্ড।</p>
+  </div>
+
+  <h2>18.4 Backlog Queue — connection যেখানে অপেক্ষা করে</h2>
+
+  <div class="cb diagram"><pre>Kernel দুটি queue রাখে:
+
+  ┌──────────────────────────────────────────┐
+  │ SYN queue (incomplete)                   │
+  │   SYN এসেছে, SYN-ACK পাঠানো হয়েছে,       │
+  │   তৃতীয় ACK-এর অপেক্ষা                   │
+  │   → net.ipv4.tcp_max_syn_backlog          │
+  └──────────────┬───────────────────────────┘
+                 │ ACK এল
+                 ▼
+  ┌──────────────────────────────────────────┐
+  │ Accept queue (complete)                  │
+  │   Handshake সম্পূর্ণ, ESTABLISHED,        │
+  │   application-এর accept() কল-এর অপেক্ষা   │
+  │   → listen(fd, backlog)-এর backlog        │
+  └──────────────┬───────────────────────────┘
+                 │ accept() call করল
+                 ▼
+           Application-এর হাতে
+
+Accept queue ভরে গেলে:
+  নতুন সম্পূর্ণ হওয়া connection ফেলে দেওয়া হয় (নীরবে)
+  → client retry করে → দেরি → শেষে timeout</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ একটি বাস্তব উৎপাদন-সমস্যা</div>
+    <p>আপনার server "ধীর" মনে হচ্ছে, কিন্তু CPU ৩০%, memory ঠিক আছে। সম্ভাব্য কারণ: application <code>accept()</code> যথেষ্ট দ্রুত করছে না (হয়তো প্রতিটি request synchronously handle করছে), ফলে accept queue ভরে যাচ্ছে এবং connection নীরবে ফেলে দেওয়া হচ্ছে।</p>
+    <p>যাচাই: <code>ss -lnt</code>-এ <code>Send-Q</code> হলো backlog-এর সর্বোচ্চ, <code>Recv-Q</code> হলো বর্তমানে queue-তে অপেক্ষমাণ সংখ্যা। <code>Recv-Q</code> ধারাবাহিকভাবে <code>Send-Q</code>-র কাছাকাছি থাকলে সমস্যা এখানেই। <code>netstat -s | grep -i listen</code> দিয়ে overflow-এর গণনাও দেখা যায়।</p>
+  </div>
+
+  <h2>18.5 SYN Flood এবং SYN Cookie</h2>
+  <p>Handshake-এর একটি জন্মগত দুর্বলতা: <strong>server-কে SYN পাওয়ামাত্রই state রাখতে হয়</strong>, তৃতীয় packet আসার আগেই।</p>
+
+  <div class="cb diagram"><pre>আক্রমণ:
+  Attacker হাজার হাজার SYN পাঠায়, ভুয়া source IP দিয়ে
+    → Server প্রতিটির জন্য SYN queue-তে state রাখে
+    → SYN-ACK পাঠায় (যা কোথাও পৌঁছায় না)
+    → তৃতীয় ACK কখনো আসে না
+    → SYN queue ভরে যায়
+    → প্রকৃত ব্যবহারকারীরা connect করতে পারে না
+
+প্রতিকার — SYN Cookie:
+  Server SYN queue-তে কিছু রাখে না। বরং সে
+  ISN-এর ভেতরেই connection-এর তথ্য cryptographically
+  encode করে দেয়।
+    → তৃতীয় ACK এলে সেই ack number থেকেই সব তথ্য
+      পুনরুদ্ধার করা যায়
+    → কোনো state নেই, তাই ভরে যাওয়ারও কিছু নেই
+
+Linux-এ: net.ipv4.tcp_syncookies = 1 (সাধারণত default)
+শুধু queue ভরে গেলেই সক্রিয় হয়।</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 18 — Handshake নিজের চোখে</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — তিনটি packet, তাদের flag, এবং sequence number-এর প্রকৃত বিনিময়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Terminal 1 — শুধু handshake-এর packet গুলো ধরুন
+sudo tcpdump -i any -n 'tcp[tcpflags] &amp; (tcp-syn|tcp-ack) != 0 and port 80' -c 6
+
+# Terminal 2
+curl -s http://example.com > /dev/null
+
+# handshake-এর সময় আলাদা করে দেখুন
+curl -w "DNS:      %{time_namelookup}s\nTCP:      %{time_connect}s\nTLS:      %{time_appconnect}s\nফার্স্ট বাইট: %{time_starttransfer}s\nমোট:      %{time_total}s\n" \
+     -o /dev/null -s https://example.com</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> tcpdump-এ পরপর <code>Flags [S]</code>, <code>Flags [S.]</code> (SYN-ACK), <code>Flags [.]</code> (ACK) — ঠিক তিনটি। প্রতিটির পাশে <code>seq</code> এবং <code>ack</code> সংখ্যা। curl-এর timing-এ <code>time_connect</code> হলো ঠিক এই handshake-এর সময় (এক RTT), আর <code>time_appconnect − time_connect</code> হলো TLS-এর সময়।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Connection" একটি বিমূর্ত ধারণা যা তিনটি প্রকৃত packet দিয়ে প্রতিষ্ঠিত হয়, এবং তার একটি পরিমাপযোগ্য মূল্য আছে — এক RTT। curl-এর timing breakdown ব্যবহার করে আপনি যেকোনো ধীর request-এ ঠিক কোন ধাপে সময় যাচ্ছে তা আলাদা করতে পারবেন।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Three-way handshake দুটি জিনিস প্রতিষ্ঠা করে <em>দুই দিকেই</em>: অপর পক্ষ সচল, এবং অপর পক্ষের ISN।</li>
+      <li>SYN → SYN-ACK → ACK। প্রতিটি পক্ষের নিজস্ব random ISN।</li>
+      <li>SYN নিজেই একটি sequence number ব্যয় করে (তাই ack = seq + 1)।</li>
+      <li>MSS, window scale, SACK — সব option handshake-এই আলোচিত হয়, পরে নয়।</li>
+      <li>খরচ: <strong>১ RTT</strong>, data পাঠানোর আগেই। TLS যোগ হলে আরও।</li>
+      <li>Kernel-এ দুটি queue: SYN queue (অসম্পূর্ণ) ও accept queue (সম্পূর্ণ, <code>accept()</code>-এর অপেক্ষায়)।</li>
+      <li>SYN flood আক্রমণ SYN queue ভরিয়ে দেয়; SYN cookie state ছাড়াই এটি প্রতিহত করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>দুটি packet-এর handshake কেন যথেষ্ট নয়?</summary>
+    <div class="ans"><p>দুটি packet-এ (SYN, SYN-ACK) client নিশ্চিত হয় যে server তার ISN পেয়েছে এবং সাড়া দিয়েছে। কিন্তু <strong>server নিশ্চিত হয় না যে তার নিজের ISN client পেয়েছে</strong> — SYN-ACK পথে হারিয়ে যেতে পারত। তৃতীয় ACK সেই নিশ্চিতকরণটি দেয়। উভয় দিকের sequence number প্রতিষ্ঠা করতে ন্যূনতম তিনটি বার্তা লাগে।</p></div>
+  </details>
+  <details class="qa"><summary>ISN random হওয়া কেন জরুরি?</summary>
+    <div class="ans"><p>দুটি কারণ। (১) <strong>পুরনো packet:</strong> একই 4-tuple-এর আগের কোনো connection-এর দেরিতে পৌঁছানো packet যেন নতুন connection-এ বৈধ হিসেবে গৃহীত না হয়। (২) <strong>নিরাপত্তা:</strong> ISN অনুমানযোগ্য হলে আক্রমণকারী সঠিক sequence number সহ নকল packet ঢুকিয়ে connection-এ data inject করতে বা reset করতে পারত।</p></div>
+  </details>
+  <details class="qa"><summary>Dhaka থেকে একটি US server-এ (RTT 250ms) একটি HTTPS request-এ ন্যূনতম কত সময় লাগবে?</summary>
+    <div class="ans"><p>আনুমানিক: DNS (যদি cache-এ না থাকে) ~250ms + TCP handshake 250ms + TLS 1.3 handshake 250ms + request/response 250ms = <strong>প্রায় ১ সেকেন্ড</strong> — কোনো server processing time ছাড়াই, শুধু আলোর গতি ও protocol-এর round trip-এর কারণে। এটিই CDN, connection reuse এবং QUIC-এর অস্তিত্বের যুক্তি।</p></div>
+  </details>
+  <details class="qa"><summary>Accept queue ভরে গেলে কী হয় এবং client কী দেখে?</summary>
+    <div class="ans"><p>Kernel সম্পূর্ণ handshake হওয়া নতুন connection নীরবে ফেলে দেয় (বা কিছু ক্ষেত্রে RST পাঠায়)। Client-এর দিকে এটি দেখায় দীর্ঘ বিলম্ব হিসেবে (retry-এর পর retry), অবশেষে timeout বা connection reset। CPU ও memory স্বাভাবিক থাকায় এই সমস্যা নির্ণয় করা কঠিন — <code>ss -lnt</code>-এর <code>Recv-Q</code> দেখাই সবচেয়ে সরাসরি উপায়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch17"><div class="d">পূর্ববর্তী</div><div class="t">Ch 17 — TCP</div></a>
+    <a class="nx" href="#ch19"><div class="d">পরবর্তী</div><div class="t">Ch 19 — TCP Data Transfer</div></a>
+  </div>
+</section>

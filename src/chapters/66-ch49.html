@@ -1,0 +1,163 @@
+<section class="chapter" id="ch49">
+  <div class="ch-eyebrow">Chapter 49</div>
+  <h1>১৫টি প্রশ্ন, ১৫টি mental model</h1>
+  <p class="ch-lede">প্রতিটি প্রশ্নের উত্তর দুই স্তরে — <strong>ধারণাগত</strong> (কেন এমন) এবং <strong>ব্যবহারিক</strong> (কী করবেন)। উত্তর দেখার আগে নিজে ভেবে দেখুন — আপনি সম্ভবত এখন বেশিরভাগেরই উত্তর জানেন।</p>
+
+  <details class="qa"><summary>১. <code>localhost</code> কাজ করে কেন? কোনো network hardware ছাড়াই?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> <code>localhost</code> resolve হয় <code>127.0.0.1</code>-এ, যা loopback interface-এর address। Kernel-এ একটি বিশেষ নিয়ম আছে: এই address-এর packet কখনো কোনো physical NIC-এ যায় না — সেগুলো network stack-এর নিচে গিয়ে সঙ্গে সঙ্গে ফিরে আসে, শুধু memory copy হিসেবে।</p>
+      <p>তবু পুরো stack চলে: TCP handshake হয়, sequence number কাজ করে, port-ভিত্তিক demultiplexing হয়। শুধু physical layer অনুপস্থিত।</p>
+      <p><strong>ব্যবহারিক:</strong> এজন্যই loopback-এর MTU ৬৫৫৩৬ (কোনো physical সীমা নেই) এবং latency ~০.০৫ms। এজন্যই network তার খুলে ফেললেও <code>curl localhost</code> কাজ করে। আরও দ্রুত local IPC-র জন্য Unix domain socket (<code>AF_UNIX</code>) ব্যবহার করা যায় — সেখানে TCP/IP stack-ও বাদ পড়ে।</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>২. <code>0.0.0.0</code> এবং <code>127.0.0.1</code> আলাদা কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> <code>127.0.0.1</code> একটি প্রকৃত address — loopback interface-এর। <code>0.0.0.0</code> কোনো address নয়, এটি একটি <em>wildcard</em>। <code>bind()</code>-এ এর মানে "এই machine-এর সব interface-এ শোনো"; routing table-এ এর মানে "যেকোনো গন্তব্য"।</p>
+      <p><strong>ব্যবহারিক:</strong> <code>127.0.0.1</code>-এ bind করা = "শুধু এই machine থেকে পৌঁছানো যাবে" — database, admin panel, internal service-এর জন্য সঠিক। <code>0.0.0.0</code> = "যেকোনো interface থেকে" — public service-এর জন্য প্রয়োজনীয়, কিন্তু firewall ছাড়া বিপজ্জনক। Docker container-এ প্রায় সবসময় <code>0.0.0.0</code> লাগে, কারণ port forwarding bridge interface-এ আসে। → Ch 9</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৩. <code>localhost:3000</code> কাজ করে কিন্তু ফোন থেকে করে না — কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> Server শুধু loopback interface-এ শুনছে। ফোনের packet Wi-Fi interface-এ পৌঁছায়, কিন্তু সেখানে ওই port-এ কোনো listener নেই — তাই kernel একটি TCP RST পাঠায়, যা "connection refused" হিসেবে দেখায়।</p>
+      <p><strong>ব্যবহারিক:</strong> ধাপে ধাপে যাচাই — (১) <code>ss -tlnp | grep 3000</code>: <code>0.0.0.0</code> না <code>127.0.0.1</code>? (২) না হলে <code>0.0.0.0</code>-তে bind করুন (Vite-এ <code>--host</code>, Next.js-এ <code>-H 0.0.0.0</code>)। (৩) Firewall (<code>ufw status</code>)। (৪) ফোন ও laptop কি একই network-এ? (কিছু Wi-Fi-তে "client isolation" চালু থাকে যা device-দের মধ্যে যোগাযোগ আটকায়।)</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৪. একটি server-এর port কেন দরকার? IP address যথেষ্ট নয় কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> IP address একটি <em>machine</em>-কে (আরও নির্দিষ্টভাবে একটি interface-কে) চিহ্নিত করে। কিন্তু সেই machine-এ nginx, PostgreSQL, Redis, sshd — সবাই একসাথে চলছে। IP header-এ "কোন process" এই তথ্যটি নেই। Port সেই demultiplexing key সরবরাহ করে।</p>
+      <p><strong>ব্যবহারিক:</strong> একটি service সম্পূর্ণভাবে চিহ্নিত হয় <code>protocol + IP + port</code> দিয়ে। এজন্যই firewall rule-এ শুধু IP নয়, port-ও লাগে; এজন্যই একই machine-এ ১০০টি service চলতে পারে; এবং এজন্যই একটি connection-এর পরিচয় 4-tuple। → Ch 15</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৫. দুটি program একই IP:port-এ listen করতে পারে না কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> Kernel একটি lookup table রাখে যেখানে key হলো (protocol, IP, port) এবং value হলো socket। একটি key-তে দুটি value থাকলে আগত packet কাকে দিতে হবে তা অনির্ধারিত হয়ে পড়ত। তাই দ্বিতীয় <code>bind()</code> ব্যর্থ হয় <code>EADDRINUSE</code> দিয়ে।</p>
+      <p><strong>ব্যবহারিক — কিন্তু কিছু ব্যতিক্রম আছে:</strong> (১) <strong>ভিন্ন protocol</strong> — TCP 53 ও UDP 53 আলাদা namespace। (২) <strong>ভিন্ন IP</strong> — <code>192.168.1.5:80</code> আর <code>10.0.0.5:80</code> সহাবস্থান করতে পারে। (৩) <strong><code>SO_REUSEPORT</code></strong> — একাধিক process ইচ্ছাকৃতভাবে একই port share করে, kernel তাদের মধ্যে load balance করে (nginx-এর multi-worker এভাবেই চলে)। (৪) ভিন্ন network namespace (container)।</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৬. <code>curl</code> কাজ করে কিন্তু browser করে না (বা উল্টো) — কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> দুটি সম্পূর্ণ ভিন্ন client, ভিন্ন নিয়ম মেনে চলে।</p>
+      <p><strong>curl কাজ করে, browser করে না:</strong></p>
+      <ul>
+        <li><strong>CORS</strong> — browser cross-origin request-এ নিরাপত্তা নীতি প্রয়োগ করে; curl করে না। এটি সবচেয়ে সাধারণ কারণ।</li>
+        <li><strong>Mixed content</strong> — HTTPS page থেকে HTTP resource browser আটকায়।</li>
+        <li><strong>Certificate</strong> — browser কঠোর (HSTS, CT, revocation); curl শিথিল।</li>
+        <li><strong>Cookie ও SameSite</strong> নীতি।</li>
+      </ul>
+      <p><strong>Browser কাজ করে, curl করে না:</strong></p>
+      <ul>
+        <li><strong>অসম্পূর্ণ certificate chain</strong> — browser AIA fetching দিয়ে অনুপস্থিত intermediate নিজে নামায়, curl করে না (Ch 33)।</li>
+        <li><strong>Authentication</strong> — browser-এ cookie/session আছে, curl-এ নেই।</li>
+        <li><strong>Proxy</strong> — browser-এর system proxy setting curl মানে না।</li>
+      </ul>
+      <p><strong>ব্যবহারিক:</strong> Browser DevTools-এর Network tab-এ প্রকৃত error দেখুন — CORS হলে console-এ স্পষ্ট বার্তা থাকে। <code>curl -v</code>-এর সাথে তুলনা করলে পার্থক্যটি ধরা পড়ে।</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৭. DNS কাজ করে কিন্তু HTTP ব্যর্থ — কী ঘটছে?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> DNS একটি সম্পূর্ণ আলাদা protocol, আলাদা port (53), আলাদা server। নাম থেকে IP পাওয়া মানে শুধু এটুকু — সেই IP-তে কিছু চলছে কিনা তা নয়।</p>
+      <p><strong>ব্যবহারিক — error message-ই বলে দেয় কোথায় সমস্যা:</strong></p>
+      <ul>
+        <li><code>connection refused</code> → packet পৌঁছেছে, কিন্তু ওই port-এ কেউ শুনছে না (service বন্ধ, বা ভুল port)।</li>
+        <li><code>timeout</code> → packet নীরবে হারাচ্ছে (firewall DROP, বা routing সমস্যা)।</li>
+        <li><code>certificate error</code> → TCP ও TLS শুরু হয়েছে, কিন্তু পরিচয় যাচাই ব্যর্থ।</li>
+        <li><code>502/504</code> → পৌঁছেছে, কিন্তু proxy-র backend সমস্যা (Ch 29)।</li>
+      </ul>
+      <p>এছাড়া DNS পুরনো IP দিতে পারে (Ch 27) — <code>dig</code> দিয়ে পাওয়া IP-তে সরাসরি <code>curl --resolve</code> করে যাচাই করুন।</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৮. Ping ব্যর্থ কিন্তু website খোলে — কীভাবে সম্ভব?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> ping ICMP ব্যবহার করে (Layer 3), website HTTPS ব্যবহার করে TCP port 443-এ (Layer 4+7)। এগুলো সম্পূর্ণ ভিন্ন protocol, এবং firewall প্রায়ই একটিকে অনুমোদন করে অন্যটিকে নয়।</p>
+      <p><strong>ব্যবহারিক:</strong> বহু server, CDN ও cloud load balancer নীতিগতভাবে ICMP-র উত্তর দেয় না (DDoS ও তথ্য ফাঁস কমাতে)। তাই <strong>ping ব্যর্থ হওয়া কখনোই "host down"-এর প্রমাণ নয়</strong>। উল্টোটাও সত্য — ping সফল মানে শুধু machine জীবিত, service চলছে তা নয়।</p>
+      <p>এজন্যই আধুনিক health check ICMP নয়, প্রকৃত protocol-level check ব্যবহার করে: <code>curl -sf https://host/health</code>। → Ch 14</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>৯. HTTP-ই তো application protocol — TCP আলাদাভাবে কেন দরকার?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> এটি layering-এর সরাসরি প্রশ্ন। HTTP <em>message-এর অর্থ</em> সংজ্ঞায়িত করে (method, header, status code)। কিন্তু সেই message-এর bytes কীভাবে নির্ভরযোগ্যভাবে, সঠিক ক্রমে অন্য machine-এ পৌঁছাবে — HTTP সে সম্পর্কে কিছুই বলে না। সেটি TCP-র দায়িত্ব।</p>
+      <p><strong>ব্যবহারিক:</strong> এই বিভাজনের কারণেই HTTP/3 তৈরি করা সম্ভব হয়েছে — HTTP-র semantics অপরিবর্তিত রেখে নিচের transport সম্পূর্ণ বদলে দেওয়া (TCP → QUIC)। আপনার application code এক লাইনও বদলায়নি। একইভাবে TLS একটি স্তর হিসেবে ঢুকে পড়েছে HTTP ও TCP-র মাঝখানে, দুটোর কোনোটিই না বদলে। <strong>Separation of concerns-এর সবচেয়ে বড় সুফল হলো স্বাধীন বিবর্তন।</strong> → Ch 3</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১০. DNS বদলালে কখনো কখনো সমস্যা ঠিক হয়ে যায় কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> কয়েকটি কারণ হতে পারে — (১) আপনার ISP-র resolver ধীর, অনির্ভরযোগ্য বা পুরনো উত্তর দিচ্ছে; (২) ISP ইচ্ছাকৃতভাবে কিছু domain-এ NXDOMAIN বা ভুল IP ফেরত দিচ্ছে (censorship বা "search assist"); (৩) resolver-এ negative cache আটকে আছে; (৪) GeoDNS আপনাকে খারাপ একটি edge-এ পাঠাচ্ছে।</p>
+      <p><strong>ব্যবহারিক:</strong> <code>dig @8.8.8.8</code> এবং <code>dig @1.1.1.1</code> দিয়ে তুলনা করুন — উত্তর ভিন্ন হলে সেটিই নিশ্চিত করে। তবে সতর্কতা: public resolver ব্যবহার করলে GeoDNS আপনাকে দূরের CDN edge-এ পাঠাতে পারে (Ch 46), তাই সবসময় ভালো নয়। DoH/DoT ব্যবহার করলে ISP-র হস্তক্ষেপ এড়ানো যায়। → Ch 26, 27</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১১. IP address কেন একটি application চিহ্নিত করার জন্য যথেষ্ট নয়?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> IP address <em>network layer</em>-এ একটি interface-কে চিহ্নিত করে। একটি machine-এ বহু application একই IP ব্যবহার করে। Application পর্যন্ত পৌঁছাতে transport layer-এর port দরকার — এবং একটি নির্দিষ্ট <em>connection</em> চিহ্নিত করতে দরকার সম্পূর্ণ 4-tuple।</p>
+      <p><strong>ব্যবহারিক:</strong> এই কারণেই একটি server-এর port 443-এ লক্ষাধিক connection থাকতে পারে — প্রতিটির 4-tuple আলাদা। এই কারণেই NAT-কে port বদলাতে হয় (একই public IP-র পেছনে বহু device)। এবং এই কারণেই <code>ss</code>-এর output-এ দুটি address:port জোড়া দেখানো হয়, একটি নয়। → Ch 15</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১২. Router MAC বদলায় কিন্তু destination IP বদলায় না কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> দুটি address-এর <em>পরিধি</em> ভিন্ন। MAC address <strong>এক hop-এর</strong> জন্য — "এই link-এর কোন যন্ত্র"। IP address <strong>end-to-end</strong> — "পৃথিবীর কোন host"। প্রতিটি router একটি নতুন link-এ packet পাঠাচ্ছে, তাই তাকে সেই link-এর জন্য নতুন MAC লিখতে হয়। কিন্তু চূড়ান্ত গন্তব্য বদলায়নি, তাই IP অপরিবর্তিত।</p>
+      <p><strong>ব্যবহারিক:</strong> এই একটি ধারণা বুঝলে ARP-এর পরিধি, routing-এর প্রকৃতি, এবং NAT কেন ব্যতিক্রম — সবই স্পষ্ট হয়ে যায়। আপনার machine Google-এর server-এর MAC কোনোদিন জানে না, জানার দরকারও নেই। → Ch 8, 13</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১৩. HTTPS-এ certificate কেন দরকার? শুধু encryption যথেষ্ট নয়?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> Encryption নিশ্চিত করে যে <em>শুধু আপনি ও অপর পক্ষ</em> পড়তে পারবে। কিন্তু "অপর পক্ষ" কে? Certificate ছাড়া আপনি একজন আক্রমণকারীর সাথেও নিখুঁতভাবে encrypted connection করতে পারেন — এবং সে আসল server-এর সাথে আরেকটি করে মাঝখানে বসে থাকতে পারে (MITM)।</p>
+      <p><strong>ব্যবহারিক:</strong> Certificate একটি বিশ্বস্ত তৃতীয় পক্ষের (CA) স্বাক্ষরিত বিবৃতি: "এই public key এই domain-এর মালিকের"। এজন্যই certificate যাচাই বন্ধ করা (<code>-k</code>, <code>verify=False</code>, <code>rejectUnauthorized: false</code>) TLS-এর নিরাপত্তা কার্যত সম্পূর্ণ বাতিল করে দেয় — encryption থাকে, কিন্তু কার সাথে তা অজানা। → Ch 31, 32</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১৪. Packet loss TCP-কে এত বেশি প্রভাবিত করে কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> TCP loss-কে congestion-এর সংকেত হিসেবে ব্যাখ্যা করে। একটি loss হলে তিনটি খরচ হয়: (১) শনাক্ত ও retransmit-এর বিলম্ব, (২) congestion window অর্ধেক হয়ে যাওয়া, (৩) ধীরে ধীরে (linear) আবার ওঠা। উপরন্তু ক্রম রক্ষার প্রতিশ্রুতির কারণে পরের সব data আটকে থাকে (HOL blocking)।</p>
+      <p><strong>ব্যবহারিক:</strong> Mathis সূত্র অনুযায়ী throughput ≈ MSS/(RTT × √loss)। ০.১% loss উচ্চ-RTT পথে throughput ১০ গুণ কমাতে পারে। এজন্যই wireless-এ TCP অন্যায্যভাবে ধীর (radio loss ≠ congestion), এবং এজন্যই BBR ও QUIC তৈরি হয়েছে। → Ch 21, 38</p>
+    </div>
+  </details>
+
+  <details class="qa"><summary>১৫. উচ্চ bandwidth থাকা সত্ত্বেও উচ্চ latency থাকতে পারে কেন?</summary>
+    <div class="ans">
+      <p><strong>ধারণাগত:</strong> এরা সম্পূর্ণ স্বাধীন দুটি রাশি। Bandwidth = পাইপের ব্যাস (প্রতি সেকেন্ডে কত data)। Latency = পাইপের দৈর্ঘ্য (এক প্রান্ত থেকে অন্য প্রান্তে যেতে কত সময়)। একটি ১০ Gbps ট্রান্স-প্যাসিফিক link-এর latency ১৫০ms — bandwidth বাড়ালেও আলোর গতি বাড়ে না।</p>
+      <p><strong>ব্যবহারিক:</strong> ছোট request (API call, page load) <strong>latency-bound</strong> — সমাধান CDN, connection reuse, কম round trip। বড় transfer (file download, video) <strong>bandwidth-bound</strong> — সমাধান compression, CDN, সমান্তরাল connection। ভুল সমস্যা optimize করলে কোনো ফল হয় না। → Ch 36, 37</p>
+    </div>
+  </details>
+
+  <h2>49.2 আরও কয়েকটি সাধারণ ধাঁধা</h2>
+
+  <details class="qa"><summary>আমার WebSocket ৫ মিনিট পরে চুপচাপ মরে যায়</summary>
+    <div class="ans"><p><strong>NAT বা load balancer-এর idle timeout।</strong> Traffic না থাকলে NAT নীরবে mapping মুছে দেয়; পরের packet-এর জন্য কোনো entry না থাকায় সেটি ফেলে দেওয়া হয় — কোনো error ছাড়াই। সমাধান: timeout-এর চেয়ে কম ব্যবধানে ping/keepalive পাঠান (৩০–৬০ সেকেন্ড)। AWS NAT Gateway-র idle timeout ৩৫০ সেকেন্ড, ALB-র default ৬০ সেকেন্ড। → Ch 34</p></div>
+  </details>
+
+  <details class="qa"><summary>Server restart করলে "Address already in use" আসে</summary>
+    <div class="ans"><p>আগের connection গুলো <code>TIME_WAIT</code>-এ আছে (৬০ সেকেন্ড), তাই port "ব্যবহৃত"। সঠিক সমাধান <code>SO_REUSEADDR</code> — এটি নিরাপদ এবং বেশিরভাগ আধুনিক framework নিজেই সেট করে। <strong>ভুল সমাধান:</strong> <code>tcp_tw_recycle</code> (NAT-এর পেছনের client ভাঙে, এবং Linux 4.12 থেকে অপসারিত)। → Ch 22</p></div>
+  </details>
+
+  <details class="qa"><summary>VPN চালু করলে কিছু website খোলে না</summary>
+    <div class="ans"><p>প্রায় সবসময় <strong>MTU সমস্যা</strong>। VPN প্রতিটি packet-এ নিজের header যোগ করে, তাই কার্যকর MTU কমে (যেমন ১৪২০)। ICMP "Fragmentation Needed" কোথাও block থাকলে PMTUD ব্যর্থ হয় — ছোট request কাজ করে, বড় response নীরবে হারায়। উপসর্গ: "page খোলে কিন্তু image আসে না", বা "ছোট API চলে, বড়টা hang করে"। যাচাই: <code>ping -M do -s 1400</code>। সমাধান: VPN interface-এর MTU কমান। → Ch 5</p></div>
+  </details>
+
+  <details class="qa"><summary>Docker container থেকে host-এর service-এ পৌঁছাতে পারছি না</summary>
+    <div class="ans"><p>Container-এর ভেতরে <code>localhost</code> মানে <em>container নিজে</em>, host নয় — কারণ প্রতিটি container-এর নিজস্ব network namespace ও নিজস্ব loopback interface। Host-এ পৌঁছাতে <code>host.docker.internal</code> (Docker Desktop) বা host-এর bridge IP (সাধারণত <code>172.17.0.1</code>) ব্যবহার করুন। উল্টোদিকে, host থেকে container-এ পৌঁছাতে হলে container-এর service-কে <code>0.0.0.0</code>-তে bind করতে হবে। → Ch 9</p></div>
+  </details>
+
+  <details class="qa"><summary>Production-এ intermittent 502 আসছে</summary>
+    <div class="ans"><p>502 মানে proxy backend-এ পৌঁছাতে পারেনি বা অবৈধ উত্তর পেয়েছে (Ch 29)। সম্ভাব্য কারণ: (১) backend crash হয়ে restart হচ্ছে (OOM?), (২) accept queue overflow — backend যথেষ্ট দ্রুত <code>accept()</code> করছে না (Ch 18), (৩) keep-alive timeout-এর অসামঞ্জস্য — proxy-র timeout backend-এর চেয়ে বেশি হলে proxy একটি মৃত connection ব্যবহার করার চেষ্টা করে (সাধারণত backend-এর timeout proxy-র চেয়ে বড় রাখা উচিত), (৪) file descriptor limit শেষ। যাচাই: backend-এর log, <code>ss -lnt</code>-এর Recv-Q, এবং <code>dmesg</code>-এ OOM।</p></div>
+  </details>
+
+  <details class="qa"><summary>একই code, আমার machine-এ চলে কিন্তু CI-তে ব্যর্থ</summary>
+    <div class="ans"><p>Networking-এর দিক থেকে সাধারণ কারণ: (১) CI environment-এ DNS ভিন্নভাবে configure করা (বা কোনো internal DNS নেই), (২) egress firewall — CI runner বাইরে যেতে পারে না, (৩) IPv6 আছে কিন্তু কাজ করে না (৫ সেকেন্ডের timeout), (৪) container-এর MTU ভিন্ন, (৫) <code>localhost</code> বনাম service নাম (Docker Compose-এ service name-ই hostname), (৬) proxy environment variable (<code>HTTP_PROXY</code>) সেট করা। প্রথম পদক্ষেপ: CI-তে <code>dig</code>, <code>curl -v</code> এবং <code>ip addr</code> চালিয়ে পরিবেশটি নিজে দেখুন।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch48"><div class="d">পূর্ববর্তী</div><div class="t">Ch 48 — What Happens When You Type a URL?</div></a>
+    <a class="nx" href="#ch50"><div class="d">পরবর্তী</div><div class="t">Ch 50 — Final Knowledge Check</div></a>
+  </div>
+</section>

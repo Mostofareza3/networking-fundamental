@@ -1,0 +1,230 @@
+<section class="chapter" id="ch23">
+  <div class="ch-eyebrow">Chapter 23</div>
+  <h1>UDP — যখন কম বেশি</h1>
+  <p class="ch-lede">TCP-র সব সুবিধা পড়ার পর প্রশ্ন জাগে — কেউ UDP ব্যবহার করবে কেন? উত্তরটি চমকপ্রদ: কারণ TCP-র "সুবিধা"গুলো কিছু application-এর জন্য আসলে <em>অসুবিধা</em>।</p>
+
+  <h2>23.1 UDP কী দেয় — এবং কী দেয় না</h2>
+
+  <div class="cb diagram"><pre>UDP Header — মাত্র ৮ bytes (TCP-র ২০+ এর তুলনায়):
+
+┌───────────────────┬───────────────────┐
+│   Source Port     │ Destination Port  │
+│     2 bytes       │     2 bytes       │
+├───────────────────┼───────────────────┤
+│     Length        │    Checksum       │
+│     2 bytes       │     2 bytes       │
+└───────────────────┴───────────────────┘
+
+লক্ষ্য করুন কী নেই:
+  ✗ Sequence number     → ক্রমের কোনো ধারণা নেই
+  ✗ Acknowledgment      → পৌঁছেছে কিনা জানার উপায় নেই
+  ✗ Window              → flow control নেই
+  ✗ Flags               → connection state নেই
+
+UDP আসলে IP-এর উপর শুধু দুটি জিনিস যোগ করে:
+  1. Port number (কোন process পাবে)
+  2. Checksum (data অবিকৃত কিনা — ঐচ্ছিক IPv4-এ)
+
+ব্যস। এর বেশি কিছু নয়।</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p><strong>TCP = ফোন কল।</strong> সংযোগ স্থাপন করতে হয়, দুজনেই জানে অন্যজন আছে, কথা ক্রমানুসারে যায়, না শুনলে "আবার বলুন" বলা যায়, শেষে "রাখছি" বলে বিদায়।</p>
+    <p><strong>UDP = পোস্টকার্ড।</strong> ঠিকানা লিখে ফেলে দিলেন। পৌঁছেছে কিনা জানবেন না। দশটি পাঠালে তিনটি হারাতে পারে, পাঁচ নম্বরটি দুই নম্বরের আগে পৌঁছাতে পারে। কিন্তু — <strong>খুব দ্রুত, কোনো আনুষ্ঠানিকতা নেই, এবং একটি হারালেও পরেরটি আটকে থাকে না।</strong></p>
+    <p>শেষ বাক্যটিই মূল কথা। বহু application-এর জন্য "একটি হারালেও পরেরটি আটকে থাকে না" — এই বৈশিষ্ট্যটি নির্ভরযোগ্যতার চেয়ে বেশি মূল্যবান।</p>
+  </div>
+
+  <h2>23.2 Why would anyone choose UDP?</h2>
+
+  <h3>কারণ ১ — পুরনো data মূল্যহীন</h3>
+  <div class="cb diagram"><pre>একটি ভিডিও কল, ৩০ frame/সেকেন্ড:
+
+  Frame 100 হারিয়ে গেল।
+
+  TCP-র আচরণ:
+    → frame 100 আবার পাঠাও
+    → frame 101, 102, 103 পৌঁছে গেলেও আটকে রাখো
+      (head-of-line blocking)
+    → 200ms পরে frame 100 এল
+    → এখন 100, 101, 102, 103 একসাথে দাও
+    → ব্যবহারকারী দেখল: ভিডিও জমে গেল, তারপর লাফ দিল
+
+  UDP-র আচরণ:
+    → frame 100 হারিয়েছে? ভুলে যাও।
+    → frame 101 এসেছে, সেটাই দেখাও
+    → ব্যবহারকারী দেখল: এক frame-এর সামান্য glitch
+
+  ★ ২০০ms পুরনো একটি video frame-এর কোনো মূল্য নেই।
+    সেটি পাওয়ার চেয়ে না পাওয়াই ভালো।</pre></div>
+
+  <h3>কারণ ২ — একটি request, একটি response</h3>
+  <div class="cb diagram"><pre>DNS query:
+
+  TCP দিয়ে হলে:
+    SYN, SYN-ACK, ACK        (3 packet, 1 RTT)
+    query, response          (2 packet, 1 RTT)
+    FIN, ACK, FIN, ACK       (4 packet)
+    ─────────────────────────────────
+    মোট 9 packet, 2+ RTT
+
+  UDP দিয়ে:
+    query, response
+    ─────────────────────────────────
+    মোট 2 packet, 1 RTT
+
+  ★ handshake-এর খরচ প্রকৃত data-র চেয়ে বেশি হলে
+    connection স্থাপন করাই অপচয়।</pre></div>
+
+  <h3>কারণ ৩ — Multicast ও broadcast</h3>
+  <p>TCP সংজ্ঞাগতভাবে point-to-point — দুটি নির্দিষ্ট endpoint-এর মধ্যে। একসাথে ১০০০ জনকে পাঠাতে হলে TCP দিয়ে ১০০০টি আলাদা connection লাগবে। UDP multicast দিয়ে একটি packet পাঠালেই সবাই পায়। IPTV, service discovery (mDNS), routing protocol — সবই এই কারণে UDP।</p>
+
+  <h3>কারণ ৪ — নিজের নিয়মে reliability</h3>
+  <div class="box tip">
+    <div class="bt">✓ সবচেয়ে গুরুত্বপূর্ণ কারণ</div>
+    <p>TCP-র reliability একটি <em>package deal</em> — আপনি ordering ছাড়া retransmission নিতে পারবেন না, বা congestion control ছাড়া flow control নিতে পারবেন না। কিন্তু আপনার application-এর হয়তো দরকার:</p>
+    <ul>
+      <li>Retransmission হ্যাঁ, কিন্তু strict ordering না</li>
+      <li>নিজস্ব congestion control (real-time video-র জন্য ভিন্ন কৌশল)</li>
+      <li>Stream-প্রতি স্বাধীন reliability</li>
+      <li>Connection migration (IP বদলালেও connection টিকে থাকবে)</li>
+    </ul>
+    <p>UDP আপনাকে খালি ক্যানভাস দেয়, এবং আপনি ঠিক যতটুকু দরকার ততটুকুই তৈরি করে নেন। <strong>QUIC ঠিক এই কাজটিই করে</strong> — সে UDP-র উপর TCP-র চেয়ে ভালো একটি reliability layer তৈরি করেছে (Ch 45)।</p>
+  </div>
+
+  <h2>23.3 কারা UDP ব্যবহার করে</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Application</th><th>কেন UDP</th></tr></thead>
+    <tbody>
+      <tr><td><strong>DNS</strong></td><td>ছোট query/response; handshake-এর খরচ অযৌক্তিক। Response বড় হলে TCP-তে যায়।</td></tr>
+      <tr><td><strong>QUIC / HTTP3</strong></td><td>নিজস্ব উন্নত transport তৈরি করেছে; TCP-র HOL blocking এড়াতে।</td></tr>
+      <tr><td><strong>VoIP, video call</strong></td><td>পুরনো audio/video frame মূল্যহীন; latency নির্ভরযোগ্যতার চেয়ে গুরুত্বপূর্ণ।</td></tr>
+      <tr><td><strong>Online game</strong></td><td>খেলোয়াড়ের অবস্থান ৫০ms পুরনো হলে অকেজো; নতুন update-ই আসল।</td></tr>
+      <tr><td><strong>Live streaming</strong></td><td>নির্দিষ্ট সময়ের মধ্যে না এলে ফেলে দেওয়াই ভালো।</td></tr>
+      <tr><td><strong>DHCP</strong></td><td>Broadcast দরকার — তখনো নিজের IP নেই।</td></tr>
+      <tr><td><strong>NTP</strong></td><td>একটি ছোট বিনিময়; latency নিজেই পরিমাপের অংশ।</td></tr>
+      <tr><td><strong>syslog, metrics</strong></td><td>বিপুল পরিমাণ; কিছু হারালেও চলে, কিন্তু sender-কে ধীর করা যাবে না।</td></tr>
+      <tr><td><strong>WireGuard, VPN</strong></td><td>TCP-over-TCP এড়াতে (দুই স্তরের retransmission ভয়াবহ)।</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ TCP-over-TCP সমস্যা</div>
+    <p>একটি TCP tunnel-এর ভেতরে TCP চালালে দুই স্তরের retransmission ও congestion control একে অপরের সাথে লড়াই করে: বাইরের TCP retransmit করছে, ভেতরের TCP-ও timeout দেখে retransmit করছে — ফলে exponentially খারাপ পরিস্থিতি, যাকে বলে <em>TCP meltdown</em>। এজন্যই আধুনিক VPN (WireGuard, OpenVPN-এর UDP mode) UDP-র উপর চলে।</p>
+  </div>
+
+  <h2>23.4 UDP-তে code লেখা</h2>
+
+  <div class="cb"><span class="cb-lang">python</span><pre># ---------- SERVER ----------
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)   # DGRAM!
+s.bind(("0.0.0.0", 9999))
+# listen() নেই। accept() নেই। কোনো connection-ই নেই।
+
+while True:
+    data, addr = s.recvfrom(65535)
+    # ★ প্রতিটি recvfrom একটি সম্পূর্ণ datagram দেয় —
+    #   কখনো আংশিক নয়, কখনো দুটি জোড়া লাগানো নয়
+    print(f"{addr} থেকে: {data}")
+    s.sendto(b"pong", addr)     # প্রতিবার গন্তব্য বলে দিতে হয়
+
+# ---------- CLIENT ----------
+c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+c.sendto(b"ping", ("127.0.0.1", 9999))   # সরাসরি পাঠান
+c.settimeout(2.0)                         # নিজেই timeout সামলান
+try:
+    data, _ = c.recvfrom(65535)
+    print("পেলাম:", data)
+except socket.timeout:
+    print("কোনো উত্তর নেই — হারিয়ে গেছে?")
+    # ★ retry করবেন? কতবার? কত পরে?
+    #   এই সিদ্ধান্তগুলো এখন আপনার।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — UDP মানে দায়িত্ব</div>
+    <p>UDP ব্যবহার করা মানে TCP যা যা করত তার প্রয়োজনীয় অংশগুলো <em>আপনাকে</em> লিখতে হবে:</p>
+    <ul>
+      <li><strong>Timeout ও retry</strong> — কতক্ষণ অপেক্ষা? কতবার চেষ্টা? Exponential backoff?</li>
+      <li><strong>Duplicate detection</strong> — নিজের sequence number দিতে হবে</li>
+      <li><strong>Ordering</strong> — দরকার হলে নিজে সাজাতে হবে</li>
+      <li><strong>Congestion control</strong> — না করলে আপনি network-এর জন্য ক্ষতিকর (এবং অন্যায্য)</li>
+      <li><strong>MTU</strong> — datagram ছোট রাখতে হবে, নাহলে fragmentation (Ch 5)</li>
+    </ul>
+    <p><strong>একটি সৎ পরামর্শ:</strong> নতুন করে "UDP-র উপর নিজের reliable protocol" লেখার আগে দুবার ভাবুন। QUIC ইতিমধ্যে এটি করেছে, বহু বছরের গবেষণা ও বাস্তব পরীক্ষার পর। বেশিরভাগ ক্ষেত্রে সঠিক পছন্দ হলো TCP, অথবা QUIC — নিজের হাতে লেখা অর্ধ-সম্পূর্ণ reliability layer নয়।</p>
+  </div>
+
+  <h2>23.5 UDP-র আকার এবং ঝুঁকি</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Datagram ছোট রাখুন</div>
+    <p>তাত্ত্বিকভাবে একটি UDP datagram ৬৫,৫০৭ bytes পর্যন্ত হতে পারে। কিন্তু MTU সাধারণত ১৫০০ — তাই বড় datagram fragment হয়ে যায়, এবং <strong>একটি fragment হারালে পুরো datagram হারায়</strong> (Ch 5)।</p>
+    <p>ব্যবহারিক নির্দেশনা: <strong>datagram ১২০০ bytes-এর নিচে রাখুন</strong> (VPN ও tunnel-এর জায়গা রেখে)। DNS ঐতিহাসিকভাবে ৫১২ bytes-এ সীমাবদ্ধ ছিল ঠিক এই কারণেই; QUIC-ও তার প্রাথমিক packet ১২০০-এর নিচে রাখে।</p>
+  </div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Amplification Attack</div>
+    <p>UDP-তে source IP যাচাই করার কোনো ব্যবস্থা নেই (কোনো handshake নেই)। তাই আক্রমণকারী ভুক্তভোগীর IP-কে source হিসেবে লিখে একটি ছোট query পাঠাতে পারে, এবং server-এর বড় response ভুক্তভোগীর কাছে গিয়ে পৌঁছায়।</p>
+    <div class="cb diagram"><pre>Attacker → [60 byte query, src IP = ভুক্তভোগীর]  → DNS server
+ভুক্তভোগী ← [4000 byte response] ← DNS server
+
+Amplification factor ≈ 60x
+১ Mbps পাঠিয়ে ৬০ Mbps আক্রমণ!
+
+NTP monlist-এ এটি ৫০০x পর্যন্ত পৌঁছেছিল।</pre></div>
+    <p>এজন্যই: public UDP service-এ <strong>response rate limiting</strong> দরকার, খোলা DNS resolver চালানো উচিত নয়, এবং QUIC-এ একটি নিয়ম আছে — server client-এর address যাচাই না করা পর্যন্ত পাওয়া data-র ৩ গুণের বেশি পাঠাতে পারবে না।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 23 — UDP-র আচরণ পরীক্ষা করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — UDP-তে connection নেই, তাই "কেউ শুনছে না" অবস্থাটি TCP-র চেয়ে সম্পূর্ণ ভিন্নভাবে প্রকাশ পায়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># TCP: বন্ধ port → তাৎক্ষণিক refused
+nc -zv 127.0.0.1 9999          # "Connection refused"
+
+# UDP: বন্ধ port → ICMP Port Unreachable
+sudo tcpdump -i lo -n icmp &
+echo "hello" | nc -u -w2 127.0.0.1 9999
+# tcpdump-এ: "ICMP udp port 9999 unreachable"
+
+# একটি UDP server চালিয়ে দেখুন
+nc -u -l 9999 &
+echo "hello" | nc -u -w1 127.0.0.1 9999
+
+# DNS — বাস্তব জীবনের UDP
+sudo tcpdump -i any -n 'udp port 53' -c 4 &
+dig +short example.com</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> UDP-তে কোনো handshake নেই — <code>nc -u</code> সরাসরি data পাঠায়। কেউ না শুনলে kernel একটি ICMP Port Unreachable পাঠায় (TCP-র RST-এর সমতুল্য, কিন্তু ভিন্ন protocol-এ)। <code>dig</code>-এর tcpdump-এ দেখবেন ঠিক দুটি packet — একটি query, একটি response। কোনো SYN, কোনো FIN নেই।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> UDP-তে "connection" বলে কিছু নেই — তাই connection-সংক্রান্ত সব ধারণা (refused, reset, established) এখানে অনুপস্থিত। DNS-এর দুই-packet বিনিময় দেখলেই বোঝা যায় কেন এখানে TCP-র নয় packet অপচয় হতো।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>UDP header মাত্র ৮ bytes — IP-এর উপর শুধু port ও checksum যোগ করে।</li>
+      <li>কোনো connection নেই, ACK নেই, ordering নেই, retransmission নেই, flow/congestion control নেই।</li>
+      <li><strong>Datagram-এর সীমানা সংরক্ষিত</strong> — এক <code>sendto()</code> = এক <code>recvfrom()</code> (TCP-র উল্টো)।</li>
+      <li>UDP বেছে নেওয়া হয় যখন: পুরনো data মূল্যহীন, বিনিময় ছোট, multicast দরকার, বা নিজস্ব transport তৈরি করতে হবে।</li>
+      <li>TCP-র head-of-line blocking এড়ানোই real-time application-এ UDP-র প্রধান আকর্ষণ।</li>
+      <li>Datagram ১২০০ bytes-এর নিচে রাখুন — fragmentation এড়াতে।</li>
+      <li>UDP-তে source IP যাচাই হয় না → amplification attack-এর ঝুঁকি → rate limiting দরকার।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি ভিডিও কলে TCP ব্যবহার করলে কী সমস্যা হতো?</summary>
+    <div class="ans"><p>Head-of-line blocking। একটি frame-এর packet হারালে TCP সেটি retransmit করত এবং <em>পরবর্তী সব frame</em> পৌঁছে গিয়েও আটকে থাকত ক্রম রক্ষার জন্য। ব্যবহারকারী দেখতেন — ভিডিও জমে গেল, তারপর হঠাৎ লাফ দিয়ে এগোল। অথচ ২০০ms পুরনো একটি frame-এর কোনো মূল্যই নেই। UDP-তে হারানো frame ভুলে গিয়ে পরেরটি দেখানো যায়।</p></div>
+  </details>
+  <details class="qa"><summary>DNS কেন UDP ব্যবহার করে, কিন্তু কখনো কখনো TCP-তেও যায়?</summary>
+    <div class="ans"><p>একটি DNS query ও response সাধারণত কয়েকশ bytes — একটি TCP handshake (৩ packet) + teardown (৪ packet) এর জন্য অযৌক্তিক অপচয়। UDP-তে মাত্র ২টি packet, ১ RTT। কিন্তু response যদি বড় হয় (DNSSEC signature, বহু record) এবং UDP-তে না আঁটে, server <code>TC</code> (truncated) flag সেট করে; তখন client TCP-তে আবার query করে, যেখানে আকারের সীমা নেই।</p></div>
+  </details>
+  <details class="qa"><summary>UDP-তে এক <code>sendto()</code> = এক <code>recvfrom()</code> — TCP-তে কেন এই নিশ্চয়তা নেই?</summary>
+    <div class="ans"><p>কারণ UDP <em>datagram</em>-ভিত্তিক: প্রতিটি datagram একটি স্বয়ংসম্পূর্ণ একক, এবং তার সীমানা protocol-এ সংরক্ষিত। TCP <em>byte stream</em>-ভিত্তিক: আপনার write গুলো kernel-এর buffer-এ মিশে যায় এবং segment-এ ভাগ হয় সম্পূর্ণ ভিন্নভাবে। TCP-তে message-এর সীমানা application-কে নিজেই সংজ্ঞায়িত করতে হয় (length prefix, delimiter, Content-Length)।</p></div>
+  </details>
+  <details class="qa"><summary>UDP amplification attack কীভাবে কাজ করে?</summary>
+    <div class="ans"><p>UDP-তে কোনো handshake নেই, তাই source IP যাচাই হয় না। আক্রমণকারী ভুক্তভোগীর IP-কে source হিসেবে লিখে একটি ছোট query (~৬০ bytes) পাঠায় একটি public server-এ। Server-এর বড় response (~৪০০০ bytes) চলে যায় ভুক্তভোগীর কাছে। ফলে আক্রমণকারী তার নিজের bandwidth-এর বহু গুণ traffic ভুক্তভোগীর দিকে পাঠাতে পারে। প্রতিকার: response rate limiting, খোলা resolver না চালানো, এবং amplification-বিরোধী নকশা (QUIC-এর ৩x নিয়ম)।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch22"><div class="d">পূর্ববর্তী</div><div class="t">Ch 22 — Connection Termination</div></a>
+    <a class="nx" href="#ch24"><div class="d">পরবর্তী</div><div class="t">Ch 24 — TCP vs UDP</div></a>
+  </div>
+</section>

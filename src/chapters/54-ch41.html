@@ -1,0 +1,254 @@
+<section class="chapter" id="ch41">
+  <div class="ch-eyebrow">Chapter 41</div>
+  <h1>Packet Capture — tcpdump</h1>
+  <p class="ch-lede">যখন আর সব tool ব্যর্থ হয়, একটি প্রশ্ন থেকে যায়: <em>তারে আসলে কী যাচ্ছে?</em> <code>tcpdump</code> সেই প্রশ্নের চূড়ান্ত উত্তর দেয় — এবং প্রায়ই সেটিই একমাত্র নিশ্চিত উত্তর।</p>
+
+  <h2>41.1 tcpdump কোথায় বসে</h2>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────┐
+│  Your Application                │
+└─────────────┬────────────────────┘
+              │ socket API
+┌─────────────▼────────────────────┐
+│  Kernel — TCP/IP stack           │
+│                                  │
+│    ┌──────────────────────┐      │
+│    │  ★ tcpdump এখানে ★    │      │
+│    │  (AF_PACKET socket)  │      │
+│    │  প্রতিটি frame-এর     │      │
+│    │  একটি কপি পায়         │      │
+│    └──────────────────────┘      │
+└─────────────┬────────────────────┘
+              │
+┌─────────────▼────────────────────┐
+│  NIC → তার/radio                  │
+└──────────────────────────────────┘
+
+গুরুত্বপূর্ণ সূক্ষ্মতা:
+  • tcpdump kernel-এর ★ভেতরে★ দেখে, তারে নয়
+  • তাই outbound packet সে দেখে ★firewall-এর আগে★,
+    এবং inbound packet দেখে ★firewall-এর পরে★ —
+    (netfilter hook-এর অবস্থানের উপর নির্ভর করে)
+  • Loopback traffic-ও দেখা যায় (-i lo)
+  • Encrypted (TLS) traffic-এর ভেতরটা দেখা যাবে না —
+    শুধু বাইরের মোড়ক</pre></div>
+
+  <h2>41.2 মৌলিক ব্যবহার</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># সবচেয়ে সাধারণ শুরু
+sudo tcpdump -i any -n port 443
+
+# গুরুত্বপূর্ণ flag গুলো
+#  -i any     সব interface (বা eth0, lo)
+#  -n         IP resolve করো না (★ দ্রুত, এবং DNS lookup
+#             নিজেই traffic তৈরি করে বলে বিভ্রান্তি এড়ায় ★)
+#  -nn        port-এর নামও resolve করো না
+#  -c 20      ২০টি packet পরে থামো
+#  -v -vv     আরও বিস্তারিত
+#  -e         Ethernet header দেখাও (MAC address)
+#  -A         ASCII-তে payload দেখাও (plaintext-এর জন্য)
+#  -X         hex + ASCII
+#  -s 0       সম্পূর্ণ packet ধরো (আধুনিক version-এ default)
+#  -w f.pcap  ফাইলে লেখো (Wireshark-এ খোলার জন্য)
+#  -r f.pcap  ফাইল থেকে পড়ো</pre></div>
+
+  <h2>41.3 Filter — সবচেয়ে গুরুত্বপূর্ণ দক্ষতা</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Filter ছাড়া tcpdump কার্যত অকেজো</div>
+    <p>একটি ব্যস্ত server-এ প্রতি সেকেন্ডে হাজার হাজার packet। Filter ছাড়া output এত দ্রুত চলে যাবে যে কিছুই পড়া যাবে না — এবং packet drop-ও হতে পারে। <strong>সবসময় যতটা সম্ভব সংকীর্ণ filter দিন।</strong></p>
+  </div>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># ── Host ──
+tcpdump -n host 1.1.1.1
+tcpdump -n src 10.0.0.5
+tcpdump -n dst 10.0.0.5
+tcpdump -n net 192.168.1.0/24
+
+# ── Port ──
+tcpdump -n port 443
+tcpdump -n portrange 8000-8100
+tcpdump -n dst port 5432
+
+# ── Protocol ──
+tcpdump -n icmp
+tcpdump -n udp port 53
+tcpdump -n arp
+
+# ── যৌক্তিক সংযোজন ──
+tcpdump -n 'host 10.0.0.5 and port 443'
+tcpdump -n 'port 80 or port 443'
+tcpdump -n 'host 10.0.0.5 and not port 22'   # ★ SSH বাদ দিন,
+                                              #   নাহলে নিজের
+                                              #   session দেখবেন
+
+# ── TCP flag (উন্নত কিন্তু অত্যন্ত কার্যকর) ──
+tcpdump -n 'tcp[tcpflags] & tcp-syn != 0'    # শুধু SYN
+tcpdump -n 'tcp[tcpflags] & tcp-rst != 0'    # ★ শুধু RST — কে
+                                              #   connection ভাঙছে
+tcpdump -n 'tcp[tcpflags] & (tcp-syn|tcp-fin) != 0'  # শুরু ও শেষ
+
+# ── HTTP method (payload-এ খোঁজা) ──
+tcpdump -n -A 'tcp port 80 and tcp[((tcp[12:1] & 0xf0) >> 2):4] = 0x47455420'
+#                                                                  G E T (space)</pre></div>
+
+  <h2>41.4 Output পড়া</h2>
+
+  <div class="cb"><span class="cb-lang">text</span><pre>20:30:15.123456 IP 192.168.0.107.51234 > 93.184.215.14.443: Flags [S], seq 1234567890, win 64240, options [mss 1460,sackOK,TS val 123 ecr 0,nop,wscale 7], length 0
+    │              │                     │                    │       │              │           │
+  সময়            source IP.port      dest IP.port          flags    seq         window      options
+
+Flags-এর প্রতীক:
+  [S]   SYN                    [F]   FIN
+  [S.]  SYN-ACK                [R]   RST
+  [.]   শুধু ACK                [P.]  PSH+ACK (data সহ)
+  [FP.] FIN+PSH+ACK</pre></div>
+
+  <h3>একটি সম্পূর্ণ HTTP request-এর যাত্রা</h3>
+
+  <div class="cb"><span class="cb-lang">text</span><pre>$ sudo tcpdump -i any -n 'host example.com and port 80'
+
+# ── TCP handshake (Ch 18) ──
+20:30:15.100 IP 192.168.0.107.51234 > 93.184.215.14.80: Flags [S], seq 1000
+20:30:15.160 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [S.], seq 5000, ack 1001
+20:30:15.161 IP 192.168.0.107.51234 > 93.184.215.14.80: Flags [.], ack 5001
+                    ↑ ৬০ms — এটাই RTT
+
+# ── HTTP request ──
+20:30:15.162 IP 192.168.0.107.51234 > 93.184.215.14.80: Flags [P.], seq 1001:1078, length 77
+                                                                    ↑ ৭৭ bytes = GET request
+
+# ── Server-এর ACK, তারপর response ──
+20:30:15.222 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [.], ack 1078
+20:30:15.225 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [P.], seq 5001:6449, length 1448
+20:30:15.226 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [P.], seq 6449:7000, length 551
+
+# ── সমাপ্তি (Ch 22) ──
+20:30:15.230 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [F.], seq 7000
+20:30:15.231 IP 192.168.0.107.51234 > 93.184.215.14.80: Flags [F.], seq 1078
+20:30:15.291 IP 93.184.215.14.80 > 192.168.0.107.51234: Flags [.], ack 1079
+
+★ এই একটি output-এ এই বইয়ের প্রায় সব ধারণা দেখা যাচ্ছে:
+  handshake, sequence number, ACK, MSS-এ ভাগ হওয়া data,
+  RTT, এবং four-way termination।</pre></div>
+
+  <h2>41.5 বাস্তব diagnostic pattern</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>যা দেখছেন</th><th>যা বোঝায়</th></tr></thead>
+    <tbody>
+      <tr><td>শুধু <code>[S]</code>, বারবার, কোনো <code>[S.]</code> নেই</td><td>Packet পৌঁছাচ্ছে না বা উত্তর ফিরছে না — firewall DROP, বা host down, বা routing সমস্যা</td></tr>
+      <tr><td><code>[S]</code>-এর জবাবে <code>[R]</code></td><td>Port-এ কেউ শুনছে না — "connection refused"</td></tr>
+      <tr><td>Handshake হলো, তারপর <code>[R]</code></td><td>Application connection ভেঙেছে — crash, timeout, বা ইচ্ছাকৃত reset</td></tr>
+      <tr><td>একই <code>seq</code> বারবার</td><td>Retransmission — packet loss (Ch 19)</td></tr>
+      <tr><td>একই <code>ack</code> বারবার</td><td>Duplicate ACK — receiver-এর কাছে ফাঁক আছে</td></tr>
+      <tr><td><code>win 0</code></td><td>Receiver-এর buffer ভরা — zero window (Ch 20)</td></tr>
+      <tr><td>শুধু একদিকের packet</td><td>Asymmetric routing, বা return path-এ সমস্যা</td></tr>
+      <tr><td>কোনো packet-ই নেই</td><td>ভুল interface বা ভুল filter; বা traffic এই machine-এ আসছেই না</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ সবচেয়ে দরকারি একটি প্রশ্ন</div>
+    <p>একটি সমস্যায় <code>tcpdump</code> চালিয়ে প্রথমেই জিজ্ঞেস করুন: <strong>"packet কি এখানে আসছে?"</strong></p>
+    <ul>
+      <li><strong>আসছে না</strong> → সমস্যা এই machine-এর আগে (routing, firewall, DNS ভুল IP, load balancer)।</li>
+      <li><strong>আসছে কিন্তু উত্তর যাচ্ছে না</strong> → সমস্যা এই machine-এ (application শুনছে না, বা outbound firewall)।</li>
+      <li><strong>উত্তর যাচ্ছে কিন্তু client পাচ্ছে না</strong> → return path-এ সমস্যা (asymmetric routing, NAT, firewall)।</li>
+    </ul>
+    <p>এই একটি প্রশ্ন সমস্যার পরিসর তিন ভাগের এক ভাগে নামিয়ে আনে — এবং অন্য কোনো tool এত নিশ্চিতভাবে এর উত্তর দিতে পারে না।</p>
+  </div>
+
+  <h2>41.6 Wireshark</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># Server-এ capture করুন, নিজের machine-এ বিশ্লেষণ করুন
+sudo tcpdump -i any -n -s 0 -w capture.pcap 'host 10.0.0.5 and port 443'
+# Ctrl+C দিয়ে থামান, তারপর:
+scp server:capture.pcap .
+wireshark capture.pcap</pre></div>
+
+  <p>Wireshark যা <code>tcpdump</code>-এর চেয়ে ভালো করে:</p>
+  <ul>
+    <li><strong>Follow TCP Stream</strong> — একটি connection-এর সম্পূর্ণ কথোপকথন একসাথে দেখা</li>
+    <li><strong>Protocol dissector</strong> — HTTP, DNS, TLS ইত্যাদি সুন্দরভাবে ভেঙে দেখানো</li>
+    <li><strong>Statistics</strong> — conversation, I/O graph, retransmission-এর হার</li>
+    <li><strong>Expert Info</strong> — সমস্যাগুলো স্বয়ংক্রিয়ভাবে চিহ্নিত করা</li>
+    <li><strong>TLS decryption</strong> — <code>SSLKEYLOGFILE</code> environment variable সেট করে browser চালালে Wireshark encrypted traffic-ও পড়তে পারে</li>
+  </ul>
+
+  <div class="box note">
+    <div class="bt">ℹ️ একটি বাস্তব workflow</div>
+    <p>Production server-এ GUI চালানো যায় না, এবং সেখানে দীর্ঘক্ষণ tcpdump দেখাও অসুবিধাজনক। তাই প্রচলিত পদ্ধতি: <strong>server-এ সংকীর্ণ filter দিয়ে <code>-w</code> ব্যবহার করে ফাইলে capture করুন, তারপর সেটি নিজের machine-এ এনে Wireshark-এ বিশ্লেষণ করুন।</strong> Capture-এর সময় <code>-c</code> বা <code>-G</code>/<code>-W</code> (rotating file) ব্যবহার করে আকার নিয়ন্ত্রণে রাখুন — নাহলে disk ভরে যেতে পারে।</p>
+  </div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Production-এ tcpdump চালানোর সতর্কতা</div>
+    <ul>
+      <li><strong>CPU খরচ</strong> — উচ্চ traffic-এ প্রতিটি packet কপি করা ব্যয়বহুল। সংকীর্ণ filter অপরিহার্য।</li>
+      <li><strong>Disk</strong> — <code>-w</code> ব্যবহারে ফাইল দ্রুত গিগাবাইটে পৌঁছাতে পারে। <code>-C</code>/<code>-W</code> দিয়ে rotate করুন।</li>
+      <li><strong>গোপনীয়তা ও compliance</strong> — capture-এ ব্যবহারকারীর data, token, এমনকি plaintext password থাকতে পারে। সংরক্ষণ ও শেয়ার করার আগে ভাবুন; অনেক প্রতিষ্ঠানে এর জন্য অনুমোদন লাগে।</li>
+      <li><strong>নিজের SSH session বাদ দিন</strong> — <code>and not port 22</code>, নাহলে আপনার নিজের output নিজেই traffic তৈরি করে অসীম প্রতিক্রিয়া তৈরি করবে।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 41 — একটি সম্পূর্ণ connection ধরুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি বাস্তব HTTP connection-এর প্রতিটি packet, শুরু থেকে শেষ পর্যন্ত, এবং সেখানে এই বইয়ের ধারণাগুলো চিনে নেওয়া।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Terminal 1 — capture শুরু করুন
+sudo tcpdump -i any -n 'host example.com and port 80'
+
+# Terminal 2 — একটি request
+curl -s http://example.com > /dev/null
+
+# ── তারপর এগুলো চেষ্টা করুন ──
+
+# শুধু handshake ও termination
+sudo tcpdump -i any -n 'tcp[tcpflags] & (tcp-syn|tcp-fin|tcp-rst) != 0'
+
+# Plaintext HTTP-র বিষয়বস্তু
+sudo tcpdump -i any -n -A -c 30 'tcp port 80'
+
+# DNS query দেখুন
+sudo tcpdump -i any -n -c 6 'udp port 53' &
+dig +short example.com
+
+# ফাইলে লিখুন, পরে পড়ুন
+sudo tcpdump -i any -n -c 50 -w /tmp/cap.pcap 'port 443'
+tcpdump -r /tmp/cap.pcap -n | head -20</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> তিনটি handshake packet, তারপর একটি <code>[P.]</code> (আপনার GET), তারপর server-এর ACK ও data packet গুলো, শেষে FIN/ACK-এর জোড়া। প্রথম দুটি packet-এর সময়ের পার্থক্যই আপনার RTT। যদি <code>length 1448</code> দেখেন, সেটাই MSS (Ch 5)।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> এই বইয়ের সব ধারণা — handshake, sequence number, ACK, MSS, window, termination — একটি tcpdump output-এ একসাথে দৃশ্যমান। কোনো tool যখন উত্তর দিতে পারছে না, তখন packet capture-ই চূড়ান্ত সত্য।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li><code>tcpdump</code> kernel-এর ভেতরে প্রতিটি frame-এর কপি পায় — তারে যাওয়ার আগে বা পরে।</li>
+      <li><strong>Filter অপরিহার্য</strong> — সংকীর্ণ filter ছাড়া output অপঠনীয় ও ব্যয়বহুল।</li>
+      <li><code>-n</code> সবসময় ব্যবহার করুন — DNS lookup নিজেই traffic তৈরি করে বিভ্রান্তি বাড়ায়।</li>
+      <li>Flags পড়ুন: <code>[S]</code>, <code>[S.]</code>, <code>[.]</code>, <code>[P.]</code>, <code>[F.]</code>, <code>[R]</code>।</li>
+      <li>Diagnostic-এর মূল প্রশ্ন: <strong>packet কি আসছে? উত্তর কি যাচ্ছে?</strong></li>
+      <li>বারবার একই seq = retransmission; বারবার একই ack = duplicate ACK; <code>win 0</code> = receiver ভরা।</li>
+      <li>Production-এ: সংকীর্ণ filter + <code>-w</code> দিয়ে ফাইলে, তারপর Wireshark-এ বিশ্লেষণ।</li>
+      <li>Capture-এ সংবেদনশীল data থাকতে পারে — গোপনীয়তা ও compliance মাথায় রাখুন।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>tcpdump</code>-এ শুধু <code>[S]</code> দেখছেন, কোনো <code>[S.]</code> নেই। কী বোঝায়?</summary>
+    <div class="ans"><p>আপনার SYN বেরিয়ে যাচ্ছে কিন্তু কোনো SYN-ACK ফিরছে না। সম্ভাবনা: (১) firewall নীরবে DROP করছে (RST নয়, তাই "timeout" হবে), (২) host down বা পৌঁছানো যাচ্ছে না, (৩) routing সমস্যা, (৪) return path ভাঙা (asymmetric routing)। গন্তব্য server-এ একই সাথে tcpdump চালালে বোঝা যাবে packet সেখানে পৌঁছাচ্ছে কিনা — এটিই নির্ণায়ক পরীক্ষা।</p></div>
+  </details>
+  <details class="qa"><summary><code>-n</code> flag কেন সবসময় ব্যবহার করা উচিত?</summary>
+    <div class="ans"><p>দুটি কারণ। (১) <strong>গতি</strong> — প্রতিটি IP-র জন্য reverse DNS lookup করলে output ধীর হয় এবং packet drop হতে পারে। (২) <strong>বিভ্রান্তি এড়ানো</strong> — সেই DNS lookup গুলো নিজেই network traffic তৈরি করে, যা আপনার capture-এ দেখা যায় এবং বিশ্লেষণ জটিল করে তোলে। DNS সমস্যা নির্ণয় করতে গিয়ে DNS traffic তৈরি করা বিশেষভাবে সমস্যাজনক।</p></div>
+  </details>
+  <details class="qa"><summary>একই <code>seq</code> নম্বর বারবার দেখা যাচ্ছে। কী ঘটছে?</summary>
+    <div class="ans"><p><strong>Retransmission</strong> — sender একই data আবার পাঠাচ্ছে কারণ সে ACK পায়নি (Ch 19)। এর মানে হয় original packet হারিয়েছে, নয় তার ACK হারিয়েছে। সাথে যদি duplicate ACK-ও দেখেন, তাহলে fast retransmit ঘটছে। ঘন ঘন retransmission মানে উল্লেখযোগ্য packet loss — <code>ss -ti</code>-তেও এটি <code>retrans</code> counter-এ দেখা যাবে।</p></div>
+  </details>
+  <details class="qa"><summary>Production server-এ tcpdump চালানোর আগে কী কী সতর্কতা?</summary>
+    <div class="ans"><p>(১) যতটা সম্ভব সংকীর্ণ filter — CPU ও packet drop এড়াতে। (২) <code>-c</code> বা <code>-W</code> দিয়ে আকার সীমিত করুন — disk ভরে যাওয়া একটি বাস্তব ঝুঁকি। (৩) <code>and not port 22</code> দিয়ে নিজের SSH session বাদ দিন। (৪) Capture-এ ব্যবহারকারীর সংবেদনশীল data থাকতে পারে — সংরক্ষণ, স্থানান্তর ও শেয়ারের ক্ষেত্রে প্রতিষ্ঠানের নীতি মানুন। (৫) সম্ভব হলে ফাইলে capture করে অন্যত্র বিশ্লেষণ করুন।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch40"><div class="d">পূর্ববর্তী</div><div class="t">Ch 40 — DNS Debugging</div></a>
+    <a class="nx" href="#ch42"><div class="d">পরবর্তী</div><div class="t">Ch 42 — What Is the Internet?</div></a>
+  </div>
+</section>

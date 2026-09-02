@@ -1,0 +1,187 @@
+<section class="chapter" id="ch5">
+  <div class="ch-eyebrow">Chapter 5</div>
+  <h1>MTU and Packet Size</h1>
+  <p class="ch-lede">Packet-এর একটি সর্বোচ্চ আকার আছে। কেন? এবং সেই সীমা অতিক্রম করলে কী হয়? এই ছোট সংখ্যাটি (সাধারণত 1500) VPN, container network এবং cloud environment-এ অদ্ভুত সব bug-এর জন্ম দেয়।</p>
+
+  <h2>5.1 Why does this exist?</h2>
+  <p>কল্পনা করুন কোনো আকার-সীমা নেই এবং একটি host ১ GB-র একটি বিশাল frame পাঠাল। সমস্যাগুলো:</p>
+
+  <ul>
+    <li><strong>Head-of-line blocking:</strong> ওই frame পাঠানোর ১০ সেকেন্ড ধরে তারটি দখল হয়ে থাকবে। অন্য সবার — এমনকি ছোট, জরুরি packet-এরও — অপেক্ষা করতে হবে।</li>
+    <li><strong>Error-এর মূল্য:</strong> এক bit নষ্ট হলে পুরো ১ GB আবার পাঠাতে হবে।</li>
+    <li><strong>Buffer:</strong> পথের প্রতিটি router-কে ১ GB memory রাখতে হবে প্রতিটি frame-এর জন্য।</li>
+    <li><strong>Latency:</strong> ছোট একটি ping-ও ১০ সেকেন্ড আটকে থাকবে।</li>
+  </ul>
+
+  <p>এসব এড়াতেই প্রতিটি link-technology একটি সর্বোচ্চ payload আকার নির্ধারণ করে — এটিই <strong>MTU</strong>।</p>
+
+  <h2>5.2 Core Concept — MTU</h2>
+  <p><strong>MTU</strong> (Maximum Transmission Unit, সর্বোচ্চ ট্রান্সমিশন একক) হলো একটি link একবারে যত byte payload বহন করতে পারে তার সর্বোচ্চ সীমা। গুরুত্বপূর্ণ: MTU গণনা করা হয় <em>link layer-এর payload</em> হিসেবে — অর্থাৎ IP header থেকে শুরু, Ethernet header বাদ দিয়ে।</p>
+
+  <div class="cb diagram"><pre>Ethernet frame (মোট 1518 bytes):
+
+┌────────────┬──────────────────────────────────┬──────┐
+│ Eth Header │       MTU = 1500 bytes           │ FCS  │
+│  14 bytes  │  (IP header + IP payload)        │ 4 B  │
+└────────────┴──────────────────────────────────┴──────┘
+             ↑                                  ↑
+             └───── এই অংশটাই MTU ──────────────┘
+
+সেই 1500 bytes-এর ভেতরে TCP-এর জন্য:
+
+┌──────────┬──────────┬────────────────────────────────┐
+│ IP Hdr   │ TCP Hdr  │   Application data             │
+│  20 B    │  20 B    │        1460 bytes = MSS        │
+└──────────┴──────────┴────────────────────────────────┘</pre></div>
+
+  <p>এখানে <strong>MSS</strong> (Maximum Segment Size) হলো এক segment-এ সর্বোচ্চ কত <em>application data</em> যেতে পারে। সাধারণ হিসাব:</p>
+  <div class="cb diagram"><pre>MSS = MTU − IP header − TCP header
+    = 1500 − 20 − 20
+    = 1460 bytes         (IPv4 + সাধারণ TCP)
+
+IPv6-এ IP header 40 bytes, তাই:
+MSS = 1500 − 40 − 20 = 1440 bytes</pre></div>
+
+  <h2>5.3 বিভিন্ন link-এর সাধারণ MTU</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Link</th><th>MTU</th><th>মন্তব্য</th></tr></thead>
+    <tbody>
+      <tr><td>Ethernet</td><td>1500</td><td>কার্যত সর্বজনীন default</td></tr>
+      <tr><td>Wi-Fi (802.11)</td><td>1500 (সাধারণত)</td><td>Ethernet-এর সাথে সঙ্গতি রাখতে</td></tr>
+      <tr><td>Jumbo Frame</td><td>9000</td><td>Data center-এ; সব যন্ত্র support করলে তবেই</td></tr>
+      <tr><td>PPPoE (DSL)</td><td>1492</td><td>PPPoE-এর ৮ bytes header কেটে নেয়</td></tr>
+      <tr><td>WireGuard VPN</td><td>1420 (সাধারণত)</td><td>VPN-এর নিজের header-এর জায়গা</td></tr>
+      <tr><td>IPv4 সর্বনিম্ন গ্যারান্টি</td><td>576</td><td>প্রতিটি link অন্তত এটুকু নিতে বাধ্য</td></tr>
+      <tr><td>IPv6 সর্বনিম্ন গ্যারান্টি</td><td>1280</td><td>IPv6-এ router fragment করে না</td></tr>
+      <tr><td>Loopback (<code>lo</code>)</td><td>65536</td><td>কোনো physical সীমা নেই — memory copy মাত্র</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>5.4 Fragmentation — MTU-র চেয়ে বড় packet হলে</h2>
+  <p>ধরুন একটি host 1500-MTU link-এ আছে, কিন্তু পথের কোথাও একটি VPN tunnel আছে যার MTU 1400। ২০০০ bytes-এর একটি packet এলে দুটি সম্ভাবনা:</p>
+
+  <h3>বিকল্প ১ — Fragmentation (IPv4)</h3>
+  <div class="cb diagram"><pre>মূল IP packet: 1500 bytes মোট (1480 payload)
+পরের link-এর MTU: 1400
+
+Router টিকে ভেঙে দেয়:
+
+Fragment 1:  ┌────────┬──────────────────────┐
+             │IP Hdr  │  payload 1376 bytes  │
+             │MF=1    │                      │
+             │off=0   │                      │
+             └────────┴──────────────────────┘
+
+Fragment 2:  ┌────────┬──────────┐
+             │IP Hdr  │ 104 bytes│
+             │MF=0    │          │
+             │off=172 │          │
+             └────────┴──────────┘
+                                        (offset ৮-এর গুণিতকে গোনা হয়)
+
+পুনর্জোড়া (reassembly) হয় শুধুমাত্র চূড়ান্ত গন্তব্যে —
+মাঝের কোনো router জোড়া লাগায় না।</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Fragmentation কেন খারাপ</div>
+    <ul>
+      <li><strong>একটি fragment হারালে পুরো packet নষ্ট</strong> — সব fragment আবার পাঠাতে হবে। ফলে loss-এর প্রভাব বহুগুণ বাড়ে।</li>
+      <li>শুধু প্রথম fragment-এ TCP/UDP header থাকে — তাই port-ভিত্তিক firewall পরের fragment গুলো নিয়ে বিভ্রান্ত হয়।</li>
+      <li>Reassembly-র জন্য গন্তব্যে memory ও timer লাগে — DoS attack-এর সুযোগ তৈরি করে।</li>
+      <li>Router-এর জন্য অতিরিক্ত CPU খরচ।</li>
+    </ul>
+    <p>এসব কারণেই <strong>IPv6-এ router আর fragment করে না</strong>। IPv6-এ packet বড় হলে router সেটি ফেলে দেয় এবং ICMPv6 "Packet Too Big" পাঠায় — sender-কেই ছোট করে পাঠাতে হয়।</p>
+  </div>
+
+  <h3>বিকল্প ২ — Path MTU Discovery (আধুনিক ও পছন্দনীয়)</h3>
+  <p><strong>Path MTU Discovery</strong> (PMTUD) হলো সেই পদ্ধতি যেখানে sender নিজেই খুঁজে বের করে পুরো পথের সবচেয়ে ছোট MTU কত।</p>
+
+  <div class="cb diagram"><pre>1. Host packet পাঠায় "Don't Fragment" (DF) bit সেট করে,
+   নিজের link-এর MTU (1500) ধরে নিয়ে।
+
+        Host ──[1500, DF=1]──▶ R1 ──▶ R2 (MTU 1400) ✗
+
+2. R2 packet-টি forward করতে পারে না (বড়) এবং fragment-ও
+   করতে পারবে না (DF সেট)। তাই সে packet ফেলে দেয় এবং
+   ICMP পাঠায়:
+
+        Host ◀──[ICMP: Fragmentation Needed, MTU=1400]── R2
+
+3. Host তার MTU cache-এ ওই গন্তব্যের জন্য 1400 লিখে রাখে
+   এবং আবার পাঠায়:
+
+        Host ──[1400, DF=1]──▶ R1 ──▶ R2 ──▶ ✓ গন্তব্য</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ PMTUD Black Hole — বাস্তব জীবনের ভূত</div>
+    <p>অনেক firewall administrator "নিরাপত্তার জন্য" সব ICMP block করে দেন। তখন ধাপ ২-এর ICMP message কখনো sender-এর কাছে পৌঁছায় না। ফল:</p>
+    <ul>
+      <li>ছোট request (TCP handshake, ছোট GET) দিব্যি কাজ করে,</li>
+      <li>কিন্তু বড় response বা বড় POST body চিরতরে আটকে যায়,</li>
+      <li>Connection টাইমআউট হয়, কোনো error message ছাড়াই।</li>
+    </ul>
+    <p>উপসর্গ: <em>"ping কাজ করে, ছোট page লোড হয়, কিন্তু বড় file বা বড় API response hang করে।"</em> এটি VPN এবং tunnel environment-এ কুখ্যাত একটি সমস্যা। <strong>ICMP পুরোপুরি block করা একটি ভুল অভ্যাস</strong> — অন্তত <code>type 3 code 4</code> (Fragmentation Needed) সবসময় অনুমতি দেওয়া উচিত।</p>
+  </div>
+
+  <h2>5.5 Developer Perspective</h2>
+
+  <div class="box dev">
+    <div class="bt">⚙️ কোথায় এটি আপনাকে কামড়াবে</div>
+    <ul>
+      <li><strong>Docker / Kubernetes:</strong> Overlay network (VXLAN) প্রতিটি packet-এ ৫০ bytes header যোগ করে। Host-এর MTU 1500 হলে container-এর হওয়া উচিত 1450। ভুল হলে pod-এর মধ্যে ছোট request কাজ করবে কিন্তু বড় payload আটকে যাবে — একটি চিরায়ত রহস্যময় bug।</li>
+      <li><strong>VPN:</strong> একই কারণ। VPN চালু করলে কিছু website খোলে না — প্রায় সবসময় MTU সমস্যা।</li>
+      <li><strong>Cloud VM:</strong> AWS-এ কিছু instance-এ 9001 MTU, কিছুতে 1500। ভুল মিলে গেলে VPC peering-এ অদ্ভুত আচরণ।</li>
+      <li><strong>UDP-ভিত্তিক protocol:</strong> UDP-তে PMTUD কম কার্যকর, তাই DNS-এর মতো protocol ঐতিহাসিকভাবে ৫১২ bytes-এ সীমাবদ্ধ ছিল — যাতে কখনো fragment না হয় (Ch 26)। QUIC-ও প্রাথমিক packet ১২০০ bytes-এর নিচে রাখে।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 5 — নিজের path MTU খুঁজে বের করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার machine থেকে একটি গন্তব্য পর্যন্ত পথের সবচেয়ে ছোট MTU-টি হাতে-কলমে বের করা, DF bit ব্যবহার করে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># নিজের interface-এর MTU দেখুন
+ip link | grep mtu              # Linux
+ifconfig | grep -i mtu          # macOS
+
+# DF bit সেট করে বিভিন্ন আকারে ping করুন (Linux)
+ping -M do -s 1472 -c 1 1.1.1.1     # 1472 + 8 ICMP + 20 IP = 1500 ✓
+ping -M do -s 1473 -c 1 1.1.1.1     # 1501 → হওয়ার কথা fail
+
+# macOS-এ:
+ping -D -s 1472 -c 1 1.1.1.1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> 1472-এ সফল, 1473-এ বার্তা আসবে <code>Frag needed and DF set (mtu = 1500)</code> বা <code>Message too long</code>। এখন সংখ্যাটি কমিয়ে binary search করুন — যেখানে সফল/ব্যর্থের সীমারেখা, সেখানে <code>সীমা + 28 = path MTU</code>। VPN চালু করে আবার চালান — সংখ্যাটি কমে যাবে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Path MTU কোনো তাত্ত্বিক সংখ্যা নয়, এটি পথের সবচেয়ে সংকীর্ণ link দ্বারা নির্ধারিত একটি বাস্তব সীমা — এবং আপনি নিজেই সেটি মেপে ফেলতে পারেন। ২৮ যোগ করছেন কারণ ২০ bytes IP header + ৮ bytes ICMP header।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>MTU = একটি link একবারে যত bytes IP-level payload নিতে পারে। Ethernet-এ 1500।</li>
+      <li>MSS = MTU − IP header − TCP header। IPv4/TCP-তে সাধারণত 1460।</li>
+      <li>বড় packet এলে IPv4 router fragment করতে পারে; কিন্তু fragmentation ব্যয়বহুল ও ভঙ্গুর।</li>
+      <li>IPv6-এ router fragment করে না — sender-কেই ঠিক আকারে পাঠাতে হয়।</li>
+      <li>PMTUD দিয়ে sender পথের সবচেয়ে ছোট MTU খুঁজে নেয় — কিন্তু এর জন্য ICMP পৌঁছানো <em>আবশ্যক</em>।</li>
+      <li>ICMP block করা = PMTUD black hole = "ছোট request কাজ করে, বড়টা hang করে"।</li>
+      <li>VPN, Docker overlay এবং tunnel প্রতিটি packet-এ header যোগ করে, তাই কার্যকর MTU কমে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Ethernet MTU 1500 হলে একটি TCP segment-এ সর্বোচ্চ কত application data যেতে পারে (IPv4)?</summary>
+    <div class="ans"><p>1460 bytes। 1500 − 20 (IP header) − 20 (TCP header) = 1460। TCP timestamp-এর মতো option থাকলে TCP header বড় হয়ে ৩২ bytes হতে পারে, তখন MSS নেমে আসে ১৪৪৮-এ।</p></div>
+  </details>
+  <details class="qa"><summary>একটি packet ৪টি fragment-এ ভাগ হলো এবং তার মধ্যে ১টি হারাল। কী হবে?</summary>
+    <div class="ans"><p>পুরো original packet-টি নষ্ট — বাকি ৩টি fragment গন্তব্যে পৌঁছেও কোনো কাজে আসে না, কারণ reassembly অসম্পূর্ণ। গন্তব্য timer শেষ হলে সেগুলো ফেলে দেয়। TCP তখন পুরো segment-টি আবার পাঠাবে (আবার ৪টি fragment হয়ে)। এজন্যই fragmentation loss-এর প্রভাবকে বহুগুণ বাড়িয়ে দেয়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি site-এ ping কাজ করে, homepage খোলে, কিন্তু বড় file download hang হয়ে যায়। প্রথম সন্দেহ কী?</summary>
+    <div class="ans"><p><strong>PMTUD black hole।</strong> ছোট packet পথের সংকীর্ণ link-এ আটকায় না, তাই handshake ও ছোট response ঠিকঠাক যায়। বড় data-এর packet MTU ছাড়িয়ে যায়, router সেগুলো ফেলে দেয়, কিন্তু ICMP "Fragmentation Needed" কোথাও block হয়ে আছে — তাই sender কখনো জানতে পারে না, শুধু retransmit করতে থাকে। যাচাই: <code>ping -M do</code> দিয়ে path MTU মাপুন, বা interface-এর MTU সাময়িকভাবে ১৪০০ করে দেখুন সমস্যা যায় কিনা।</p></div>
+  </details>
+  <details class="qa"><summary>Loopback interface-এর MTU 65536 কেন?</summary>
+    <div class="ans"><p>কারণ loopback-এ কোনো physical medium নেই — data কখনো তারে যায় না, শুধু kernel-এর মধ্যে memory copy হয়। তাই collision, transmission time বা bit error-এর কোনো প্রশ্নই নেই, ছোট রাখার কোনো কারণ নেই। বড় MTU মানে কম packet, কম overhead, দ্রুত local IPC।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch4"><div class="d">পূর্ববর্তী</div><div class="t">Ch 4 — Bits, Bytes, Frames, Packets</div></a>
+    <a class="nx" href="#ch6"><div class="d">পরবর্তী</div><div class="t">Ch 6 — MAC Addresses and Ethernet</div></a>
+  </div>
+</section>

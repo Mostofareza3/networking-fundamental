@@ -1,0 +1,261 @@
+<section class="chapter" id="ch3">
+  <div class="ch-eyebrow">Chapter 3</div>
+  <h1>Network Layers &amp; Encapsulation</h1>
+  <p class="ch-lede">OSI-এর সাতটি layer মুখস্থ করা networking শেখা নয়। কিন্তু <em>কেন</em> layer-এ ভাগ করা হলো এবং <em>encapsulation</em> ঠিক কীভাবে কাজ করে — এই দুটি বুঝলে বাকি বইয়ের প্রায় সব কিছু জায়গামতো বসে যাবে।</p>
+
+  <h2>3.1 Why does this exist?</h2>
+  <p>কল্পনা করুন কেউ একটি single, monolithic protocol লিখল যেটি একসাথে করে: তামার তারে voltage নিয়ন্ত্রণ, পাশের machine খুঁজে বের করা, পৃথিবীর অন্য প্রান্তে পথ নির্ধারণ, হারানো data পুনরায় পাঠানো, encryption, এবং HTTP request-এর গঠন।</p>
+
+  <p>এই design-এ ভয়াবহ সমস্যা:</p>
+  <ul>
+    <li>Wi-Fi আবিষ্কার হলে পুরো protocol নতুন করে লিখতে হবে — কারণ তামার তারের অংশটা এতে জড়ানো।</li>
+    <li>HTTP-এর নতুন version আনতে হলে routing-এর কোড ছুঁতে হবে।</li>
+    <li>Copper আর fiber-এর জন্য পুরো আলাদা দুটো Internet লাগবে।</li>
+  </ul>
+
+  <div class="box why">
+    <div class="bt">💡 Why Layers</div>
+    <p>Layering হলো networking-এ প্রয়োগ করা <strong>separation of concerns</strong>। প্রতিটি layer:</p>
+    <ul>
+      <li>একটি নির্দিষ্ট সমস্যা সমাধান করে,</li>
+      <li>নিচের layer-এর কাছে একটি নির্দিষ্ট service চায়,</li>
+      <li>উপরের layer-কে একটি নির্দিষ্ট service দেয়,</li>
+      <li>এবং <strong>পাশের layer গুলোর ভেতরের কথা জানে না</strong>।</li>
+    </ul>
+    <p>ফল: TCP-কে কিছু না বদলে আপনি Ethernet থেকে Wi-Fi-তে যেতে পারেন। HTTP-এর নতুন version আনতে IP-তে হাত দিতে হয় না। এটি software architecture-এর সবচেয়ে সফল প্রয়োগগুলোর একটি — আপনি যদি কখনো interface-based design বা dependency inversion ব্যবহার করে থাকেন, এটি ঠিক সেই ধারণা।</p>
+  </div>
+
+  <h2>3.2 দুটি model — OSI এবং TCP/IP</h2>
+  <p><strong>OSI model</strong> (Open Systems Interconnection) হলো একটি ৭-layer তাত্ত্বিক reference model। <strong>TCP/IP model</strong> হলো বাস্তবে যেটি Internet চালাচ্ছে সেটি — এতে ৪ বা ৫টি layer।</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>#</th><th>OSI Layer</th><th>বাস্তব TCP/IP</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td>7</td><td>Application</td><td rowspan="3" style="vertical-align:middle"><strong>Application</strong></td><td>HTTP, DNS, SMTP</td></tr>
+      <tr><td>6</td><td>Presentation</td><td>TLS*, encoding</td></tr>
+      <tr><td>5</td><td>Session</td><td>—</td></tr>
+      <tr><td>4</td><td>Transport</td><td><strong>Transport</strong></td><td>TCP, UDP</td></tr>
+      <tr><td>3</td><td>Network</td><td><strong>Network / Internet</strong></td><td>IP, ICMP</td></tr>
+      <tr><td>2</td><td>Data Link</td><td rowspan="2" style="vertical-align:middle"><strong>Link</strong></td><td>Ethernet, Wi-Fi, ARP</td></tr>
+      <tr><td>1</td><td>Physical</td><td>তার, radio, fiber</td></tr>
+    </tbody>
+  </table></div>
+
+  <p style="font-size:14px;color:var(--text-dim)">* TLS-কে প্রায়ই "Layer 6" বলা হয়, কিন্তু বাস্তবে সে TCP-এর ঠিক উপরে বসা একটি application-level library। OSI-এর সাথে হুবহু মেলানোর চেষ্টা এখানে বিভ্রান্তিকর।</p>
+
+  <div class="box warn">
+    <div class="bt">⚠️ OSI নিয়ে সৎ কথা</div>
+    <p>OSI-এর ৭ layer একটি <em>শেখানোর কাঠামো</em>, Internet-এর প্রকৃত নকশা নয়। বাস্তবে layer 5 এবং 6 কার্যত ফাঁকা, আর TLS, QUIC, VPN-এর মতো জিনিস পরিষ্কারভাবে কোনো একটি layer-এ বসে না। <strong>"Please Do Not Throw Sausage Pizza Away" মুখস্থ করা এই বইয়ের লক্ষ্য নয়।</strong> লক্ষ্য হলো এই পাঁচটি দায়িত্ব বোঝা: physical signaling, local delivery, global routing, process-to-process reliability, application semantics। কেউ "Layer 3 problem" বললে যেন বোঝেন সে routing/IP-এর কথা বলছে — এটুকুই যথেষ্ট।</p>
+  </div>
+
+  <h2>3.3 প্রতিটি layer-এর একটি বাক্যের দায়িত্ব</h2>
+
+  <div class="cb diagram"><pre>┌─────────────────────────────────────────────────────────────┐
+│ APPLICATION   "দুই program কী ভাষায় কথা বলবে?"                │
+│ HTTP, DNS     → GET /users, JSON, status code                │
+├─────────────────────────────────────────────────────────────┤
+│ TRANSPORT     "কোন process পাবে, এবং নির্ভরযোগ্যভাবে?"          │
+│ TCP, UDP      → port number, sequence, ACK, retransmit       │
+├─────────────────────────────────────────────────────────────┤
+│ NETWORK       "পৃথিবীর কোন machine, এবং কোন পথে?"              │
+│ IP, ICMP      → IP address, routing, TTL                     │
+├─────────────────────────────────────────────────────────────┤
+│ LINK          "পাশের/পরের যন্ত্রটিকে কীভাবে দেব?"               │
+│ Ethernet,Wi-Fi→ MAC address, frame, error detect             │
+├─────────────────────────────────────────────────────────────┤
+│ PHYSICAL      "0 আর 1 কে signal-এ কীভাবে বদলাব?"              │
+│ তার, radio     → voltage, আলোর pulse, radio wave              │
+└─────────────────────────────────────────────────────────────┘</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — দুটি scope</div>
+    <p>এই পার্থক্যটি বইয়ের অন্যতম গুরুত্বপূর্ণ ধারণা:</p>
+    <ul>
+      <li><strong>Link layer = এক hop।</strong> শুধু "আমার থেকে পরের যন্ত্র পর্যন্ত"। প্রতিটি hop-এ নতুন করে লেখা হয়।</li>
+      <li><strong>Network layer = end to end।</strong> মূল উৎস থেকে চূড়ান্ত গন্তব্য পর্যন্ত অপরিবর্তিত থাকে।</li>
+    </ul>
+    <p>এজন্যই MAC address প্রতি hop-এ বদলায় কিন্তু destination IP বদলায় না। Chapter 13-এ এটি ধাপে ধাপে দেখব — এবং এটি বুঝলে "router কেন MAC বদলায় কিন্তু IP বদলায় না" প্রশ্নটির উত্তর আপনাআপনি চলে আসে।</p>
+  </div>
+
+  <h2>3.4 Encapsulation — বইয়ের সবচেয়ে গুরুত্বপূর্ণ ধারণা</h2>
+  <p><strong>Encapsulation</strong> (এনক্যাপসুলেশন) হলো সেই প্রক্রিয়া যেখানে প্রতিটি layer উপরের layer-এর পুরো data-কে <em>অস্বচ্ছ payload</em> হিসেবে ধরে নিয়ে তার সামনে (এবং কখনো পেছনে) নিজের header যোগ করে।</p>
+
+  <p>মূল কথাটি এই: <strong>নিচের layer উপরের layer-এর data-এর ভেতরে কী আছে তা জানে না এবং জানার দরকারও নেই।</strong> IP জানে না সে TCP বহন করছে না UDP; সে শুধু জানে "এই বান্ডিলটা ওই address-এ পৌঁছাতে হবে"।</p>
+
+  <h3>পাঠানোর সময় — নিচে নামা</h3>
+  <div class="cb diagram"><pre>ধাপ 1 — Application আপনার data দেয়:
+
+        ┌──────────────────────┐
+        │  "GET /users ..."    │
+        └──────────────────────┘
+
+ধাপ 2 — TCP সামনে নিজের header লাগায় (port, seq, ACK):
+
+        ┌────────┬──────────────────────┐
+        │TCP Hdr │  "GET /users ..."    │   = SEGMENT
+        └────────┴──────────────────────┘
+
+ধাপ 3 — IP সামনে নিজের header লাগায় (src IP, dst IP, TTL):
+
+    ┌───────┬────────┬──────────────────────┐
+    │IP Hdr │TCP Hdr │  "GET /users ..."    │   = PACKET
+    └───────┴────────┴──────────────────────┘
+
+ধাপ 4 — Ethernet সামনে header, পেছনে trailer (checksum):
+
+┌────────┬───────┬────────┬──────────────────────┬─────┐
+│Eth Hdr │IP Hdr │TCP Hdr │  "GET /users ..."    │ FCS │  = FRAME
+└────────┴───────┴────────┴──────────────────────┴─────┘
+
+ধাপ 5 — NIC পুরোটাকে signal-এ বদলায়:
+
+    10110100 01101001 11010010 00101101 ...     = BITS</pre></div>
+
+  <h3>গ্রহণের সময় — উপরে ওঠা (de-encapsulation)</h3>
+  <div class="cb diagram"><pre>BITS      →  NIC signal থেকে bit বানায়
+   ↓
+FRAME     →  "এই MAC কি আমার? হ্যাঁ।" Eth header খুলে ফেলে
+   ↓          checksum যাচাই করে
+PACKET    →  "এই IP কি আমার? হ্যাঁ।" IP header খুলে ফেলে
+   ↓          protocol field দেখে: 6 = TCP
+SEGMENT   →  "port 443? কোন socket?" TCP header খুলে ফেলে
+   ↓          seq দেখে ঠিক জায়গায় বসায়
+DATA      →  Application-এর read() call এই bytes পায়</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — চিঠি ও খাম</div>
+    <p>আপনি একটি চিঠি লিখলেন (application data)। সেটি একটি খামে ভরলেন যাতে ঠিকানা লেখা (IP header)। সেই খামটি ডাকঘরের একটি বস্তায় গেল যাতে "পরের শাখা: চট্টগ্রাম" লেখা (Ethernet frame)। চট্টগ্রামে পৌঁছে বস্তা খোলা হলো এবং খামটি নতুন বস্তায় ভরা হলো "পরের শাখা: হালিশহর" লিখে — <strong>খাম অপরিবর্তিত, বস্তা বদলে গেল</strong>। এটাই hop-by-hop link layer বনাম end-to-end network layer।</p>
+    <p>আর গুরুত্বপূর্ণ বিষয়: ডাকঘরের কেউ আপনার <em>চিঠিটা</em> পড়ে না। প্রতিটি layer শুধু নিজের header পড়ে। এটিই encapsulation-এর শক্তি।</p>
+  </div>
+
+  <h2>3.5 Interactive — একটি packet-এর ভেতরে</h2>
+  <p>নিচের প্রতিটি স্তরে click করে দেখুন সেখানে কী থাকে এবং কে সেটি পড়ে। এটি একটি HTTPS request-এর packet, যা Wi-Fi দিয়ে যাচ্ছে।</p>
+
+  <div class="pkt" id="pkt1">
+    <div class="pkt-hint">▸ যেকোনো স্তরে click করুন — বাইরের মোড়ক সবার উপরে, আপনার data সবার নিচে</div>
+
+    <div class="layer" data-d="d1"><span class="tag">L2</span><span class="nm">Ethernet Header</span><span class="sz">14 bytes</span></div>
+    <div class="detail" id="d1">
+      <p><strong>কী আছে:</strong> Destination MAC (6 B), Source MAC (6 B), EtherType (2 B — <code>0x0800</code> মানে ভেতরে IPv4, <code>0x86DD</code> মানে IPv6, <code>0x0806</code> মানে ARP)।</p>
+      <p><strong>কে পড়ে:</strong> switch এবং পরবর্তী hop-এর NIC।</p>
+      <p><strong>কতদূর টেকে:</strong> মাত্র <strong>এক hop</strong>। প্রতিটি router এই header ফেলে দিয়ে নতুন লেখে। → Chapter 6</p>
+    </div>
+
+    <div class="layer" data-d="d2"><span class="tag">L3</span><span class="nm">IP Header</span><span class="sz">20 bytes</span></div>
+    <div class="detail" id="d2">
+      <p><strong>কী আছে:</strong> Source IP, Destination IP, TTL, Protocol (6 = TCP, 17 = UDP, 1 = ICMP), Total Length, Header Checksum, Fragment fields।</p>
+      <p><strong>কে পড়ে:</strong> পথের প্রতিটি router।</p>
+      <p><strong>কতদূর টেকে:</strong> <strong>end to end</strong> — গন্তব্য পর্যন্ত IP অপরিবর্তিত (NAT ছাড়া, Ch 34)। শুধু TTL প্রতি hop-এ ১ করে কমে। → Chapter 9</p>
+    </div>
+
+    <div class="layer L4" data-d="d3"><span class="tag">L4</span><span class="nm">TCP Header</span><span class="sz">20+ bytes</span></div>
+    <div class="detail" id="d3">
+      <p><strong>কী আছে:</strong> Source Port, Destination Port (443), Sequence Number, Acknowledgment Number, Flags (SYN/ACK/FIN/RST/PSH), Window Size, Checksum।</p>
+      <p><strong>কে পড়ে:</strong> <strong>শুধু দুই প্রান্তের kernel</strong>। মাঝের router-রা সাধারণত এটি পড়েও না — TCP end-to-end।</p>
+      <p><strong>কাজ:</strong> কোন process পাবে (port), কোন ক্রমে বসবে (seq), কী পাওয়া গেছে (ACK)। → Chapter 17–19</p>
+    </div>
+
+    <div class="layer" data-d="d4"><span class="tag">TLS</span><span class="nm">TLS Record Header</span><span class="sz">5 bytes</span></div>
+    <div class="detail" id="d4">
+      <p><strong>কী আছে:</strong> Content Type, TLS version, Record Length। এর পরেই শুরু হয় <em>encrypted</em> অংশ।</p>
+      <p><strong>গুরুত্বপূর্ণ:</strong> এই header-এর <em>নিচের</em> সব কিছু encrypted। পথের কেউ IP, port, packet-এর আকার দেখতে পায় — কিন্তু URL, header, body দেখতে পায় না। → Chapter 31–33</p>
+    </div>
+
+    <div class="layer" data-d="d5"><span class="tag">L7</span><span class="nm">HTTP Request (encrypted)</span><span class="sz">variable</span></div>
+    <div class="detail" id="d5">
+      <p><strong>কী আছে:</strong> <code>GET /users HTTP/1.1</code>, <code>Host:</code>, <code>Authorization:</code>, cookie, body — অর্থাৎ আপনার application যা লিখেছে।</p>
+      <p><strong>কে পড়ে:</strong> শুধু গন্তব্য server-এর application process, TLS decrypt করার পরে। → Chapter 28</p>
+    </div>
+
+    <div class="layer" data-d="d6"><span class="tag">L2</span><span class="nm">Ethernet FCS (trailer)</span><span class="sz">4 bytes</span></div>
+    <div class="detail" id="d6">
+      <p><strong>কী আছে:</strong> Frame Check Sequence — পুরো frame-এর একটি CRC32 checksum।</p>
+      <p><strong>কাজ:</strong> transmission-এ bit নষ্ট হয়েছে কিনা তা <em>শনাক্ত</em> করা। Ethernet ভাঙা frame মেরামত করে না — সে চুপচাপ ফেলে দেয়। মেরামতের দায়িত্ব উপরের layer-এর (TCP)। এটি একটি চমৎকার উদাহরণ: <strong>প্রতিটি layer শুধু নিজের দায়িত্ব পালন করে।</strong></p>
+    </div>
+  </div>
+
+  <h2>3.6 Overhead — একটি হিসাব</h2>
+  <p>Encapsulation বিনামূল্যে আসে না। প্রতিটি header জায়গা নেয়:</p>
+
+  <div class="cb diagram"><pre>একটি সাধারণ 1500-byte Ethernet frame-এ:
+
+  Ethernet header + FCS  :   18 bytes
+  IPv4 header            :   20 bytes
+  TCP header             :   20 bytes
+  ─────────────────────────────────────
+  মোট overhead           :   58 bytes
+  Application data       : 1442 bytes  (~96%)
+
+কিন্তু আপনি যদি একবারে 1 byte পাঠান:
+
+  overhead : 58 bytes
+  data     :  1 byte    (~1.7% efficiency!)</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <p>এজন্যই ১০০০ বার ১ byte পাঠানোর চেয়ে একবারে ১০০০ byte পাঠানো নাটকীয়ভাবে দ্রুত। এজন্যই TCP-এর <em>Nagle's algorithm</em> ছোট write গুলোকে জমা করে একসাথে পাঠায় (আর latency-sensitive application-এ আমরা <code>TCP_NODELAY</code> দিয়ে সেটি বন্ধ করি)। এজন্যই database-এ batch insert দ্রুত, এবং এজন্যই GraphQL/HTTP2-এ request একত্র করার এত চেষ্টা। <strong>Per-message overhead হলো একটি বাস্তব খরচ, এবং এটি সরাসরি encapsulation থেকে আসে।</strong></p>
+  </div>
+
+  <h2>3.7 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Data উপর থেকে নিচে নামার সময় প্রতিটি layer আগের layer-এর data-কে বদলে দেয় বা রূপান্তর করে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>প্রতিটি layer উপরের layer-এর data-কে <strong>অপরিবর্তিত রেখে</strong> শুধু নিজের header <em>যোগ</em> করে। আপনার HTTP request-এর bytes যেমন ছিল, তার-এর মধ্য দিয়ে যাওয়ার সময়ও ঠিক তেমনই থাকে — শুধু সামনে-পেছনে কিছু মোড়ক যুক্ত হয়। (ব্যতিক্রম: TLS আসলেই encrypt করে রূপান্তর করে — সেটিই তার কাজ।)</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Router সব layer খুলে দেখে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>একটি সাধারণ router শুধু <strong>Layer 2 এবং Layer 3</strong> পর্যন্ত খোলে — frame খুলে IP header দেখে সিদ্ধান্ত নেয়, তারপর নতুন frame বানায়। TCP header তার কাছে অর্থহীন payload মাত্র। (NAT router-রা ব্যতিক্রম — তারা port বদলানোর জন্য TCP/UDP header-এ হাত দেয়, Ch 34। আর Layer-7 load balancer HTTP পর্যন্ত খোলে, Ch 47 — কিন্তু সেটি "router" নয়।)</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>OSI-এর ৭টি layer মুখস্থ না করলে networking শেখা যায় না।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>বাস্তবে Internet চলে ৪–৫টি layer-এ। "Layer 2 / Layer 3 / Layer 4 / Layer 7" — এই চারটি শব্দ industry-তে ব্যবহৃত হয় এবং এদের অর্থ (link / IP / TCP-UDP / application) জানাই যথেষ্ট। Layer 5 আর 6 বাস্তবে প্রায় কেউ আলাদা করে ব্যবহার করে না।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 3 — নিজের চোখে encapsulation দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি বাস্তব packet-এ Ethernet, IP এবং TCP header তিনটি স্তরে সাজানো আছে, তা নিজের machine-এ যাচাই করা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># root/sudo দরকার। একটি TCP packet ধরুন এবং সব layer দেখান।
+sudo tcpdump -i any -n -c 1 -e -v 'tcp port 443'
+
+# তারপর অন্য একটি terminal-এ:
+curl -s https://example.com > /dev/null</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>-e</code> flag link-layer header দেখায়। Output-এ প্রথমে পাবেন দুটি MAC address (<code>aa:bb:cc... > dd:ee:ff...</code>) এবং <code>ethertype IPv4</code> — এটাই Ethernet header। তারপর <code>IP</code> শব্দের পরে source ও destination IP এবং <code>ttl</code> — এটাই IP header। তারপর <code>Flags [S]</code>, <code>seq</code>, <code>win</code> — এটাই TCP header। <strong>একটি লাইনেই তিনটি layer, একটির ভেতরে আরেকটি।</strong></p>
+    <p><strong>আমরা কী শিখলাম:</strong> Encapsulation কোনো তাত্ত্বিক চিত্র নয় — এটি তারের ভেতর দিয়ে যাওয়া bytes-এর প্রকৃত বিন্যাস। <code>tcpdump</code> ঠিক এই বিন্যাসটাই parse করে দেখাচ্ছে। → বিস্তারিত Chapter 41।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Layering = separation of concerns। প্রতিটি layer একটি সমস্যা সমাধান করে এবং পাশেরটির ভেতর জানে না।</li>
+      <li>বাস্তব stack: Application → Transport → Network → Link → Physical।</li>
+      <li><strong>Encapsulation</strong> = প্রতিটি layer উপরের সব কিছুকে payload ধরে নিজের header যোগ করে।</li>
+      <li>নিচে নামা: Data → Segment → Packet → Frame → Bits। উপরে ওঠা: ঠিক উল্টো।</li>
+      <li><strong>Link layer এক hop-এর জন্য, Network layer end-to-end</strong> — এটিই MAC বদলায় কিন্তু IP বদলায় না-এর কারণ।</li>
+      <li>Header গুলো overhead — তাই ছোট ছোট অনেক write-এর চেয়ে বড় একটি write দক্ষ।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Encapsulation-এর সময় IP layer কি TCP header পড়ে বা বোঝে?</summary>
+    <div class="ans"><p>না। IP-এর কাছে TCP segment-টি একটি অস্বচ্ছ byte-এর গুচ্ছ। IP শুধু নিজের header-এর <code>Protocol</code> field-এ <code>6</code> লিখে রাখে যাতে গন্তব্যের kernel জানতে পারে payload-টি TCP-কে দিতে হবে। এটাই সঠিক layering — IP জানে <em>কাকে দিতে হবে</em>, কিন্তু <em>ভেতরে কী আছে</em> তা নয়।</p></div>
+  </details>
+  <details class="qa"><summary>Segment, packet এবং frame — এদের সম্পর্ক কী?</summary>
+    <div class="ans"><p>এরা একই data-এর ক্রমবর্ধমান মোড়ক। <strong>Segment</strong> = TCP header + data। <strong>Packet</strong> = IP header + segment। <strong>Frame</strong> = Ethernet header + packet + FCS। অর্থাৎ frame-এর ভেতরে packet, packet-এর ভেতরে segment, segment-এর ভেতরে আপনার data।</p></div>
+  </details>
+  <details class="qa"><summary>একটি packet ৫টি router পেরিয়ে গেল। Ethernet header কতবার বদলাল? Destination IP কতবার বদলাল?</summary>
+    <div class="ans"><p>Ethernet header বদলাল প্রতিটি hop-এ — অর্থাৎ ৬ বার লেখা হলো (host→R1, R1→R2, R2→R3, R3→R4, R4→R5, R5→server)। Destination IP বদলাল <strong>শূন্য বার</strong> (NAT না থাকলে)। TTL কমল ৫ বার। এটিই "link = hop-local, network = end-to-end" নীতির সরাসরি ফল।</p></div>
+  </details>
+  <details class="qa"><summary>Ethernet-এর FCS ভাঙা frame শনাক্ত করে ফেলে দেয়, কিন্তু আবার পাঠায় না। এটি কি একটি design ত্রুটি?</summary>
+    <div class="ans"><p>না, এটি সচেতন design। Ethernet-এর দায়িত্ব শুধু "নষ্ট data উপরে পাঠাব না" — মেরামত নয়। মেরামত (retransmission) end-to-end সমস্যা, কারণ data ৫টি ভিন্ন link পেরোতে পারে; প্রতিটি link আলাদাভাবে reliability দিলেও end-to-end নির্ভরযোগ্যতার নিশ্চয়তা মেলে না। তাই সেই দায়িত্ব TCP-র, যে দুই প্রান্তে বসে আছে। এটি <em>end-to-end principle</em>-এর ধ্রুপদী উদাহরণ।</p></div>
+  </details>
+  <details class="qa"><summary>1 byte data পাঠাতে তারে সর্বনিম্ন কত byte যায় (TCP/IPv4/Ethernet)?</summary>
+    <div class="ans"><p>কমপক্ষে ৫৯ bytes payload+header (14 Eth + 20 IP + 20 TCP + 1 data + 4 FCS = 59)। বাস্তবে Ethernet-এর সর্বনিম্ন frame আকার 64 bytes, তাই padding দিয়ে ৬৪ bytes-এ পৌঁছায় — সাথে preamble ও inter-frame gap আলাদা। অর্থাৎ ১ byte পাঠাতে তারে যায় প্রায় ৮৪ bytes সমতুল্য সময়। এটিই ছোট packet-এর নিদারুণ অদক্ষতা।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch2"><div class="d">পূর্ববর্তী</div><div class="t">Ch 2 — Network Components</div></a>
+    <a class="nx" href="#ch4"><div class="d">পরবর্তী</div><div class="t">Ch 4 — Bits, Bytes, Frames, Packets</div></a>
+  </div>
+</section>

@@ -1,0 +1,122 @@
+<section class="chapter" id="ch24">
+  <div class="ch-eyebrow">Chapter 24</div>
+  <h1>TCP vs UDP — সঠিক তুলনা</h1>
+  <p class="ch-lede">"TCP ধীর, UDP দ্রুত" — এই সরলীকরণটি এতটাই প্রচলিত যে অনেকে এর ভিত্তিতে architecture-এর সিদ্ধান্ত নেন। এটি ভুল, এবং কেন ভুল তা বোঝা গুরুত্বপূর্ণ।</p>
+
+  <h2>24.1 পূর্ণ তুলনা</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>বৈশিষ্ট্য</th><th>TCP</th><th>UDP</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Connection</strong></td><td>Connection-oriented; handshake দরকার</td><td>Connectionless; সরাসরি পাঠান</td></tr>
+      <tr><td><strong>Reliability</strong></td><td>নিশ্চিত delivery (নাহলে জানায়)</td><td>কোনো নিশ্চয়তা নেই</td></tr>
+      <tr><td><strong>Ordering</strong></td><td>ক্রম বজায় থাকে</td><td>কোনো ক্রম নেই</td></tr>
+      <tr><td><strong>Retransmission</strong></td><td>স্বয়ংক্রিয়</td><td>নেই (application-এর দায়িত্ব)</td></tr>
+      <tr><td><strong>Duplicate detection</strong></td><td>আছে</td><td>নেই</td></tr>
+      <tr><td><strong>Flow control</strong></td><td>আছে (receive window)</td><td>নেই</td></tr>
+      <tr><td><strong>Congestion control</strong></td><td>আছে (cwnd, AIMD)</td><td>নেই</td></tr>
+      <tr><td><strong>Header size</strong></td><td>২০+ bytes</td><td>৮ bytes</td></tr>
+      <tr><td><strong>Data model</strong></td><td>Byte stream (সীমানা নেই)</td><td>Datagram (সীমানা সংরক্ষিত)</td></tr>
+      <tr><td><strong>Multicast/Broadcast</strong></td><td>সম্ভব নয়</td><td>সম্ভব</td></tr>
+      <tr><td><strong>প্রথম byte-এর বিলম্ব</strong></td><td>১ RTT (handshake)</td><td>০ RTT</td></tr>
+      <tr><td><strong>Head-of-line blocking</strong></td><td>আছে</td><td>নেই</td></tr>
+      <tr><td><strong>State (kernel-এ)</strong></td><td>প্রতি connection-এ উল্লেখযোগ্য</td><td>প্রায় কিছুই নেই</td></tr>
+      <tr><td><strong>সাধারণ ব্যবহার</strong></td><td>HTTP, SSH, database, email, file transfer</td><td>DNS, QUIC, VoIP, gaming, streaming, DHCP</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>24.2 "TCP ধীর, UDP দ্রুত" — কেন এটি ভুল</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>UDP TCP-র চেয়ে দ্রুত, তাই performance দরকার হলে UDP ব্যবহার করা উচিত।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>দুটি protocol-ই একই তারে, একই গতিতে packet পাঠায়। "গতি"-র পার্থক্য আসে <em>নির্দিষ্ট পরিস্থিতিতে</em>, এবং সেগুলো জানা জরুরি:</p>
+    <ul>
+      <li><strong>UDP-র প্রকৃত সুবিধা:</strong> handshake নেই (১ RTT সাশ্রয়), head-of-line blocking নেই, কম header, কম state।</li>
+      <li><strong>কিন্তু:</strong> আপনার যদি reliability দরকার হয় এবং আপনি সেটি UDP-র উপর নিজে লেখেন, আপনার implementation প্রায় নিশ্চিতভাবে TCP-র চেয়ে <em>খারাপ</em> হবে — কারণ TCP-র congestion control ৩৫ বছরের গবেষণা ও বাস্তব পরীক্ষার ফসল।</li>
+      <li><strong>বাস্তবে:</strong> বড় ফাইল transfer-এ TCP প্রায়ই সরল UDP implementation-এর চেয়ে দ্রুত, কারণ তার congestion control পথের প্রকৃত ক্ষমতা কাজে লাগাতে পারে।</li>
+    </ul>
+    </div>
+  </div>
+
+  <div class="box model">
+    <div class="bt">🧠 সঠিক প্রশ্নটি</div>
+    <p>"কোনটি দ্রুত?" — ভুল প্রশ্ন।<br>
+    <strong>"আমার application-এর জন্য পুরনো data-র কি কোনো মূল্য আছে?"</strong> — সঠিক প্রশ্ন।</p>
+    <div class="cb diagram"><pre>পুরনো data-র মূল্য আছে?
+    │
+    ├── হ্যাঁ (ফাইল, API response, database query)
+    │     → TCP
+    │     সব byte দরকার, ক্রম দরকার, দেরি হলেও চলবে
+    │
+    └── না (video frame, খেলোয়াড়ের অবস্থান, sensor reading)
+          → UDP
+          নতুন data-ই আসল; পুরনোটা পেয়ে লাভ নেই
+
+দ্বিতীয় প্রশ্ন:
+বিনিময়টি কি এত ছোট যে handshake-ই বেশি খরচ?
+    → হ্যাঁ হলে UDP (যেমন DNS)</pre></div>
+  </div>
+
+  <h2>24.3 সিদ্ধান্তের কাঠামো</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>যদি আপনার দরকার হয়...</th><th>বেছে নিন</th></tr></thead>
+    <tbody>
+      <tr><td>প্রতিটি byte অবশ্যই পৌঁছাতে হবে</td><td><strong>TCP</strong></td></tr>
+      <tr><td>ক্রম গুরুত্বপূর্ণ</td><td><strong>TCP</strong></td></tr>
+      <tr><td>বড় data transfer</td><td><strong>TCP</strong></td></tr>
+      <tr><td>Request/response semantics</td><td><strong>TCP</strong> (বা ছোট হলে UDP)</td></tr>
+      <tr><td>Real-time, latency-সংবেদনশীল</td><td><strong>UDP</strong></td></tr>
+      <tr><td>পুরনো data ফেলে দেওয়াই ভালো</td><td><strong>UDP</strong></td></tr>
+      <tr><td>একাধিক প্রাপকের কাছে একসাথে</td><td><strong>UDP</strong> (multicast)</td></tr>
+      <tr><td>খুব ছোট, একবারের বিনিময়</td><td><strong>UDP</strong></td></tr>
+      <tr><td>TCP-র reliability কিন্তু HOL blocking ছাড়া</td><td><strong>QUIC</strong> (Ch 45)</td></tr>
+      <tr><td>Web application</td><td><strong>HTTP/2 (TCP)</strong> বা <strong>HTTP/3 (QUIC)</strong></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>24.4 QUIC — বিতর্কের অবসান</h2>
+
+  <div class="box tip">
+    <div class="bt">✓ তৃতীয় পথ</div>
+    <p>QUIC এই পুরো বিতর্কটিকে অপ্রাসঙ্গিক করে দিয়েছে। সে UDP-র উপর নির্মিত, কিন্তু TCP-র সব নির্ভরযোগ্যতা দেয় — এবং আরও কিছু:</p>
+    <div class="cb diagram"><pre>          TCP        UDP        QUIC
+Reliable   ✓          ✗          ✓
+Ordered    ✓ (সব)     ✗          ✓ (stream-প্রতি)
+HOL block  ✓ আছে      ✗ নেই      ✗ নেই ★
+Handshake  1 RTT      0          0–1 RTT ★
+Encryption আলাদা TLS  আলাদা      অন্তর্নির্মিত ★
+Migration  ✗          —          ✓ ★
+Where      kernel     kernel     user space ★</pre></div>
+    <p>শেষ লাইনটি গুরুত্বপূর্ণ: QUIC user space-এ চলে, তাই application update করলেই নতুন congestion control পাওয়া যায় — kernel বা OS update-এর অপেক্ষা করতে হয় না। TCP-র উন্নতি দশকের পর দশক ধরে আটকে ছিল ঠিক এই কারণেই।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>TCP: connection, reliability, ordering, flow ও congestion control — একটি package হিসেবে।</li>
+      <li>UDP: শুধু port + checksum। বাকি সব আপনার দায়িত্ব।</li>
+      <li><strong>"TCP ধীর, UDP দ্রুত" ভুল সরলীকরণ</strong> — দুটোই একই গতিতে packet পাঠায়।</li>
+      <li>সঠিক প্রশ্ন: <strong>পুরনো data-র কি মূল্য আছে?</strong> থাকলে TCP, না থাকলে UDP।</li>
+      <li>UDP-র প্রকৃত সুবিধা: handshake নেই, HOL blocking নেই, multicast সম্ভব, নিজস্ব transport লেখা যায়।</li>
+      <li>নিজে reliability লিখলে সেটি প্রায় নিশ্চিতভাবে TCP-র চেয়ে খারাপ হবে — QUIC ব্যবহার করুন।</li>
+      <li>QUIC = UDP-র নমনীয়তা + TCP-র নির্ভরযোগ্যতা + অন্তর্নির্মিত encryption + connection migration।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>"UDP দ্রুত কারণ তার header ছোট" — এই যুক্তি কতটা সঠিক?</summary>
+    <div class="ans"><p>খুব সামান্য। ১২ bytes-এর পার্থক্য একটি ১৫০০-byte packet-এ ০.৮% — নগণ্য। UDP-র প্রকৃত সুবিধা header-এর আকার নয়, বরং: (১) handshake না থাকায় ১ RTT সাশ্রয়, (২) head-of-line blocking না থাকা, (৩) retransmission-জনিত বিলম্ব না থাকা, (৪) কম kernel state। Header-এর আকার তালিকার সবচেয়ে নিচে।</p></div>
+  </details>
+  <details class="qa"><summary>একটি multiplayer game-এ খেলোয়াড়ের অবস্থান পাঠাতে কোনটি এবং কেন?</summary>
+    <div class="ans"><p><strong>UDP।</strong> খেলোয়াড়ের অবস্থান প্রতি ৫০ms-এ update হয়। একটি হারানো update retransmit করে ২০০ms পরে পাওয়ার কোনো মূল্য নেই — ততক্ষণে চারটি নতুন update চলে এসেছে। TCP ব্যবহার করলে সেই পুরনো packet-এর জন্য নতুন update গুলো আটকে থাকত (HOL blocking), ফলে খেলা "rubber-banding" করত। তবে chat বা inventory-র মতো নির্ভরযোগ্য অংশগুলো TCP বা QUIC-এ পাঠানো হয়।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার team একটি "custom reliable UDP protocol" লেখার প্রস্তাব দিয়েছে। কী প্রশ্ন করবেন?</summary>
+    <div class="ans"><p>(১) TCP বা QUIC কেন যথেষ্ট নয় — সুনির্দিষ্টভাবে? (২) Congestion control কে লিখবে এবং কীভাবে পরীক্ষা করা হবে? (এটি না থাকলে আপনার protocol network-এর জন্য ক্ষতিকর ও অন্যায্য।) (৩) NAT traversal, MTU discovery, retransmission timing — এগুলো কে সামলাবে? (৪) QUIC কি ব্যবহার করা যায়, যেখানে এই সব সমস্যা ইতিমধ্যে সমাধান করা আছে? বেশিরভাগ ক্ষেত্রে উত্তর হলো — QUIC ব্যবহার করুন।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch23"><div class="d">পূর্ববর্তী</div><div class="t">Ch 23 — UDP</div></a>
+    <a class="nx" href="#ch25"><div class="d">পরবর্তী</div><div class="t">Ch 25 — Why DNS Exists</div></a>
+  </div>
+</section>

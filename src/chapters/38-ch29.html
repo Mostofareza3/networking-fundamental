@@ -1,0 +1,261 @@
+<section class="chapter" id="ch29">
+  <div class="ch-eyebrow">Chapter 29</div>
+  <h1>HTTP Methods এবং Status Codes</h1>
+  <p class="ch-lede">Status code মুখস্থ করা অর্থহীন। কিন্তু <em>কেন</em> 401 আর 403 আলাদা, বা কেন 502 আর 504 ভিন্ন সমস্যার ইঙ্গিত দেয় — এটি জানা প্রতিদিনের debugging-এ সরাসরি কাজে লাগে।</p>
+
+  <h2>29.1 Methods</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Method</th><th>উদ্দেশ্য</th><th>Safe?</th><th>Idempotent?</th><th>Body?</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET</code></td><td>Resource পড়া</td><td>✓</td><td>✓</td><td>না</td></tr>
+      <tr><td><code>HEAD</code></td><td>শুধু header (body ছাড়া GET)</td><td>✓</td><td>✓</td><td>না</td></tr>
+      <tr><td><code>OPTIONS</code></td><td>কী কী সম্ভব জানা (CORS preflight)</td><td>✓</td><td>✓</td><td>না</td></tr>
+      <tr><td><code>POST</code></td><td>নতুন তৈরি / প্রক্রিয়াকরণ</td><td>✗</td><td>✗</td><td>হ্যাঁ</td></tr>
+      <tr><td><code>PUT</code></td><td>সম্পূর্ণ প্রতিস্থাপন</td><td>✗</td><td>✓</td><td>হ্যাঁ</td></tr>
+      <tr><td><code>PATCH</code></td><td>আংশিক পরিবর্তন</td><td>✗</td><td>✗*</td><td>হ্যাঁ</td></tr>
+      <tr><td><code>DELETE</code></td><td>মুছে ফেলা</td><td>✗</td><td>✓</td><td>ঐচ্ছিক</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box why">
+    <div class="bt">💡 Safe এবং Idempotent — কেন এই দুটি শব্দ গুরুত্বপূর্ণ</div>
+    <p><strong>Safe</strong> = server-এর অবস্থা বদলায় না (শুধু পড়া)। এজন্যই browser নির্দ্বিধায় GET request prefetch করে, এবং crawler নির্ভয়ে GET পাঠায়। একটি GET যদি data মুছে ফেলে, সেটি protocol-এর চুক্তি ভঙ্গ — এবং বাস্তবে বিপর্যয় ঘটায় (একটি বিখ্যাত ঘটনা: একটি admin panel-এ GET link দিয়ে delete করা হতো; Google-এর crawler এসে সব মুছে ফেলেছিল)।</p>
+    <p><strong>Idempotent</strong> = একবার বা দশবার পাঠালে ফলাফল একই। এটি <strong>retry-এর ভিত্তি</strong>:</p>
+    <div class="cb diagram"><pre>Client ──▶ PUT /users/123 {name: "রেজা"}
+        ✗ কোনো উত্তর এল না (timeout)
+
+প্রশ্ন: আবার পাঠাব?
+
+  PUT হলে   → নিরাপদ। দুবার হলেও একই ফল।
+  DELETE    → নিরাপদ। ইতিমধ্যে মুছে গেলে 404 পাব, ক্ষতি নেই।
+  POST হলে  → ★বিপজ্জনক★। দুটি order তৈরি হতে পারে!</pre></div>
+    <p>* PATCH idempotent হতে <em>পারে</em>, নির্ভর করে আপনি কীভাবে লিখেছেন তার উপর। <code>{"name": "রেজা"}</code> idempotent; <code>{"increment_views": 1}</code> নয়।</p>
+  </div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — POST-এর retry সমস্যা</div>
+    <p>Network timeout হলে আপনি জানেন না request পৌঁছেছিল কিনা। POST-এ retry করলে duplicate তৈরি হতে পারে। সমাধান: <strong>idempotency key</strong>।</p>
+    <div class="cb"><span class="cb-lang">http</span><pre>POST /orders HTTP/1.1
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+
+{"item": "laptop", "qty": 1}</pre></div>
+    <p>Server এই key টি সংরক্ষণ করে। একই key-তে দ্বিতীয় request এলে সে নতুন order তৈরি না করে আগেরটির ফলাফল ফেরত দেয়। Stripe, PayPal-সহ সব payment API এই pattern ব্যবহার করে — কারণ এখানে duplicate-এর মূল্য বাস্তব টাকা।</p>
+  </div>
+
+  <h2>29.2 Status Code — পাঁচটি শ্রেণি</h2>
+
+  <div class="cb diagram"><pre>1xx  Informational  — "প্রক্রিয়া চলছে"      (বিরল)
+2xx  Success        — "হয়ে গেছে"
+3xx  Redirection    — "অন্য কোথাও দেখো"
+4xx  Client Error   — "★তুমি★ ভুল করেছ"
+5xx  Server Error   — "★আমি★ ভুল করেছি"
+
+★ 4xx এবং 5xx-এর পার্থক্যটি নিছক শ্রেণিবিভাগ নয় —
+  এটি দায় নির্ধারণ করে, এবং তাই monitoring ও
+  alerting-এর ভিত্তি:
+
+  4xx বাড়লে  → client-এর সমস্যা, বা আপনার API-র
+               documentation/validation-এ সমস্যা
+  5xx বাড়লে  → ★আপনার★ সমস্যা — এখনই দেখুন
+
+এজন্যই SLO সাধারণত 5xx-এর হার দিয়ে মাপা হয়, 4xx নয়।</pre></div>
+
+  <h2>29.3 গুরুত্বপূর্ণ status code গুলো</h2>
+
+  <div class="tabs" id="tabs-status">
+    <div class="tab-btns">
+      <button class="on" data-t="st2">2xx Success</button>
+      <button data-t="st3">3xx Redirect</button>
+      <button data-t="st4">4xx Client</button>
+      <button data-t="st5">5xx Server</button>
+    </div>
+    <div class="tab-body">
+      <div class="tab-pane on" id="st2">
+        <div class="tw"><table>
+          <thead><tr><th>Code</th><th>নাম</th><th>কখন ব্যবহার করবেন</th></tr></thead>
+          <tbody>
+            <tr><td><strong>200</strong></td><td>OK</td><td>সাধারণ সাফল্য, body সহ। GET-এর স্বাভাবিক উত্তর।</td></tr>
+            <tr><td><strong>201</strong></td><td>Created</td><td>নতুন resource তৈরি হয়েছে। <code>Location</code> header-এ নতুন URL দিন।</td></tr>
+            <tr><td><strong>202</strong></td><td>Accepted</td><td>গ্রহণ করেছি, কিন্তু এখনো প্রক্রিয়া হয়নি — asynchronous job-এর জন্য।</td></tr>
+            <tr><td><strong>204</strong></td><td>No Content</td><td>সফল, কিন্তু কিছু ফেরত দেওয়ার নেই। DELETE বা PUT-এর পর আদর্শ। <strong>Body থাকতেই পারবে না।</strong></td></tr>
+            <tr><td><strong>206</strong></td><td>Partial Content</td><td>Range request-এর উত্তর — video seeking, resume download।</td></tr>
+          </tbody>
+        </table></div>
+        <div class="box tip"><div class="bt">✓ 200 বনাম 201 বনাম 204</div>
+        <p>POST-এর পর কী দেবেন? <strong>201</strong> যদি নতুন কিছু তৈরি হয়ে থাকে (এবং <code>Location</code> header-এ তার URL দিন)। <strong>200</strong> যদি ফেরত দেওয়ার মতো data থাকে। <strong>204</strong> যদি কিছুই ফেরত দেওয়ার না থাকে — এতে client অপ্রয়োজনীয় parsing এড়াতে পারে।</p></div>
+      </div>
+      <div class="tab-pane" id="st3">
+        <div class="tw"><table>
+          <thead><tr><th>Code</th><th>নাম</th><th>বিস্তারিত</th></tr></thead>
+          <tbody>
+            <tr><td><strong>301</strong></td><td>Moved Permanently</td><td>স্থায়ী। Browser ও search engine এটি cache করে — <strong>বদলানো খুব কঠিন</strong>। সতর্কভাবে ব্যবহার করুন।</td></tr>
+            <tr><td><strong>302</strong></td><td>Found</td><td>সাময়িক। ঐতিহাসিকভাবে method বদলে GET করে দেয় (যা মূল উদ্দেশ্য ছিল না)।</td></tr>
+            <tr><td><strong>303</strong></td><td>See Other</td><td>"POST-এর পর এই URL-এ GET করো" — POST/Redirect/GET pattern-এর জন্য।</td></tr>
+            <tr><td><strong>304</strong></td><td>Not Modified</td><td>"তোমার cache-এর version এখনো ঠিক আছে।" <strong>Body ছাড়া</strong> — এটাই মূল সাশ্রয়।</td></tr>
+            <tr><td><strong>307</strong></td><td>Temporary Redirect</td><td>302-এর মতো, কিন্তু <strong>method সংরক্ষিত</strong> (POST → POST)।</td></tr>
+            <tr><td><strong>308</strong></td><td>Permanent Redirect</td><td>301-এর মতো, কিন্তু method সংরক্ষিত।</td></tr>
+          </tbody>
+        </table></div>
+        <div class="box warn"><div class="bt">⚠️ 301 স্থায়ীভাবে cache হয়</div>
+        <p>Browser একটি 301 পেলে সেটি দীর্ঘ সময়ের জন্য (কখনো কখনো অনির্দিষ্টকাল) মনে রাখে এবং পরের বার server-কে জিজ্ঞেসই করে না। ভুল করে 301 দিলে সেই ব্যবহারকারীদের কাছে সংশোধন পৌঁছানো প্রায় অসম্ভব। <strong>সন্দেহ থাকলে 302/307 দিন</strong>, নিশ্চিত হলে তবেই 301।</p></div>
+        <h4>304 কীভাবে কাজ করে</h4>
+        <div class="cb diagram"><pre>প্রথম request:
+  GET /style.css
+  ← 200 OK, ETag: "abc123", Content-Length: 45000
+
+পরের request (cache expire হওয়ার পর):
+  GET /style.css
+  If-None-Match: "abc123"          ← "এটাই আছে আমার কাছে"
+
+  ← 304 Not Modified                ← body নেই!
+    (৪৫ KB-র বদলে ~২০০ bytes)</pre></div>
+      </div>
+      <div class="tab-pane" id="st4">
+        <div class="tw"><table>
+          <thead><tr><th>Code</th><th>নাম</th><th>প্রকৃত অর্থ</th></tr></thead>
+          <tbody>
+            <tr><td><strong>400</strong></td><td>Bad Request</td><td>Request-টিই বিকৃত — JSON ভাঙা, required field নেই, validation ব্যর্থ।</td></tr>
+            <tr><td><strong>401</strong></td><td>Unauthorized</td><td><strong>"তুমি কে?"</strong> — credential নেই বা অবৈধ। (নামটি ভুল; হওয়া উচিত ছিল "Unauthenticated"।)</td></tr>
+            <tr><td><strong>403</strong></td><td>Forbidden</td><td><strong>"তুমি কে জানি, কিন্তু তোমার অনুমতি নেই।"</strong> Login করলেও লাভ নেই।</td></tr>
+            <tr><td><strong>404</strong></td><td>Not Found</td><td>Resource নেই। কখনো কখনো 403-এর বদলে ইচ্ছাকৃতভাবে দেওয়া হয় (অস্তিত্ব গোপন রাখতে)।</td></tr>
+            <tr><td><strong>405</strong></td><td>Method Not Allowed</td><td>URL আছে, কিন্তু এই method-এ নয়। <code>Allow</code> header-এ কোনগুলো চলবে তা দিন।</td></tr>
+            <tr><td><strong>409</strong></td><td>Conflict</td><td>বর্তমান অবস্থার সাথে সংঘাত — duplicate email, concurrent edit, version mismatch।</td></tr>
+            <tr><td><strong>410</strong></td><td>Gone</td><td>ছিল, ইচ্ছাকৃতভাবে মুছে ফেলা হয়েছে, ফিরবে না। 404-এর চেয়ে নির্দিষ্ট।</td></tr>
+            <tr><td><strong>413</strong></td><td>Payload Too Large</td><td>Body খুব বড়। nginx-এর <code>client_max_body_size</code> এখানেই।</td></tr>
+            <tr><td><strong>415</strong></td><td>Unsupported Media Type</td><td>ভুল <code>Content-Type</code> — যেমন JSON API-তে XML পাঠানো।</td></tr>
+            <tr><td><strong>422</strong></td><td>Unprocessable Entity</td><td>Syntax ঠিক, কিন্তু semantically ভুল (email format ঠিক নয়, তারিখ অতীতে)।</td></tr>
+            <tr><td><strong>429</strong></td><td>Too Many Requests</td><td>Rate limit। <strong>সবসময় <code>Retry-After</code> header দিন।</strong></td></tr>
+          </tbody>
+        </table></div>
+        <div class="box tip"><div class="bt">✓ 401 বনাম 403 — এক বাক্যে</div>
+        <p><strong>401 = "আমি জানি না তুমি কে"</strong> (authentication ব্যর্থ; login করলে সমাধান হতে পারে)।<br>
+        <strong>403 = "আমি জানি তুমি কে, কিন্তু তোমার অনুমতি নেই"</strong> (authorization ব্যর্থ; login করে লাভ নেই)।<br>
+        401 পেলে client-কে login page দেখানো যুক্তিসঙ্গত; 403 পেলে "আপনার অনুমতি নেই" বলা উচিত।</p></div>
+      </div>
+      <div class="tab-pane" id="st5">
+        <div class="tw"><table>
+          <thead><tr><th>Code</th><th>নাম</th><th>প্রকৃত অর্থ ও প্রথম পদক্ষেপ</th></tr></thead>
+          <tbody>
+            <tr><td><strong>500</strong></td><td>Internal Server Error</td><td>Application-এ unhandled exception। <strong>Application log দেখুন</strong> — stack trace সেখানে।</td></tr>
+            <tr><td><strong>501</strong></td><td>Not Implemented</td><td>Server এই method চেনে না।</td></tr>
+            <tr><td><strong>502</strong></td><td>Bad Gateway</td><td><strong>Proxy upstream-এ পৌঁছাতে পারছে না, বা অবৈধ উত্তর পেয়েছে।</strong> সাধারণত: backend crash করেছে বা চালুই নেই। Backend চলছে কিনা দেখুন।</td></tr>
+            <tr><td><strong>503</strong></td><td>Service Unavailable</td><td>সাময়িকভাবে অক্ষম — maintenance, overload, সব worker ব্যস্ত। <code>Retry-After</code> দিন।</td></tr>
+            <tr><td><strong>504</strong></td><td>Gateway Timeout</td><td><strong>Proxy upstream-এ পৌঁছেছে, কিন্তু সময়মতো উত্তর পায়নি।</strong> Backend চলছে কিন্তু ধীর — slow query, deadlock, বাইরের API-র অপেক্ষা।</td></tr>
+          </tbody>
+        </table></div>
+        <div class="box tip"><div class="bt">✓ 502 বনাম 504 — সবচেয়ে দরকারি পার্থক্য</div>
+        <div class="cb diagram"><pre>502 Bad Gateway
+   nginx ──✗──▶ backend
+   "connection refused" বা অবৈধ উত্তর
+   ⇒ Backend চলছেই না, বা crash করেছে,
+     বা ভুল port-এ শুনছে
+   → প্রথমে দেখুন: process চলছে কি? port ঠিক কি?
+
+504 Gateway Timeout
+   nginx ──────▶ backend  (সংযোগ হয়েছে!)
+         ⏰ ... অপেক্ষা ... timeout
+   ⇒ Backend জীবিত কিন্তু সময়মতো উত্তর দিচ্ছে না
+   → প্রথমে দেখুন: slow query? deadlock?
+     বাইরের কোনো API-র অপেক্ষা? thread pool শেষ?</pre></div>
+        <p>এই একটি পার্থক্য জানা থাকলে outage-এর সময় আপনি সরাসরি সঠিক জায়গায় খোঁজা শুরু করতে পারবেন।</p></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>29.4 API design-এ সঠিক code বাছাই</h2>
+
+  <div class="cb diagram"><pre>POST /users  (নতুন user তৈরি)
+
+  সফল, user তৈরি হলো        → 201 + Location header
+  Email duplicate            → 409 Conflict
+  Email format ভুল           → 422 (বা 400)
+  JSON ভাঙা                  → 400 Bad Request
+  Token নেই                  → 401 Unauthorized
+  Token আছে, কিন্তু admin নয়  → 403 Forbidden
+  খুব বেশি request           → 429 + Retry-After
+  Database মৃত               → 503 (500 নয়!)
+  Code-এ bug                 → 500
+
+GET /users/999  (নেই এমন user)
+  → 404 Not Found
+
+DELETE /users/123
+  সফল                       → 204 No Content
+  ইতিমধ্যে মুছে গেছে           → 404 বা 204 (idempotent হলে 204 যুক্তিসঙ্গত)</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ যে ভুলগুলো সবচেয়ে বেশি হয়</div>
+    <ul>
+      <li><strong>সব কিছুতে 200</strong> — body-তে <code>{"error": "..."}</code> লিখে। এতে HTTP-র পুরো error semantics নষ্ট হয়: monitoring, retry logic, cache — কিছুই ঠিকমতো কাজ করে না।</li>
+      <li><strong>ব্যবসায়িক ভুলে 500</strong> — "email duplicate" server-এর ব্যর্থতা নয়, এটি 409। 500 alerting trigger করবে অকারণে।</li>
+      <li><strong>401 আর 403 মিশিয়ে ফেলা</strong> — client ভুল আচরণ করবে (অপ্রয়োজনীয় re-login loop)।</li>
+      <li><strong>429-এ <code>Retry-After</code> না দেওয়া</strong> — client জানবে না কতক্ষণ অপেক্ষা করবে, ফলে aggressive retry করে পরিস্থিতি আরও খারাপ করবে।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 29 — বাস্তব status code সংগ্রহ করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — বিভিন্ন পরিস্থিতিতে বাস্তব server কী কী code দেয় এবং সেগুলো কীভাবে পড়তে হয়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># শুধু status code
+curl -s -o /dev/null -w "%{http_code}\n" https://example.com
+
+# একটি redirect chain অনুসরণ করুন
+curl -sIL http://github.com | grep -E "^HTTP|^location" -i
+
+# শুধু header (HEAD request)
+curl -sI https://example.com
+
+# 404 তৈরি করুন
+curl -s -o /dev/null -w "%{http_code}\n" https://example.com/nothing-here
+
+# একটি নির্দিষ্ট code চেয়ে নিন (পরীক্ষার জন্য দারুণ)
+for code in 200 201 301 401 403 404 418 429 500 502 503; do
+  printf "%s → " $code
+  curl -s -o /dev/null -w "%{http_code}\n" https://httpbin.org/status/$code
+done
+
+# 304 দেখুন — conditional request
+etag=$(curl -sI https://example.com | grep -i etag | cut -d' ' -f2 | tr -d '\r')
+curl -s -o /dev/null -w "%{http_code}\n" -H "If-None-Match: $etag" https://example.com</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>-L</code> সহ redirect chain-এ পরপর 301/302 তারপর 200 দেখবেন, এবং প্রতিটির <code>location</code> header। Conditional request-এ <code>304</code> পাবেন — কোনো body ছাড়াই, যা bandwidth-এর বড় সাশ্রয়। (<code>418 I'm a teapot</code> একটি এপ্রিল ফুল RFC থেকে আসা রসিকতা, কিন্তু বাস্তবেই implement করা আছে অনেক জায়গায়।)</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Status code শুধু একটি সংখ্যা নয় — এটি client-এর আচরণ নিয়ন্ত্রণ করে। 301 cache হয়, 304 body বাঁচায়, 429 retry-এর সময় নির্ধারণ করে। সঠিক code দেওয়া মানে client-কে সঠিক সিদ্ধান্ত নিতে দেওয়া।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li><strong>Safe</strong> = state বদলায় না; <strong>Idempotent</strong> = বারবার করলেও একই ফল।</li>
+      <li>GET/HEAD/OPTIONS safe; GET/PUT/DELETE idempotent; POST কোনোটিই নয়।</li>
+      <li>POST-এর নিরাপদ retry-এর জন্য <strong>idempotency key</strong> ব্যবহার করুন।</li>
+      <li>4xx = client-এর দায়, 5xx = server-এর দায় — monitoring ও SLO-র ভিত্তি।</li>
+      <li><strong>401</strong> = "তুমি কে?"; <strong>403</strong> = "তুমি কে জানি, অনুমতি নেই"।</li>
+      <li><strong>502</strong> = backend-এ পৌঁছানো যায়নি; <strong>504</strong> = পৌঁছেছে কিন্তু সময়মতো উত্তর দেয়নি।</li>
+      <li>301 প্রায় স্থায়ীভাবে cache হয় — সন্দেহ থাকলে 302/307 দিন।</li>
+      <li>304 body ছাড়া উত্তর — conditional request-এর মূল সাশ্রয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি request timeout হলো। POST এবং PUT-এর ক্ষেত্রে retry করা কি সমান নিরাপদ?</summary>
+    <div class="ans"><p>না। <strong>PUT idempotent</strong> — একবার বা দশবার "এই resource-কে এই মান দাও" বললে ফলাফল একই, তাই retry নিরাপদ। <strong>POST idempotent নয়</strong> — "একটি নতুন order তৈরি করো" দুবার পাঠালে দুটি order হতে পারে। POST-এ নিরাপদে retry করতে হলে idempotency key ব্যবহার করুন, যাতে server duplicate শনাক্ত করতে পারে।</p></div>
+  </details>
+  <details class="qa"><summary>502 এবং 504-এর মধ্যে পার্থক্য কী, এবং প্রতিটির প্রথম diagnostic পদক্ষেপ কী?</summary>
+    <div class="ans"><p><strong>502</strong> = proxy backend-এ সংযোগই করতে পারেনি বা অবৈধ উত্তর পেয়েছে → backend সম্ভবত বন্ধ, crash করেছে, বা ভুল port-এ আছে। প্রথম পদক্ষেপ: process চলছে কিনা এবং সঠিক port-এ শুনছে কিনা দেখুন। <strong>504</strong> = সংযোগ হয়েছে কিন্তু সময়মতো উত্তর আসেনি → backend জীবিত কিন্তু ধীর। প্রথম পদক্ষেপ: slow query, deadlock, thread pool exhaustion, বা বাইরের কোনো API-র অপেক্ষা খুঁজুন।</p></div>
+  </details>
+  <details class="qa"><summary>একটি API-তে duplicate email দিয়ে user তৈরির চেষ্টা করলে কোন code দেওয়া উচিত?</summary>
+    <div class="ans"><p><strong>409 Conflict</strong> — request-টি বৈধ ছিল, কিন্তু resource-এর বর্তমান অবস্থার সাথে সংঘাত করছে। 400 নয় (request বিকৃত নয়), এবং অবশ্যই 500 নয় (এটি server-এর ব্যর্থতা নয়, একটি প্রত্যাশিত ব্যবসায়িক পরিস্থিতি)। 500 দিলে আপনার alerting অকারণে trigger হবে।</p></div>
+  </details>
+  <details class="qa"><summary>304 Not Modified কীভাবে bandwidth বাঁচায়?</summary>
+    <div class="ans"><p>Client তার cache-এ থাকা version-এর ETag (বা Last-Modified) পাঠায় <code>If-None-Match</code> header-এ। Server যদি দেখে resource বদলায়নি, সে <strong>body ছাড়াই</strong> 304 পাঠায় — মাত্র কয়েকশ bytes header, ৪৫ KB-র CSS ফাইলের বদলে। Client তার নিজের cache-এর copy ব্যবহার করে। Round trip বাঁচে না, কিন্তু data transfer নাটকীয়ভাবে কমে।</p></div>
+  </details>
+  <details class="qa"><summary>"সব response-এ 200 দিয়ে body-তে error লিখব" — এই approach-এর সমস্যা কী?</summary>
+    <div class="ans"><p>HTTP-র পুরো error semantics নষ্ট হয়। Monitoring system 5xx-এর হার দেখে alert করে — সব 200 হলে outage অদৃশ্য থাকবে। HTTP client library-র স্বয়ংক্রিয় retry logic কাজ করবে না। Cache ভুল করে error response cache করবে। Load balancer-এর health check ব্যর্থ backend-কে সুস্থ ভাববে। Proxy ও CDN সঠিক আচরণ করতে পারবে না। মোটকথা — আপনি একটি সমৃদ্ধ, সর্বজনীন ভাষা ফেলে দিয়ে নিজের একটি ব্যক্তিগত convention তৈরি করছেন যা কোনো tool বোঝে না।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch28"><div class="d">পূর্ববর্তী</div><div class="t">Ch 28 — HTTP Fundamentals</div></a>
+    <a class="nx" href="#ch30"><div class="d">পরবর্তী</div><div class="t">Ch 30 — HTTP Connections</div></a>
+  </div>
+</section>

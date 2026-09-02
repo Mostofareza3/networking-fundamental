@@ -1,0 +1,362 @@
+<section class="chapter" id="ch32">
+  <div class="ch-eyebrow">Chapter 32</div>
+  <h1>Cryptography for Developers</h1>
+  <p class="ch-lede">TLS বোঝার জন্য cryptographer হওয়ার দরকার নেই। দরকার পাঁচটি ধারণা — এবং সবচেয়ে গুরুত্বপূর্ণ, এদের প্রত্যেকে কোন <em>সমস্যা</em> সমাধান করে সেটি। এই chapter ঠিক ততটুকুই, বেশি নয়।</p>
+
+  <h2>32.1 Symmetric Encryption — একটি ভাগ করা চাবি</h2>
+
+  <div class="cb diagram"><pre>একই চাবি দিয়ে encrypt এবং decrypt:
+
+  plaintext ──[ চাবি K ]──▶ ciphertext
+  ciphertext ──[ চাবি K ]──▶ plaintext
+
+  উদাহরণ: AES-256-GCM, ChaCha20-Poly1305
+
+✓ অত্যন্ত দ্রুত — আধুনিক CPU-তে hardware support
+  (AES-NI instruction), গিগাবাইট প্রতি সেকেন্ড
+✓ ছোট overhead
+
+✗ কিন্তু একটি মৌলিক সমস্যা:
+  ★ চাবিটি অপর প্রান্তে পৌঁছাবে কীভাবে? ★
+
+  আপনি একটি অনিরাপদ পথ দিয়ে চাবি পাঠালে
+  আক্রমণকারী সেটিও পেয়ে যাবে।
+  আর নিরাপদ পথ থাকলে তো encryption-এরই দরকার নেই!
+
+  এটাই ★key distribution problem★ —
+  cryptography-র শতাব্দীপ্রাচীন সমস্যা।</pre></div>
+
+  <h2>32.2 Asymmetric Encryption — জোড়া চাবি</h2>
+
+  <div class="cb diagram"><pre>দুটি গাণিতিকভাবে সম্পর্কিত চাবি:
+
+  Public key   — সবাইকে দেওয়া যায়, ছড়িয়ে দিন
+  Private key  — কখনো কাউকে দেবেন না
+
+  একটি দিয়ে lock করলে ★শুধু অন্যটি★ দিয়ে খোলা যায়।
+
+দুই ধরনের ব্যবহার:
+
+1. ENCRYPTION (গোপনীয়তা)
+   কেউ আপনার public key দিয়ে encrypt করল
+       ↓
+   শুধু আপনি (private key দিয়ে) খুলতে পারবেন
+
+2. SIGNATURE (সত্যতা)  ← এটাই TLS-এ বেশি গুরুত্বপূর্ণ
+   আপনি private key দিয়ে sign করলেন
+       ↓
+   যে কেউ public key দিয়ে যাচাই করতে পারবে
+   "হ্যাঁ, এটি সত্যিই ওই private key-র মালিকের"
+
+উদাহরণ: RSA, ECDSA, Ed25519
+
+✗ ধীর — symmetric-এর চেয়ে ১০০০ গুণ পর্যন্ত
+✓ কিন্তু key distribution problem সমাধান করে</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — TLS-এর মূল কৌশল</div>
+    <p>দুটির সমস্যা একে অপরের পরিপূরক:</p>
+    <ul>
+      <li>Symmetric দ্রুত, কিন্তু চাবি বিনিময় করা যায় না।</li>
+      <li>Asymmetric চাবি বিনিময় করতে পারে, কিন্তু ধীর।</li>
+    </ul>
+    <p><strong>সমাধান: দুটোই ব্যবহার করো।</strong></p>
+    <div class="cb diagram"><pre>1. Asymmetric দিয়ে একটি symmetric চাবি নিরাপদে
+   প্রতিষ্ঠা করো                    ← ধীর, কিন্তু একবারই
+
+2. তারপর সব প্রকৃত data সেই symmetric চাবি দিয়ে
+   encrypt করো                     ← দ্রুত, বাকি সময়
+
+এটাকে বলে ★hybrid cryptosystem★ — এবং এটিই
+TLS handshake-এর মূল ধারণা।</pre></div>
+  </div>
+
+  <h2>32.3 Hash Function</h2>
+
+  <div class="cb diagram"><pre>যেকোনো আকারের input ──▶ নির্দিষ্ট আকারের output
+
+  "hello"                    → 2cf24dba5fb0a30e...  (256 bit)
+  "hello!"                   → ce06092fb948d9ff...  (সম্পূর্ণ ভিন্ন!)
+  একটি ৫ GB ভিডিও ফাইল       → 8f434346648f6b96...  (256 bit)
+
+উদাহরণ: SHA-256, SHA-3, BLAKE3
+
+প্রয়োজনীয় বৈশিষ্ট্য:
+
+  1. Deterministic — একই input, সবসময় একই output
+  2. দ্রুত গণনা
+  3. ★ One-way ★ — hash থেকে input বের করা অসম্ভব
+  4. ★ Avalanche ★ — ১ bit বদলালে output সম্পূর্ণ ভিন্ন
+  5. ★ Collision-resistant ★ — দুটি ভিন্ন input-এর
+     একই hash খুঁজে পাওয়া ব্যবহারিকভাবে অসম্ভব
+
+ব্যবহার:
+  • Data অবিকৃত কিনা যাচাই (checksum)
+  • Digital signature-এ (পুরো document-এর বদলে hash sign করা)
+  • Password সংরক্ষণ (কিন্তু ★bcrypt/argon2★ দিয়ে,
+    সরাসরি SHA-256 দিয়ে নয় — সেটি খুব দ্রুত,
+    তাই brute-force সহজ)</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ Hash ≠ Encryption</div>
+    <p>একটি সাধারণ বিভ্রান্তি: <strong>Encryption দ্বিমুখী</strong> (চাবি থাকলে ফিরিয়ে আনা যায়)। <strong>Hash একমুখী</strong> (কোনোভাবেই ফিরিয়ে আনা যায় না — তথ্য হারিয়ে যায়, কারণ output-এর আকার স্থির)। তাই "password encrypt করে রাখা" ভুল — password <em>hash</em> করে রাখতে হয়, এবং সেটিও একটি ধীর, salt-যুক্ত algorithm দিয়ে।</p>
+  </div>
+
+  <h2>32.4 Digital Signature</h2>
+
+  <div class="cb diagram"><pre>SIGN করা (private key দিয়ে):
+
+  Document ──▶ [ hash ] ──▶ digest
+                              │
+                              ▼
+                    [ private key দিয়ে encrypt ]
+                              │
+                              ▼
+                          SIGNATURE
+
+  পাঠানো হয়: Document + Signature
+
+
+যাচাই করা (public key দিয়ে):
+
+  পাওয়া Document ──▶ [ hash ] ──▶ digest A
+                                      │
+  পাওয়া Signature ─▶[public key দিয়ে ]─▶ digest B
+                     decrypt
+                                      │
+                        digest A == digest B ?
+                              │
+              ┌───────────────┴───────────────┐
+             হ্যাঁ                            না
+              │                               │
+    ✓ Document অবিকৃত               ✗ হয় বদলানো হয়েছে,
+    ✓ প্রকৃত মালিকই sign করেছে         নয় ভুল key
+
+
+★ Signature একসাথে দুটি নিশ্চয়তা দেয়:
+  Integrity (বদলানো হয়নি) + Authenticity (কে পাঠিয়েছে)
+
+★ Hash কেন? কারণ asymmetric operation ধীর।
+  ৫ GB ফাইল sign করার বদলে তার ৩২-byte hash sign করা
+  অনেক দ্রুত, এবং সমান নিরাপদ।</pre></div>
+
+  <h2>32.5 Certificate এবং Certificate Authority</h2>
+
+  <p>এখন আমরা মূল প্রশ্নে ফিরে আসি: <em>এই public key টি সত্যিই example.com-এর, তা আমি কীভাবে জানব?</em></p>
+
+  <div class="cb diagram"><pre>একটি certificate মূলত একটি ★signed বিবৃতি★:
+
+┌────────────────────────────────────────────────┐
+│  X.509 CERTIFICATE                             │
+├────────────────────────────────────────────────┤
+│  Subject:      CN=example.com                  │
+│  SAN:          example.com, www.example.com    │
+│                ← ★ browser এটিই দেখে, CN নয় ★  │
+│                                                │
+│  Public Key:   30 82 01 0a 02 82 01 01 00 ...  │
+│                ← server-এর public key           │
+│                                                │
+│  Issuer:       CN=Let's Encrypt R3             │
+│  Valid From:   2026-08-01                      │
+│  Valid Until:  2026-10-30                      │
+│  Serial:       03:8f:2a:...                    │
+├────────────────────────────────────────────────┤
+│  SIGNATURE (CA-র private key দিয়ে)             │
+│  8f:2a:19:cd:...                               │
+└────────────────────────────────────────────────┘
+
+অর্থাৎ CA বলছে:
+  "আমি, Let's Encrypt, যাচাই করেছি যে এই public key-টি
+   example.com-এর মালিকের। এই বিবৃতিতে আমি স্বাক্ষর
+   করলাম। আমার স্বাক্ষর যাচাই করুন।"</pre></div>
+
+  <h3>Chain of Trust</h3>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────┐
+│  ROOT CA                                 │
+│  ISRG Root X1                            │
+│  ★ self-signed ★                         │
+│  ★ আপনার OS/browser-এ আগে থেকেই আছে ★     │
+└────────────────┬─────────────────────────┘
+                 │ sign করে
+                 ▼
+┌──────────────────────────────────────────┐
+│  INTERMEDIATE CA                         │
+│  Let's Encrypt R3                        │
+│  (root-এর private key offline রাখা হয়,   │
+│   তাই দৈনন্দিন কাজ intermediate করে)     │
+└────────────────┬─────────────────────────┘
+                 │ sign করে
+                 ▼
+┌──────────────────────────────────────────┐
+│  LEAF CERTIFICATE                        │
+│  example.com                             │
+└──────────────────────────────────────────┘
+
+যাচাইয়ের প্রক্রিয়া (নিচ থেকে উপরে):
+
+1. leaf-এর signature R3-এর public key দিয়ে যাচাই ✓
+2. R3-এর signature ISRG Root X1-এর key দিয়ে যাচাই ✓
+3. ISRG Root X1 কি আমার trust store-এ আছে? ✓
+4. মেয়াদ ঠিক আছে? ✓
+5. Hostname কি SAN-এ আছে? ✓
+6. Revoke করা হয়েছে কি? (OCSP/CRL) ✓
+   ⇒ বিশ্বাস প্রতিষ্ঠিত
+
+★ পুরো ব্যবস্থাটি দাঁড়িয়ে আছে একটি ভিত্তির উপর:
+  আপনার OS/browser-এর সাথে আগে থেকে ইনস্টল করা
+  ~১৫০টি root certificate।</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Trust store — ব্যবস্থাটির একক দুর্বলতা</div>
+    <p>আপনার machine প্রায় ১৫০টি root CA-কে বিশ্বাস করে, এবং <strong>তাদের যেকোনো একটি যেকোনো domain-এর জন্য certificate ইস্যু করতে পারে</strong>। একটি CA আপস হলে বা দুর্বৃত্ত হলে সে <code>google.com</code>-এর নামেও certificate দিতে পারে।</p>
+    <p>এটি তাত্ত্বিক ঝুঁকি নয় — ২০১১ সালে DigiNotar নামের একটি CA আপস হয়েছিল এবং জাল Google certificate ইস্যু করা হয়েছিল, যা ইরানে নজরদারিতে ব্যবহৃত হয়। DigiNotar-এর certificate সব browser থেকে সরিয়ে ফেলা হয় এবং কোম্পানিটি দেউলিয়া হয়ে যায়।</p>
+    <p>প্রশমনের ব্যবস্থা: <strong>Certificate Transparency</strong> (সব ইস্যু করা certificate একটি public, append-only log-এ যায় — তাই জাল certificate ধরা পড়ে), <strong>CAA record</strong> (DNS-এ বলে দেওয়া কোন CA আপনার domain-এর জন্য ইস্যু করতে পারবে), এবং কিছু ক্ষেত্রে certificate pinning।</p>
+    <p><strong>আরেকটি বাস্তব প্রভাব:</strong> কর্পোরেট network-এ প্রায়ই কোম্পানির নিজস্ব root CA আপনার machine-এ ইনস্টল করা থাকে — যা তাদের সব HTTPS traffic decrypt করতে দেয়। এটি "man-in-the-middle by policy"।</p>
+  </div>
+
+  <h2>32.6 Key Exchange এবং Forward Secrecy</h2>
+
+  <div class="cb diagram"><pre>Diffie-Hellman — একটি সুন্দর ধারণা:
+
+দুজন মানুষ একটি প্রকাশ্য চ্যানেলে কথা বলে একটি
+★গোপন চাবি★ প্রতিষ্ঠা করতে পারে — অথচ যে শুনছে
+সে চাবিটি বের করতে পারবে না।
+
+সরলীকৃত রঙের উপমা:
+
+  Alice                সবাই দেখছে              Bob
+  ─────                ──────────              ───
+  গোপন: লাল                                 গোপন: নীল
+                      সাধারণ: হলুদ
+  লাল+হলুদ ──────▶ কমলা         সবুজ ◀────── নীল+হলুদ
+              ◀─────────────────────▶
+  কমলা+... নয়,                            সবুজ+...নয়,
+  সবুজ + লাল = বাদামি          কমলা + নীল = বাদামি
+       │                                    │
+       └────────── একই ফল! ─────────────────┘
+
+  পর্যবেক্ষক দেখল: হলুদ, কমলা, সবুজ
+  কিন্তু বাদামি বানাতে পারল না, কারণ তার
+  কাছে লাল বা নীল নেই।
+
+  (বাস্তবে রঙের বদলে modular exponentiation বা
+   elliptic curve-এর গণিত)</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Forward Secrecy — একটি অত্যন্ত গুরুত্বপূর্ণ বৈশিষ্ট্য</div>
+    <p>আধুনিক TLS প্রতিটি connection-এর জন্য <strong>নতুন, সাময়িক (ephemeral)</strong> DH key pair তৈরি করে — একে বলে ECDHE (Elliptic Curve Diffie-Hellman Ephemeral)।</p>
+    <div class="cb diagram"><pre>Forward secrecy ছাড়া (পুরনো RSA key exchange):
+  আক্রমণকারী আজকের encrypted traffic রেকর্ড করল
+  ৫ বছর পরে server-এর private key চুরি করল
+  → ★ ৫ বছরের সব রেকর্ড করা traffic decrypt করতে পারল ★
+
+Forward secrecy সহ (ECDHE):
+  প্রতিটি connection-এর session key আলাদা, এবং
+  সেটি DH দিয়ে তৈরি — কখনো তারে যায় না
+  Server-এর private key শুধু ★পরিচয় প্রমাণ★ করে,
+  session key তৈরিতে ব্যবহৃত হয় না
+  → ★ private key চুরি হলেও পুরনো traffic নিরাপদ ★</pre></div>
+    <p>TLS 1.3-এ forward secrecy <strong>বাধ্যতামূলক</strong> — RSA key exchange সম্পূর্ণভাবে সরিয়ে দেওয়া হয়েছে। এটি TLS 1.3-এর অন্যতম প্রধান উন্নতি।</p>
+  </div>
+
+  <h2>32.7 AEAD — Encryption এবং Integrity একসাথে</h2>
+
+  <div class="cb diagram"><pre>ঐতিহাসিক সমস্যা: encryption আর authentication
+আলাদাভাবে জোড়া লাগাতে গিয়ে বহু দুর্বলতা তৈরি হয়েছে
+(padding oracle, BEAST, Lucky13 — সব এই শ্রেণির)।
+
+AEAD (Authenticated Encryption with Associated Data)
+দুটি কাজ একসাথে, নিরাপদভাবে করে:
+
+  plaintext + key + nonce
+        ↓
+  ciphertext + authentication tag
+
+Decrypt করার সময় tag যাচাই হয়:
+  tag না মিললে → decrypt করাই হয় না, error
+  → বদলানো data কখনো application পর্যন্ত পৌঁছায় না
+
+আধুনিক AEAD:
+  • AES-256-GCM        (hardware acceleration আছে)
+  • ChaCha20-Poly1305  (mobile/ARM-এ দ্রুত)
+
+TLS 1.3-এ ★শুধুমাত্র★ AEAD cipher অনুমোদিত।
+পুরনো, ভঙ্গুর নির্মাণগুলো সম্পূর্ণ বাদ দেওয়া হয়েছে।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — বাস্তব নিয়ম</div>
+    <ul>
+      <li><strong>নিজে crypto লিখবেন না।</strong> এটি নিছক পরামর্শ নয় — বিশেষজ্ঞরাও ভুল করেন। প্রতিষ্ঠিত library ব্যবহার করুন (libsodium, OS-এর native crypto, ভাষার standard library)।</li>
+      <li><strong>Password কখনো encrypt করবেন না, hash করবেন</strong> — এবং bcrypt/scrypt/argon2 দিয়ে, SHA-256 দিয়ে নয়। SHA দ্রুত, এবং password hashing-এ দ্রুত হওয়াই দুর্বলতা।</li>
+      <li><strong>MD5 ও SHA-1 মৃত</strong> — collision তৈরি করা ব্যবহারিকভাবে সম্ভব। কোনো নিরাপত্তা-প্রসঙ্গে ব্যবহার করবেন না।</li>
+      <li><strong>Certificate যাচাই কখনো বন্ধ করবেন না</strong> — <code>verify=False</code>, <code>-k</code>, <code>rejectUnauthorized: false</code> — এগুলো TLS-এর সম্পূর্ণ নিরাপত্তা বাতিল করে দেয়। "শুধু development-এ" দিয়ে শুরু হয়ে production-এ পৌঁছে যাওয়া একটি অতি পরিচিত দুর্ঘটনা।</li>
+      <li><strong>Random-এর জন্য cryptographically secure উৎস</strong> ব্যবহার করুন (<code>crypto.randomBytes</code>, <code>/dev/urandom</code>), <code>Math.random()</code> নয়।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 32 — Certificate এবং hash নিয়ে খেলুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি বাস্তব certificate-এর ভেতরে কী আছে, chain কেমন দেখায়, এবং hash-এর avalanche বৈশিষ্ট্য।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Hash-এর avalanche effect
+echo -n "hello"  | sha256sum
+echo -n "hellp"  | sha256sum      # মাত্র ১ অক্ষরের পার্থক্য
+
+# একটি certificate-এর সম্পূর্ণ বিবরণ
+openssl s_client -connect example.com:443 -servername example.com &lt;/dev/null 2>/dev/null \
+  | openssl x509 -noout -text | head -40
+
+# সম্পূর্ণ chain দেখুন
+openssl s_client -connect example.com:443 -servername example.com -showcerts &lt;/dev/null 2>/dev/null \
+  | grep -E "^ *[0-9] s:|^ *i:"
+#   s: = subject (কার certificate)
+#   i: = issuer (কে sign করেছে)
+
+# মেয়াদ ও SAN
+echo | openssl s_client -connect example.com:443 -servername example.com 2>/dev/null \
+  | openssl x509 -noout -dates -ext subjectAltName
+
+# আপনার machine-এ কতগুলো root CA বিশ্বাসযোগ্য?
+ls /etc/ssl/certs/*.pem 2>/dev/null | wc -l          # Linux
+security find-certificate -a /System/Library/Keychains/SystemRootCertificates.keychain \
+  | grep -c "alis" 2>/dev/null                        # macOS</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> "hello" আর "hellp"-এর hash সম্পূর্ণ ভিন্ন — কোনো মিল নেই। Chain-এ দেখবেন leaf-এর issuer হলো intermediate, intermediate-এর issuer হলো root। SAN-এ দেখবেন এই certificate কোন কোন নামের জন্য বৈধ। আর আপনার machine-এ প্রায় ১৫০+ root CA আছে — প্রত্যেকে যেকোনো site-এর জন্য certificate ইস্যু করার ক্ষমতা রাখে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Certificate কোনো জাদু নয় — এটি একটি structured document যাতে একটি public key আছে এবং কেউ সেই তথ্যে স্বাক্ষর করেছে। পুরো HTTPS ব্যবস্থাটি দাঁড়িয়ে আছে আপনার machine-এ আগে থেকে ইনস্টল করা কয়েকশ root certificate-এর উপর।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li><strong>Symmetric</strong> দ্রুত কিন্তু চাবি বিনিময়ের সমস্যা; <strong>asymmetric</strong> ধীর কিন্তু সেই সমস্যা সমাধান করে।</li>
+      <li>TLS দুটোই ব্যবহার করে (hybrid): asymmetric দিয়ে symmetric চাবি প্রতিষ্ঠা, তারপর symmetric দিয়ে data।</li>
+      <li><strong>Hash</strong> একমুখী ও fixed-size; encryption দ্বিমুখী। Password hash করতে হয়, encrypt নয়।</li>
+      <li><strong>Digital signature</strong> = private key দিয়ে hash encrypt → integrity + authenticity একসাথে।</li>
+      <li><strong>Certificate</strong> = একটি CA-র signed বিবৃতি: "এই public key এই domain-এর"।</li>
+      <li>Chain of trust: leaf → intermediate → root, এবং root আপনার OS-এ আগে থেকেই আছে।</li>
+      <li><strong>Forward secrecy</strong> (ECDHE): প্রতিটি session-এ নতুন key, তাই private key চুরি হলেও পুরনো traffic নিরাপদ।</li>
+      <li><strong>AEAD</strong> encryption ও integrity একসাথে নিরাপদভাবে করে; TLS 1.3-এ শুধু AEAD অনুমোদিত।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>TLS শুধু asymmetric encryption ব্যবহার করলে সমস্যা কী?</summary>
+    <div class="ans"><p>অত্যন্ত ধীর হতো — asymmetric operation symmetric-এর চেয়ে শত-হাজার গুণ ধীর। একটি ১০০ MB ফাইল RSA দিয়ে encrypt করা ব্যবহারিকভাবে অসম্ভব। তাই TLS asymmetric ব্যবহার করে শুধু <em>একটি symmetric চাবি নিরাপদে প্রতিষ্ঠা</em> করতে (এবং পরিচয় যাচাই করতে), তারপর সব প্রকৃত data দ্রুত symmetric cipher দিয়ে যায়।</p></div>
+  </details>
+  <details class="qa"><summary>Certificate ঠিক কী প্রমাণ করে?</summary>
+    <div class="ans"><p>এটি একটি CA-র স্বাক্ষরিত বিবৃতি: "এই public key-টি এই domain নামের মালিকের"। CA domain-এর মালিকানা যাচাই করেছে (সাধারণত DNS record বা HTTP challenge দিয়ে) এবং সেই বিবৃতিতে নিজের private key দিয়ে স্বাক্ষর করেছে। Browser CA-র public key (যা তার trust store-এ আছে) দিয়ে সেই স্বাক্ষর যাচাই করে। Certificate <em>নিরাপত্তা</em> প্রমাণ করে না, শুধু <em>পরিচয়</em> প্রমাণ করে।</p></div>
+  </details>
+  <details class="qa"><summary>Forward secrecy কী এবং কেন এটি গুরুত্বপূর্ণ?</summary>
+    <div class="ans"><p>প্রতিটি session-এর encryption key একটি সাময়িক (ephemeral) key exchange দিয়ে তৈরি হয় এবং তা কখনো তারে যায় না। Server-এর দীর্ঘমেয়াদি private key শুধু পরিচয় প্রমাণ করে, session key তৈরিতে ব্যবহৃত হয় না। ফলে কেউ যদি আজকের traffic রেকর্ড করে রাখে এবং পাঁচ বছর পরে server-এর private key চুরি করে, সে পুরনো traffic decrypt করতে <strong>পারবে না</strong>। TLS 1.3-এ এটি বাধ্যতামূলক।</p></div>
+  </details>
+  <details class="qa"><summary>একটি দুর্বৃত্ত CA কী করতে পারে, এবং তা প্রতিরোধের ব্যবস্থা কী?</summary>
+    <div class="ans"><p>যেকোনো domain-এর জন্য বৈধ certificate ইস্যু করতে পারে — যা দিয়ে সে অদৃশ্যভাবে MITM আক্রমণ চালাতে পারে (browser কোনো সতর্কতা দেবে না)। প্রতিরোধ: <strong>Certificate Transparency</strong> (সব ইস্যু করা certificate public log-এ যায়, তাই domain মালিক জাল certificate দেখতে পান), <strong>CAA record</strong> (DNS-এ নির্দিষ্ট করে দেওয়া কোন CA ইস্যু করতে পারবে), এবং কিছু ক্ষেত্রে certificate pinning। ২০১১-এ DigiNotar-এর ঘটনা এই ঝুঁকিটি বাস্তবে প্রমাণ করেছে।</p></div>
+  </details>
+  <details class="qa"><summary>Password কেন encrypt না করে hash করতে হয়?</summary>
+    <div class="ans"><p>Encryption দ্বিমুখী — চাবি চুরি হলে সব password উদ্ধার করা যায়। Hash একমুখী — database চুরি হলেও মূল password ফিরিয়ে আনা যায় না। তবে সাধারণ hash (SHA-256) যথেষ্ট নয়, কারণ তা অত্যন্ত দ্রুত, ফলে brute-force ও rainbow table আক্রমণ কার্যকর। তাই <strong>bcrypt, scrypt বা argon2</strong> ব্যবহার করতে হয় — এরা ইচ্ছাকৃতভাবে ধীর এবং প্রতিটি password-এর জন্য আলাদা salt ব্যবহার করে।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch31"><div class="d">পূর্ববর্তী</div><div class="t">Ch 31 — Why HTTPS?</div></a>
+    <a class="nx" href="#ch33"><div class="d">পরবর্তী</div><div class="t">Ch 33 — TLS Handshake</div></a>
+  </div>
+</section>

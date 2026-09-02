@@ -1,0 +1,411 @@
+<section class="chapter" id="ch16">
+  <div class="ch-eyebrow">Chapter 16</div>
+  <h1>Sockets — Application এবং Network-এর সংযোগস্থল</h1>
+  <p class="ch-lede">এই chapter টি বইয়ের সেই বিন্দু যেখানে networking আর operating system একসাথে মিশে যায়। Socket হলো সেই abstraction যার মাধ্যমে আপনার লেখা প্রতিটি লাইন network-এ পৌঁছায় — <code>fetch()</code>, <code>net.connect()</code>, database driver, সবকিছুর নিচে একটি socket আছে।</p>
+
+  <h2>16.1 Why does this exist?</h2>
+  <p>আপনার application user space-এ চলে। Network hardware-এ পৌঁছাতে হলে kernel-এর মধ্য দিয়ে যেতে হবে (OS fundamentals থেকে এটি পরিচিত)। কিন্তু কী interface দিয়ে?</p>
+
+  <p>Unix-এর নকশাগত সিদ্ধান্ত ছিল চমৎকার: <strong>network connection-কেও file-এর মতো দেখাও।</strong></p>
+
+  <div class="cb diagram"><pre>File-এর সাথে যা করেন:          Socket-এর সাথেও তাই:
+
+  fd = open("file.txt")          fd = socket(...)
+  read(fd, buf, n)               read(fd, buf, n)     ← একই call!
+  write(fd, buf, n)              write(fd, buf, n)    ← একই call!
+  close(fd)                      close(fd)            ← একই call!
+
+দুটোই একটি সংখ্যা — file descriptor।
+Kernel-এর table-এ একটি index মাত্র।</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why এই abstraction গুরুত্বপূর্ণ</div>
+    <p>"সবকিছু একটি file descriptor" — এই নকশার ফলে <code>select()</code>, <code>poll()</code>, <code>epoll</code>, <code>kqueue</code>-এর মতো ব্যবস্থা একসাথে file, socket, pipe, timer সবকিছুর উপর কাজ করতে পারে। <strong>এটিই Node.js-এর event loop, nginx-এর event-driven model, এবং Go-এর runtime scheduler-এর ভিত্তি।</strong> আপনি যখন <code>epoll</code>-এর নাম শোনেন, সে আসলে একগুচ্ছ socket fd-র উপর নজর রাখছে।</p>
+  </div>
+
+  <h2>16.2 Socket কী</h2>
+  <p>একটি <strong>socket</strong> (সকেট) হলো একটি communication endpoint — kernel-এর ভেতরে একটি data structure যা একটি network connection-এর সব অবস্থা ধরে রাখে, এবং যার সাথে আপনার application একটি file descriptor-এর মাধ্যমে কথা বলে।</p>
+
+  <div class="cb diagram"><pre>একটি socket-এর সাথে যুক্ত থাকে:
+
+  ┌─────────────────────────────────────────┐
+  │ Protocol      : TCP / UDP               │
+  │ Local IP      : 192.168.1.5             │
+  │ Local Port    : 51234                   │
+  │ Remote IP     : 93.184.215.14           │
+  │ Remote Port   : 443                     │
+  │ State         : ESTABLISHED             │
+  │ Send buffer   : [ যা পাঠানো বাকি ]        │
+  │ Recv buffer   : [ যা এসেছে, পড়া হয়নি ]   │
+  │ TCP state     : seq, ack, window, RTT   │
+  └─────────────────────────────────────────┘
+
+আপনার code এর কিছুই দেখে না — শুধু একটি সংখ্যা:  fd = 7</pre></div>
+
+  <h2>16.3 Vertical stack — উপর থেকে নিচে</h2>
+
+  <div class="cb diagram"><pre>┌─────────────────────────────────────────────────┐
+│  USER SPACE                                     │
+│                                                 │
+│   আপনার application                              │
+│      fetch() / net.connect() / db.query()       │
+│              ↓                                  │
+│   Language runtime / library                    │
+│      (libuv, Go runtime, JVM NIO)               │
+│              ↓                                  │
+│   Socket API                                    │
+│      socket(), connect(), send(), recv()        │
+└──────────────┬──────────────────────────────────┘
+               │  ═══ SYSTEM CALL BOUNDARY ═══
+               │  (context switch — এখানে খরচ আছে)
+┌──────────────▼──────────────────────────────────┐
+│  KERNEL SPACE                                   │
+│                                                 │
+│   Socket layer                                  │
+│      fd → socket structure খুঁজে বের করা          │
+│              ↓                                  │
+│   TCP/UDP layer                                 │
+│      buffer, seq/ack, retransmit, window        │
+│              ↓                                  │
+│   IP layer                                      │
+│      routing lookup, IP header, fragmentation   │
+│              ↓                                  │
+│   Link layer                                    │
+│      ARP, Ethernet header                       │
+│              ↓                                  │
+│   Device driver + queue                         │
+└──────────────┬──────────────────────────────────┘
+               ▼
+┌─────────────────────────────────────────────────┐
+│  HARDWARE — NIC → তার/radio                      │
+└─────────────────────────────────────────────────┘</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — Socket একটি সীমান্ত</div>
+    <p>Socket হলো সেই রেখা যেখানে <em>আপনার দায়িত্ব শেষ এবং kernel-এর দায়িত্ব শুরু</em>। আপনি <code>write()</code> করলেন — এর মানে "এই bytes গুলো kernel-এর send buffer-এ রাখলাম"। এর মানে <strong>এই নয়</strong> যে data পাঠানো হয়ে গেছে, বা গন্তব্যে পৌঁছেছে, বা receiver পড়েছে।</p>
+    <p>এই পার্থক্যটি গুরুত্বপূর্ণ: <code>write()</code> সফল হওয়া মানে শুধু "kernel দায়িত্ব নিয়েছে"। Kernel পরে নিজের সময়মতো, নিজের মতো ভাগ করে, প্রয়োজনে বারবার চেষ্টা করে সেটি পাঠাবে।</p>
+  </div>
+
+  <h2>16.4 Server-এর জীবনচক্র</h2>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ socket()                                             │
+│   একটি endpoint তৈরি করো। এখনো কোনো address নেই,       │
+│   কোনো connection নেই। শুধু একটি fd ফেরত পেলে।         │
+│   fd = socket(AF_INET, SOCK_STREAM, 0)                │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ bind(fd, 0.0.0.0:8080)                               │
+│   "এই socket-টি এই IP ও port-এর সাথে যুক্ত করো"        │
+│   এখানেই "Address already in use" error আসতে পারে।    │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ listen(fd, backlog)                                  │
+│   "এটি এখন একটি listening socket — আগত connection    │
+│    গ্রহণ করার জন্য প্রস্তুত"                            │
+│   backlog = কতগুলো অপেক্ষমাণ connection জমা থাকবে      │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ accept(fd)  ← এখানে block করে অপেক্ষা করে              │
+│   একটি সম্পূর্ণ handshake হওয়া connection নিয়ে         │
+│   ★ একটি সম্পূর্ণ নতুন socket ★ ফেরত দেয়               │
+│   conn_fd = accept(fd)                                │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ recv(conn_fd) / send(conn_fd)                        │
+│   এই নতুন socket দিয়ে ওই client-এর সাথে কথা বলো        │
+│   মূল listening socket পরের client-এর জন্য মুক্ত        │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ close(conn_fd)                                       │
+│   এই কথোপকথন শেষ। listening socket চলতেই থাকে।         │
+└──────────────────────────────────────────────────────┘</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ সবচেয়ে গুরুত্বপূর্ণ সূক্ষ্মতা — দুই ধরনের socket</div>
+    <p>এটি নতুনদের কাছে বিভ্রান্তিকর, কিন্তু ধারণাটি মৌলিক:</p>
+    <ul>
+      <li><strong>Listening socket</strong> — একটি মাত্র, শুধু <code>(local IP, local port)</code> জানে। এর কোনো peer নেই। এর কাজ শুধু নতুন connection তৈরি করা। <code>ss</code>-এ এটি <code>LISTEN</code> অবস্থায় দেখায়।</li>
+      <li><strong>Connected socket</strong> — প্রতিটি client-এর জন্য একটি করে, সম্পূর্ণ 4-tuple জানে। প্রকৃত data এদের দিয়েই যায়। <code>ss</code>-এ <code>ESTAB</code>।</li>
+    </ul>
+    <p>একটি web server-এ ১টি listening socket এবং ১০,০০০টি connected socket থাকতে পারে — সবগুলোরই local port 443। এতে কোনো সংঘাত নেই, কারণ প্রতিটির 4-tuple আলাদা।</p>
+  </div>
+
+  <h2>16.5 Client-এর জীবনচক্র</h2>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ socket()                                             │
+│   একটি endpoint তৈরি করো                              │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ connect(fd, 93.184.215.14:443)                       │
+│                                                      │
+│   এই একটি call-এর ভেতরে যা যা ঘটে:                     │
+│     1. routing lookup — কোন interface দিয়ে যাব        │
+│     2. source IP নির্ধারণ                              │
+│     3. একটি ephemeral source port বেছে নেওয়া           │
+│     4. TCP three-way handshake (SYN/SYN-ACK/ACK)      │
+│     5. handshake সফল হলে তবেই return করে              │
+│                                                      │
+│   ★ bind() লাগে না — kernel নিজেই source port দেয় ★   │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ send() / recv()                                      │
+└────────────────────┬─────────────────────────────────┘
+                     ▼
+┌──────────────────────────────────────────────────────┐
+│ close()                                              │
+└──────────────────────────────────────────────────────┘</pre></div>
+
+  <h2>16.6 পাশাপাশি — সম্পূর্ণ চিত্র</h2>
+
+  <div class="cb diagram"><pre>     SERVER                          CLIENT
+        │                               │
+   socket()                             │
+        │                               │
+   bind(:8080)                          │
+        │                               │
+   listen()                             │
+        │                               │
+   accept() ──── অপেক্ষা...              │
+        │                          socket()
+        │                               │
+        │         ◀── SYN ─────── connect()
+        │         ─── SYN-ACK ──▶       │  (blocked)
+        │         ◀── ACK ──────        │
+        │                               │
+   accept() ফেরত দেয়              connect() ফেরত দেয়
+   conn_fd                              │
+        │                               │
+        │         ◀── "GET /" ─── send()
+   recv()                               │
+        │                               │
+   send() ──── "HTTP/1.1 200" ──▶  recv()
+        │                               │
+   close()      ◀── FIN ────────── close()
+        │                               │</pre></div>
+
+  <h2>16.7 Code — তিনটি স্তরে একই জিনিস</h2>
+
+  <div class="tabs" id="tabs-socket">
+    <div class="tab-btns">
+      <button class="on" data-t="s1">JavaScript</button>
+      <button data-t="s2">C (raw syscall)</button>
+      <button data-t="s3">Python</button>
+    </div>
+    <div class="tab-body">
+      <div class="tab-pane on" id="s1">
+        <p>উচ্চ স্তরে socket গুলো লুকানো, কিন্তু নিচে তারাই আছে:</p>
+        <div class="cb"><span class="cb-lang">js</span><pre>// এই এক লাইন যা যা করে
+const res = await fetch("https://api.example.com/users");
+//  1. DNS resolve  → getaddrinfo() syscall
+//  2. socket()      → একটি fd তৈরি
+//  3. connect()     → TCP handshake
+//  4. TLS handshake → certificate যাচাই, key বিনিময়
+//  5. write()       → HTTP request bytes
+//  6. read()        → response bytes
+//  7. close() বা keep-alive pool-এ ফেরত
+
+// নিচু স্তরে, একই জিনিস স্পষ্টভাবে:
+const net = require("net");
+
+const server = net.createServer((socket) => {
+  // এই socket = accept()-এর ফেরত দেওয়া conn_fd
+  console.log("client:", socket.remoteAddress, socket.remotePort);
+
+  socket.on("data", (chunk) => {      // recv()
+    socket.write("Echo: " + chunk);   // send()
+  });
+
+  socket.on("end", () => {            // FIN পেয়েছি
+    console.log("client চলে গেল");
+  });
+});
+
+server.listen(8080, "0.0.0.0");        // bind() + listen()</pre></div>
+      </div>
+      <div class="tab-pane" id="s2">
+        <p>C-তে প্রতিটি ধাপ স্পষ্ট — কোনো কিছু লুকানো নেই:</p>
+        <div class="cb"><span class="cb-lang">c</span><pre>// ---------- SERVER ----------
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+// "Address already in use" এড়াতে (Ch 22-এ TIME_WAIT দেখুন)
+int yes = 1;
+setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof(yes));
+
+struct sockaddr_in addr = {
+    .sin_family = AF_INET,
+    .sin_port   = htons(8080),        // host → network byte order
+    .sin_addr   = { .s_addr = INADDR_ANY }   // 0.0.0.0
+};
+
+bind(fd, (struct sockaddr*)&amp;addr, sizeof(addr));
+listen(fd, 128);                      // backlog = 128
+
+while (1) {
+    struct sockaddr_in cli;
+    socklen_t len = sizeof(cli);
+
+    int conn = accept(fd, (struct sockaddr*)&amp;cli, &amp;len);
+    //  ↑ এখানে block করে। নতুন একটি fd ফেরত দেয়।
+
+    char buf[1024];
+    ssize_t n = recv(conn, buf, sizeof(buf), 0);
+    //  ↑ n < requested হতে পারে! TCP byte stream (Ch 4)
+
+    send(conn, buf, n, 0);
+    close(conn);                      // শুধু এই connection
+}
+
+// ---------- CLIENT ----------
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+struct sockaddr_in srv = { ... };
+connect(fd, (struct sockaddr*)&amp;srv, sizeof(srv));
+//  ↑ এর ভেতরেই TCP handshake সম্পন্ন হয়
+send(fd, "hello", 5, 0);
+recv(fd, buf, sizeof(buf), 0);
+close(fd);</pre></div>
+      </div>
+      <div class="tab-pane" id="s3">
+        <p>Python-এর <code>socket</code> module কার্যত C API-র সরাসরি প্রতিরূপ:</p>
+        <div class="cb"><span class="cb-lang">python</span><pre>import socket
+
+# ---------- SERVER ----------
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("0.0.0.0", 8080))
+srv.listen(128)
+
+while True:
+    conn, addr = srv.accept()      # নতুন socket + client-এর ঠিকানা
+    print("connected:", addr)      # ('192.168.1.9', 51234)
+
+    data = conn.recv(1024)         # চাওয়া 1024, পেতে পারেন কম
+    conn.sendall(b"Echo: " + data) # sendall = সব যাওয়া পর্যন্ত loop
+    conn.close()
+
+# ---------- CLIENT ----------
+cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+cli.connect(("example.com", 80))
+print("আমার source port:", cli.getsockname()[1])   # ephemeral!
+cli.sendall(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+print(cli.recv(4096).decode()[:200])
+cli.close()</pre></div>
+        <p><code>getsockname()</code> চালিয়ে দেখুন — kernel আপনার হয়ে যে source port বেছে নিয়েছে সেটি দেখতে পাবেন।</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>16.8 Buffer — যেখানে অধিকাংশ বিভ্রান্তি জন্মায়</h2>
+
+  <div class="cb diagram"><pre>APPLICATION                KERNEL                  NETWORK
+
+  write("hello")  ──────▶  ┌──────────────┐
+                           │ Send Buffer  │ ──────▶  packets
+  ✓ ফেরত এল                 │ "hello"      │
+  (মানে: kernel নিয়েছে,      └──────────────┘
+   পাঠিয়েছে নয়!)
+
+                           ┌──────────────┐
+  read(buf)     ◀──────    │ Recv Buffer  │ ◀──────  packets
+                           │ "world"      │
+  ✓ যা আছে তাই দেয়           └──────────────┘
+  (হয়তো আংশিক)</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ তিনটি অনিবার্য সত্য</div>
+    <ol>
+      <li><strong><code>write()</code> ফেরত আসা মানে পাঠানো হয়েছে নয়</strong> — শুধু kernel buffer-এ কপি হয়েছে। এমনকি <code>close()</code>-এর পরও কিছু data পথে থাকতে পারে।</li>
+      <li><strong><code>read()</code> চাওয়ার চেয়ে কম দিতে পারে</strong> — আপনি ১০০০ চাইলেন, পেলেন ২০০। এটি error নয়, TCP-এর স্বাভাবিক আচরণ (Ch 4)। তাই সবসময় loop-এ পড়তে হয়।</li>
+      <li><strong>Send buffer ভরে গেলে <code>write()</code> block করে</strong> (blocking mode-এ) বা <code>EAGAIN</code> দেয় (non-blocking mode-এ)। এটিই <strong>backpressure</strong>-এর প্রকৃত রূপ — receiver ধীর হলে সেই ধীরগতি buffer হয়ে আপনার <code>write()</code> পর্যন্ত পৌঁছায় (Ch 20)।</li>
+    </ol>
+  </div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Node.js-এ এটি যেভাবে দেখা যায়</div>
+    <div class="cb"><span class="cb-lang">js</span><pre>const ok = socket.write(bigChunk);
+if (!ok) {
+  // kernel buffer ভরা — thamun
+  socket.once("drain", () => resume());
+}
+
+// অথবা stream.pipe() নিজেই এটি সামলায়:
+readStream.pipe(socket);   // backpressure স্বয়ংক্রিয়</pre></div>
+    <p><code>write()</code>-এর <code>false</code> return করা আর <code>'drain'</code> event — এই দুটি সরাসরি kernel socket buffer-এর অবস্থার প্রতিফলন। Stream API এই OS-স্তরের বাস্তবতাকেই একটি সুন্দর মোড়কে দেয়।</p>
+  </div>
+
+  <h2>16.9 Socket-এর ধরন</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Type</th><th>Protocol</th><th>বৈশিষ্ট্য</th></tr></thead>
+    <tbody>
+      <tr><td><code>SOCK_STREAM</code></td><td>TCP</td><td>Connection-oriented, নির্ভরযোগ্য, ক্রমবদ্ধ byte stream</td></tr>
+      <tr><td><code>SOCK_DGRAM</code></td><td>UDP</td><td>Connectionless, অনিশ্চিত, message-সীমা সংরক্ষিত</td></tr>
+      <tr><td><code>SOCK_RAW</code></td><td>IP সরাসরি</td><td>নিজে header লেখা (root লাগে) — <code>ping</code> এভাবেই চলে</td></tr>
+      <tr><td><code>AF_UNIX</code></td><td>—</td><td>একই machine-এর process-দের মধ্যে; কোনো network stack নেই, তাই দ্রুত। Docker socket, PostgreSQL-এর local সংযোগ এভাবেই।</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 16 — Socket-এর জীবনচক্র নিজের চোখে</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — listening socket এবং connected socket-এর পার্থক্য, এবং একটি connection তৈরি হওয়ার মুহূর্তে kernel-এর table-এ কী যোগ হয়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Terminal 1 — একটি server চালান
+python3 -m http.server 8080
+
+# Terminal 2 — listening socket দেখুন
+ss -tlnp | grep 8080
+# LISTEN  0  5  0.0.0.0:8080  0.0.0.0:*   ← peer নেই!
+
+# Terminal 3 — একটি connection ধরে রাখুন
+nc localhost 8080          # খোলা রাখুন
+
+# Terminal 2 — আবার দেখুন
+ss -tnp | grep 8080
+# এখন LISTEN ছাড়াও দুটি ESTAB দেখবেন
+# (একটি client-এর দিক, একটি server-এর দিক — দুটোই এই machine-এ)</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> LISTEN লাইনে peer address <code>0.0.0.0:*</code> — অর্থাৎ কোনো নির্দিষ্ট peer নেই। ESTAB লাইনে দুটো প্রান্তেরই সম্পূর্ণ address:port আছে — এটাই 4-tuple। এবং লক্ষ্য করুন LISTEN socket-টি ESTAB তৈরি হওয়ার পরেও <em>টিকে আছে</em> — সে পরের client-এর জন্য অপেক্ষা করছে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> <code>accept()</code> যে "নতুন socket" ফেরত দেয় সেটি কোনো রূপক নয় — <code>ss</code>-এ আপনি দুটি আলাদা entry দেখতে পাচ্ছেন। একটি connection মানে kernel-এর ভেতরে একটি প্রকৃত, আলাদা data structure।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Socket = communication endpoint; application-এর কাছে এটি একটি file descriptor।</li>
+      <li>Server: <code>socket → bind → listen → accept → recv/send → close</code>।</li>
+      <li>Client: <code>socket → connect → send/recv → close</code>। <code>bind()</code> লাগে না।</li>
+      <li><strong><code>accept()</code> একটি নতুন socket ফেরত দেয়</strong> — listening socket আলাদা, connected socket আলাদা।</li>
+      <li><code>connect()</code>-এর ভেতরেই routing lookup, source port বাছাই, এবং TCP handshake ঘটে।</li>
+      <li><code>write()</code> সফল = kernel buffer-এ কপি হয়েছে, পাঠানো বা পৌঁছানো নয়।</li>
+      <li><code>read()</code> চাওয়ার চেয়ে কম দিতে পারে — সবসময় loop-এ পড়ুন।</li>
+      <li>Buffer ভরে গেলে <code>write()</code> আটকায় — এটিই backpressure।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>accept()</code> কেন একটি নতুন socket ফেরত দেয়? পুরনোটাই ব্যবহার করলে সমস্যা কী?</summary>
+    <div class="ans"><p>কারণ listening socket-এর কোনো peer নেই — সে শুধু <code>(local IP, port)</code> জানে এবং তার কাজ নতুন connection গ্রহণ করা। প্রতিটি client-এর সাথে কথা বলতে দরকার একটি সম্পূর্ণ 4-tuple সহ আলাদা socket, নিজস্ব buffer ও নিজস্ব TCP state সহ। পুরনোটা ব্যবহার করলে দ্বিতীয় client-এর জন্য কোনো জায়গা থাকত না, এবং একাধিক client-এর data মিশে যেত।</p></div>
+  </details>
+  <details class="qa"><summary><code>write()</code> সফলভাবে ফেরত এল। এর মানে কি data গন্তব্যে পৌঁছেছে?</summary>
+    <div class="ans"><p>না। এর একমাত্র অর্থ — bytes গুলো kernel-এর send buffer-এ কপি হয়েছে এবং kernel দায়িত্ব নিয়েছে। তারপর সেগুলো segment-এ ভাগ হবে, পাঠানো হবে, হয়তো হারাবে, আবার পাঠানো হবে। গন্তব্যে পৌঁছেছে কিনা তা জানার একমাত্র উপায় application-স্তরের acknowledgment (যেমন HTTP response) — TCP-এর ACK শুধু <em>kernel</em> পেয়েছে বলে, application পড়েছে বলে নয়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি server-এ ১০,০০০ client যুক্ত। কতটি socket আছে?</summary>
+    <div class="ans"><p>১০,০০১টি — একটি listening socket এবং ১০,০০০টি connected socket। সবগুলোর local port একই (যেমন 443), কিন্তু প্রতিটির 4-tuple ভিন্ন। প্রতিটি socket-এর নিজস্ব send/recv buffer আছে, তাই ১০,০০০ connection মানে উল্লেখযোগ্য পরিমাণ kernel memory (এটাই C10K সমস্যার একটি দিক)।</p></div>
+  </details>
+  <details class="qa"><summary>Client-কে কেন <code>bind()</code> করতে হয় না?</summary>
+    <div class="ans"><p>কারণ client-এর কোনো নির্দিষ্ট port দরকার নেই — কেউ তার কাছে connect করতে আসছে না। <code>connect()</code>-এর সময় kernel স্বয়ংক্রিয়ভাবে ephemeral range থেকে একটি অব্যবহৃত port বেছে নেয় (implicit bind)। তবে চাইলে client-ও <code>bind()</code> করতে পারে — যেমন যদি নির্দিষ্ট একটি source IP বা port ব্যবহার করতে হয় (firewall নিয়ম বা multi-homed host-এ)।</p></div>
+  </details>
+  <details class="qa"><summary>Socket-কে file descriptor বানানোর সুবিধা কী?</summary>
+    <div class="ans"><p>একই API (<code>read</code>, <code>write</code>, <code>close</code>, <code>select</code>/<code>poll</code>/<code>epoll</code>) file, socket, pipe, terminal, timer — সবকিছুতে কাজ করে। ফলে একটি event loop একসাথে file I/O এবং network I/O-র উপর নজর রাখতে পারে। এটিই Node.js, nginx, এবং সব আধুনিক async runtime-এর ভিত্তি।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch15"><div class="d">পূর্ববর্তী</div><div class="t">Ch 15 — Why Transport Layer?</div></a>
+    <a class="nx" href="#ch17"><div class="d">পরবর্তী</div><div class="t">Ch 17 — TCP</div></a>
+  </div>
+</section>

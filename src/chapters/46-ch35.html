@@ -1,0 +1,249 @@
+<section class="chapter" id="ch35">
+  <div class="ch-eyebrow">Chapter 35</div>
+  <h1>Firewalls</h1>
+  <p class="ch-lede">Firewall-এর মূল ধারণা সরল: প্রতিটি packet-এর জন্য একটি সিদ্ধান্ত — যেতে দাও, ফেলে দাও, নাকি প্রত্যাখ্যান করো। কিন্তু "ফেলে দাও" আর "প্রত্যাখ্যান করো"-র পার্থক্য debugging-এ যা বলে দেয়, তা জানা মূল্যবান।</p>
+
+  <h2>35.1 Firewall কী করে</h2>
+
+  <div class="cb diagram"><pre>প্রতিটি packet-এর জন্য একটি সিদ্ধান্ত:
+
+  ACCEPT  → যেতে দাও
+  DROP    → চুপচাপ ফেলে দাও, কিছু বলো না
+  REJECT  → ফেলে দাও ★এবং★ প্রেরককে জানাও
+            (ICMP unreachable বা TCP RST)
+
+সিদ্ধান্ত নেওয়া হয় যা দেখে:
+  • Source / destination IP
+  • Source / destination port
+  • Protocol (TCP/UDP/ICMP)
+  • Interface (কোন NIC দিয়ে এল)
+  • Connection state (নতুন? বিদ্যমান? সম্পর্কিত?)
+  • [Layer 7 firewall হলে] HTTP-র বিষয়বস্তু</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ DROP বনাম REJECT — debugging-এ যা বলে দেয়</div>
+    <div class="cb diagram"><pre>REJECT:
+  Client → SYN → firewall → RST বা ICMP ফেরত
+  Client দেখে: "Connection refused" ★তাৎক্ষণিক★
+
+DROP:
+  Client → SYN → firewall → (কিছুই না)
+  Client অপেক্ষা করে... retry... retry...
+  Client দেখে: "Connection timed out" ★৩০–৭৫ সেকেন্ড পরে★
+
+কোনটি ব্যবহার করবেন?
+  DROP   — বাইরের দিকে। আক্রমণকারীকে তথ্য দেবেন না;
+           port scan ধীর ও ব্যয়বহুল হয়ে যায়।
+  REJECT — ভেতরের দিকে। আপনার নিজের developer-রা
+           দ্রুত জানুক কী হচ্ছে, ৭৫ সেকেন্ড অপেক্ষা না করে।
+
+★ Debugging-এর সূত্র: timeout মানে প্রায়ই DROP
+  (firewall নীরবে ফেলে দিচ্ছে), আর refused মানে
+  packet পৌঁছেছে কিন্তু listener নেই বা REJECT নিয়ম আছে।</pre></div>
+  </div>
+
+  <h2>35.2 Stateless বনাম Stateful</h2>
+
+  <div class="cb diagram"><pre>STATELESS (packet filter) — প্রতিটি packet স্বাধীনভাবে
+
+  নিয়ম: "port 80-এ outbound অনুমোদিত"
+
+  সমস্যা: response-এর জন্যও নিয়ম লিখতে হবে!
+    "source port 80 থেকে inbound অনুমোদিত"
+
+  কিন্তু এটি বিপজ্জনক — যে কেউ source port 80
+  ব্যবহার করে আপনার ভেতরে ঢুকতে পারে।
+
+
+STATEFUL — connection-এর অবস্থা মনে রাখে
+
+  নিয়ম: "outbound connection অনুমোদিত"
+        "ESTABLISHED ও RELATED inbound অনুমোদিত"
+
+  Firewall একটি connection table রাখে:
+  ┌──────────────────────────────────────────┐
+  │ 192.168.1.10:51234 → 93.184.x:443  ESTAB │
+  │ 192.168.1.11:38900 → 142.250.x:80  ESTAB │
+  └──────────────────────────────────────────┘
+
+  Inbound packet এলে সে দেখে — এটি কি একটি
+  বিদ্যমান connection-এর অংশ? হ্যাঁ হলে অনুমোদন,
+  না হলে (unsolicited) নিয়ম অনুযায়ী।
+
+  ★ আধুনিক সব firewall stateful ★</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ NAT এবং stateful firewall — একই বংশ</div>
+    <p>লক্ষ্য করুন — NAT-ও একটি connection table রাখে, stateful firewall-ও। কার্যত এরা একই ধরনের যন্ত্র, ভিন্ন উদ্দেশ্যে। এজন্যই সেগুলো প্রায়ই একই বাক্সে (এবং Linux-এ একই subsystem — <code>netfilter</code>/<code>conntrack</code>-এ) থাকে।</p>
+  </div>
+
+  <h2>35.3 কোথায় কোথায় firewall থাকে</h2>
+
+  <div class="cb diagram"><pre>একটি packet আপনার laptop থেকে server-এ যেতে
+কতগুলো firewall পেরোয়:
+
+  আপনার laptop
+      ↓  ← ১. Host firewall (ufw, Windows Defender)
+  আপনার router
+      ↓  ← ২. Home router-এর firewall (+ NAT)
+  ISP
+      ↓  ← ৩. ISP-র filtering (কখনো কখনো)
+  Internet
+      ↓
+  Cloud provider-এর edge
+      ↓  ← ৪. DDoS protection, WAF
+  VPC / Network ACL
+      ↓  ← ৫. Subnet-স্তরের নিয়ম
+  Security Group
+      ↓  ← ৬. Instance-স্তরের নিয়ম
+  Server-এর host firewall
+      ↓  ← ৭. iptables/nftables
+  Container / Pod
+      ↓  ← ৮. Kubernetes NetworkPolicy
+  Application
+         ← ৯. Application-স্তরের authorization
+
+★ "Connection timeout" হলে এই নয়টির যেকোনো একটি
+  দায়ী হতে পারে। একটি একটি করে বাদ দিয়ে এগোতে হয়।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — যেভাবে খুঁজবেন</div>
+    <div class="cb diagram"><pre>উপসর্গ: "আমার service-এ পৌঁছাতে পারছি না"
+
+ধাপ ১: Server নিজেই কি শুনছে?
+       ss -tlnp | grep 8080
+       না থাকলে → application-এর সমস্যা, firewall নয়
+
+ধাপ ২: Server-এর ভেতর থেকে কাজ করে?
+       curl localhost:8080
+       হ্যাঁ হলে → application ঠিক আছে, network-এ সমস্যা
+
+ধাপ ৩: কোন address-এ bind করা?
+       0.0.0.0 না 127.0.0.1?  (Ch 9)
+       127.0.0.1 হলে → বাইরে থেকে কখনোই পৌঁছানো যাবে না
+
+ধাপ ৪: Host firewall?
+       sudo iptables -L -n -v | grep 8080
+       sudo ufw status
+
+ধাপ ৫: Cloud security group?
+       Console-এ inbound rule দেখুন
+
+ধাপ ৬: Network ACL / subnet?
+       ★ NACL stateless — inbound ও outbound
+         দুটোরই নিয়ম লাগে! এটি একটি সাধারণ ফাঁদ
+
+ধাপ ৭: প্রকৃত packet আসছে কি?
+       sudo tcpdump -i any port 8080
+       SYN আসছে কিন্তু SYN-ACK যাচ্ছে না?
+         → firewall outbound আটকাচ্ছে
+       কোনো SYN-ই আসছে না?
+         → আগেই কোথাও আটকে যাচ্ছে</pre></div>
+    <p>ধাপ ৭ সবচেয়ে গুরুত্বপূর্ণ: <code>tcpdump</code> দিয়ে দেখলেই বোঝা যায় সমস্যা "আসছে না" নাকি "যাচ্ছে না"।</p>
+  </div>
+
+  <h2>35.4 Linux-এ firewall</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># বর্তমান নিয়ম দেখুন
+sudo iptables -L -n -v --line-numbers
+sudo nft list ruleset              # আধুনিক nftables
+
+# ufw — সহজ frontend
+sudo ufw status verbose
+sudo ufw allow 22/tcp              # SSH অনুমোদন
+sudo ufw allow from 10.0.0.0/8 to any port 5432   # শুধু internal
+sudo ufw enable
+
+# একটি সাধারণ stateful নীতি (ধারণাগত)
+#   1. ESTABLISHED,RELATED → ACCEPT   (response গুলো)
+#   2. loopback            → ACCEPT
+#   3. নির্দিষ্ট service    → ACCEPT   (22, 80, 443)
+#   4. বাকি সব inbound     → DROP
+#   5. outbound            → ACCEPT (সাধারণত)</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Docker আপনার firewall উপেক্ষা করে</div>
+    <p>Docker <code>-p 8080:8080</code> দিয়ে port publish করলে সে সরাসরি <code>iptables</code>-এর <code>DOCKER</code> chain-এ নিয়ম যোগ করে, যা <code>ufw</code>-র নিয়মের <em>আগে</em> মূল্যায়িত হয়।</p>
+    <p>ফলাফল: আপনি <code>ufw deny 8080</code> করলেও Docker container টি Internet থেকে পৌঁছানো যাবে। এটি বহু অনিচ্ছাকৃত database exposure-এর কারণ হয়েছে।</p>
+    <p><strong>সমাধান:</strong> <code>-p 127.0.0.1:8080:8080</code> ব্যবহার করে শুধু loopback-এ publish করুন, অথবা Docker-এর <code>iptables</code> ব্যবস্থাপনা বন্ধ করে নিজে নিয়ম লিখুন।</p>
+  </div>
+
+  <h2>35.5 Firewall-এর বাইরে</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>যন্ত্র</th><th>কোন layer</th><th>কী করে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Packet filter</strong></td><td>3–4</td><td>IP, port, protocol দেখে সিদ্ধান্ত</td></tr>
+      <tr><td><strong>Stateful firewall</strong></td><td>3–4</td><td>+ connection-এর অবস্থা মনে রাখে</td></tr>
+      <tr><td><strong>WAF</strong> (Web Application Firewall)</td><td>7</td><td>HTTP-র বিষয়বস্তু দেখে — SQL injection, XSS-এর ধরন খোঁজে</td></tr>
+      <tr><td><strong>IDS / IPS</strong></td><td>3–7</td><td>আক্রমণের ধরন শনাক্ত (IDS) বা আটকানো (IPS)</td></tr>
+      <tr><td><strong>Rate limiter</strong></td><td>4–7</td><td>অতিরিক্ত request সীমিত করে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ WAF সম্পর্কে বাস্তবসম্মত প্রত্যাশা</div>
+    <p>WAF ধরনভিত্তিক (pattern-based) — সে জানা আক্রমণের ধরন খোঁজে। এটি সুরক্ষার একটি স্তর, কিন্তু <strong>নিরাপদ code-এর বিকল্প নয়</strong>। Parameterized query, input validation, output encoding — এগুলোই প্রকৃত প্রতিরক্ষা। WAF-কে ভাবুন একটি নিরাপত্তা-জাল হিসেবে: শূন্য-দিনের আক্রমণ বা জানা দুর্বলতার বিরুদ্ধে সময় কিনে দেয়, কিন্তু মূল সমস্যা সমাধান করে না।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 35 — DROP এবং REJECT-এর পার্থক্য দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একই "বন্ধ" port DROP আর REJECT-এ কীভাবে সম্পূর্ণ ভিন্ন উপসর্গ দেখায়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># বর্তমান নিয়ম
+sudo iptables -L -n -v | head -20
+
+# একটি port REJECT করুন
+sudo iptables -A INPUT -p tcp --dport 9001 -j REJECT
+time curl -s -m 10 http://localhost:9001 ; echo "exit: $?"
+# → দ্রুত "Connection refused"
+
+# একই port DROP করুন
+sudo iptables -A INPUT -p tcp --dport 9002 -j DROP
+time curl -s -m 10 http://localhost:9002 ; echo "exit: $?"
+# → ১০ সেকেন্ড অপেক্ষা, তারপর timeout
+
+# পরিষ্কার করুন
+sudo iptables -D INPUT -p tcp --dport 9001 -j REJECT
+sudo iptables -D INPUT -p tcp --dport 9002 -j DROP
+
+# connection tracking table দেখুন (stateful-এর প্রমাণ)
+sudo conntrack -L 2>/dev/null | head
+# বা
+sudo cat /proc/net/nf_conntrack 2>/dev/null | head</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> REJECT-এ curl প্রায় সঙ্গে সঙ্গে ব্যর্থ হয় ("Connection refused"), কারণ firewall একটি RST পাঠিয়েছে। DROP-এ curl পুরো ১০ সেকেন্ড অপেক্ষা করে timeout-এ যায়, কারণ কোনো উত্তরই আসেনি। <code>conntrack</code>-এর তালিকায় দেখবেন firewall প্রতিটি চলমান connection মনে রাখছে — এটিই stateful-এর প্রমাণ।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Connection refused" আর "timeout"-এর পার্থক্য নিছক শব্দগত নয় — এটি সরাসরি বলে দেয় পথে কী ঘটেছে। Timeout প্রায় সবসময় মানে কোথাও কেউ নীরবে packet ফেলে দিচ্ছে, যা সাধারণত একটি DROP নিয়ম।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Firewall তিনটি সিদ্ধান্ত নেয়: ACCEPT, DROP (নীরবে), REJECT (জানিয়ে)।</li>
+      <li><strong>DROP → timeout; REJECT → connection refused</strong> — debugging-এ এই পার্থক্য মূল্যবান।</li>
+      <li>Stateful firewall connection মনে রাখে, তাই response-এর জন্য আলাদা নিয়ম লাগে না।</li>
+      <li>একটি packet ৯টি পর্যন্ত ভিন্ন firewall পেরোতে পারে — উপসর্গ দেখে স্তর নির্ণয় করতে হয়।</li>
+      <li>Debugging-এর ক্রম: listening? → localhost-এ কাজ করে? → কোন IP-তে bind? → host firewall → cloud SG → NACL → tcpdump।</li>
+      <li>AWS NACL <strong>stateless</strong> — inbound ও outbound দুটোরই নিয়ম লাগে (একটি সাধারণ ফাঁদ)।</li>
+      <li>Docker <code>iptables</code>-এ নিজের নিয়ম যোগ করে ufw-কে বাইপাস করে।</li>
+      <li>WAF সুরক্ষার একটি স্তর, নিরাপদ code-এর বিকল্প নয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>DROP এবং REJECT-এর মধ্যে কোনটি কখন ব্যবহার করবেন?</summary>
+    <div class="ans"><p><strong>DROP</strong> বাইরের দিকে (Internet-মুখী) — আক্রমণকারীকে কোনো তথ্য দেয় না এবং port scan অত্যন্ত ধীর ও ব্যয়বহুল করে তোলে। <strong>REJECT</strong> ভেতরের দিকে (internal network) — আপনার নিজের developer ও service গুলো দ্রুত জানতে পারে কী হচ্ছে, ৭৫ সেকেন্ড timeout-এর অপেক্ষা না করে। DROP নিরাপত্তার জন্য, REJECT ব্যবহারযোগ্যতার জন্য।</p></div>
+  </details>
+  <details class="qa"><summary>Stateless firewall-এ HTTP response-এর জন্য নিয়ম লিখতে গেলে কী ঝুঁকি?</summary>
+    <div class="ans"><p>আপনাকে লিখতে হবে "source port 80 থেকে আসা inbound packet অনুমোদিত"। কিন্তু যে কেউ ইচ্ছাকৃতভাবে source port 80 ব্যবহার করে আপনার network-এ packet পাঠাতে পারে — অর্থাৎ নিয়মটি কার্যত একটি ফাঁক। Stateful firewall এই সমস্যা এড়ায়: সে জানে কোন connection আপনি নিজে শুরু করেছিলেন, তাই শুধু সেগুলোর প্রকৃত response অনুমোদন করে।</p></div>
+  </details>
+  <details class="qa"><summary>একটি cloud instance-এ service চলছে, security group-এ port খোলা, তবু connection timeout। আর কী দেখবেন?</summary>
+    <div class="ans"><p>(১) Service কি <code>0.0.0.0</code>-তে bind, না <code>127.0.0.1</code>-এ? (২) Host firewall (iptables/ufw) কি আটকাচ্ছে? (৩) <strong>Network ACL</strong> — এটি stateless, তাই <em>outbound</em> নিয়মও দরকার (ephemeral port range-এর জন্য); এটি সবচেয়ে বেশি উপেক্ষিত। (৪) Route table ঠিক আছে? Public subnet-এ Internet Gateway আছে? (৫) <code>tcpdump</code> দিয়ে দেখুন SYN আদৌ পৌঁছাচ্ছে কিনা — এটিই সবচেয়ে নির্ণায়ক পরীক্ষা।</p></div>
+  </details>
+  <details class="qa"><summary>Docker-এ <code>-p 5432:5432</code> দিয়ে PostgreSQL চালালে কী ঝুঁকি?</summary>
+    <div class="ans"><p>Docker <code>iptables</code>-এ সরাসরি নিয়ম যোগ করে যা <code>ufw</code>-র নিয়মের আগে মূল্যায়িত হয়। ফলে আপনি ufw-তে port 5432 বন্ধ রাখলেও database টি <strong>Internet থেকে পৌঁছানো যাবে</strong>। বহু বাস্তব data breach এভাবেই হয়েছে। সমাধান: <code>-p 127.0.0.1:5432:5432</code> ব্যবহার করে শুধু loopback-এ publish করুন, বা container গুলোকে একটি Docker network-এ রেখে port publish-ই না করা।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch34"><div class="d">পূর্ববর্তী</div><div class="t">Ch 34 — NAT</div></a>
+    <a class="nx" href="#ch36"><div class="d">পরবর্তী</div><div class="t">Ch 36 — Latency</div></a>
+  </div>
+</section>

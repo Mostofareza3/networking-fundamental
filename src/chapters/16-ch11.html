@@ -1,0 +1,178 @@
+<section class="chapter" id="ch11">
+  <div class="ch-eyebrow">Chapter 11</div>
+  <h1>Default Gateway</h1>
+  <p class="ch-lede">আপনার machine পৃথিবীর প্রতিটি network-এর পথ জানে না — এবং জানার দরকারও নেই। তার শুধু একটি জিনিস জানা দরকার: <em>"যা আমি চিনি না, তা কার কাছে দেব।"</em></p>
+
+  <h2>11.1 Why does this exist?</h2>
+  <p>আপনার laptop <code>142.250.190.14</code> (google.com)-এ packet পাঠাতে চায়। এটি local নয়। এখন কী?</p>
+
+  <p>একটি বিকল্প হতো — laptop-এ পৃথিবীর সব network-এর route রাখা। সমস্যা: বর্তমানে global routing table-এ প্রায় ৯ লক্ষ prefix, যা প্রতি সেকেন্ডে বদলাচ্ছে। প্রতিটি laptop, ফোন, IoT bulb-কে এই table রাখতে ও update করতে হলে ব্যবস্থাটি অচল হয়ে যেত।</p>
+
+  <div class="box why">
+    <div class="bt">💡 Why Default Gateway</div>
+    <p>সমাধান: <strong>"আমি জানি না, কিন্তু আমি এমন একজনকে চিনি যে জানে।"</strong> আপনার machine শুধু দুটি জিনিস জানে — (১) তার নিজের subnet-এ কারা আছে, আর (২) বাকি সব কিছুর জন্য একটি ঠিকানা: default gateway। এটি computer science-এর একটি পরিচিত নকশা: <em>delegation</em> — নিজে না পারলে যে পারে তার কাছে পাঠাও।</p>
+    <p>এবং এই নকশাটি recursive: আপনার router-ও সব জানে না, সে তার ISP-কে দেয়। ISP-ও সব জানে না, সে তার upstream-কে দেয়। শেষ পর্যন্ত Internet-এর core-এ কিছু router আছে যারা প্রকৃতপক্ষে পুরো table রাখে (Ch 42)।</p>
+  </div>
+
+  <h2>11.2 সিদ্ধান্তের প্রবাহ</h2>
+
+  <div class="cb diagram"><pre>Application: connect("142.250.190.14", 443)
+        │
+        ▼
+┌───────────────────────────────────────────────┐
+│ Kernel: routing table দেখে                     │
+│                                               │
+│  Destination টি কি কোনো "scope link" route-এ   │
+│  পড়ে? অর্থাৎ আমার নিজের subnet-এ?              │
+└───────────────┬───────────────────────────────┘
+                │
+        ┌───────┴────────┐
+        │                │
+       হ্যাঁ              না
+        │                │
+        ▼                ▼
+┌────────────────┐  ┌──────────────────────────┐
+│ সরাসরি delivery │  │ default route ব্যবহার করো  │
+│                │  │ 0.0.0.0/0 via 192.168.1.1│
+│ ARP: গন্তব্যের  │  │                          │
+│ MAC কী?        │  │ ARP: 192.168.1.1-এর      │
+│                │  │      MAC কী?             │
+│                │  │  ← gateway-এর MAC, গন্তব্যের│
+│                │  │    নয়!                   │
+└───────┬────────┘  └────────────┬─────────────┘
+        │                        │
+        ▼                        ▼
+┌──────────────────────────────────────────────┐
+│ Frame তৈরি:                                   │
+│   dst MAC = (উপরের ARP-এর উত্তর)              │
+│   src MAC = আমার                              │
+│   dst IP  = 142.250.190.14  ← সবসময় আসল গন্তব্য │
+│   src IP  = 192.168.1.5                       │
+└──────────────────────────────────────────────┘</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — বইয়ের কেন্দ্রীয় ধারণা</div>
+    <p style="font-size:1.05rem"><strong>Destination IP = চূড়ান্ত গন্তব্য (কখনো বদলায় না)।<br>
+    Destination MAC = পরের hop (প্রতি hop-এ বদলায়)।</strong></p>
+    <p>এই দুই লাইনই routing-এর পুরো ভিত্তি। আপনার machine Google-এর server-এর MAC কোনোদিন জানে না — সে শুধু নিজের router-এর MAC জানে। Router-ও Google-এর MAC জানে না — সে পরের router-এর MAC জানে। এভাবে চেইন চলতে থাকে, আর IP address পুরো পথ জুড়ে একই থাকে, শেষ গন্তব্যকে নির্দেশ করে।</p>
+  </div>
+
+  <h2>11.3 একটি বাস্তব routing table পড়া</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ ip route
+default via 192.168.0.1 dev wlan0 proto dhcp metric 600
+169.254.0.0/16 dev wlan0 scope link metric 1000
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.0.0/24 dev wlan0 proto kernel scope link src 192.168.0.107</pre></div>
+
+  <p>লাইন ধরে ধরে পড়া যাক:</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Route</th><th>অর্থ</th></tr></thead>
+    <tbody>
+      <tr><td><code>default via 192.168.0.1 dev wlan0</code></td><td>"যা অন্য কোনো নিয়মে পড়ে না, তা wlan0 দিয়ে 192.168.0.1-কে পাঠাও।" <code>default</code> = <code>0.0.0.0/0</code> = সব কিছু।</td></tr>
+      <tr><td><code>192.168.0.0/24 ... scope link</code></td><td>"এই ২৫৪টি address সরাসরি পৌঁছানো যায় — কোনো <code>via</code> নেই, তাই gateway লাগবে না, ARP করেই পাঠাও।"</td></tr>
+      <tr><td><code>172.17.0.0/16 dev docker0</code></td><td>Docker-এর তৈরি করা route। Container-দের সাথে কথা বলার জন্য।</td></tr>
+      <tr><td><code>169.254.0.0/16</code></td><td>Link-local route, স্বয়ংক্রিয়ভাবে যোগ হয়।</td></tr>
+      <tr><td><code>metric 600</code></td><td>একাধিক route মিললে কম metric-এর টি জেতে। Wi-Fi ও Ethernet দুটোই সংযুক্ত থাকলে এটিই ঠিক করে কোনটি ব্যবহার হবে।</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ <code>via</code> থাকা মানে কী</div>
+    <p><strong><code>via</code> আছে</strong> = "এটি অন্য কারো হাতে দিতে হবে" (indirect / next-hop route)।<br>
+    <strong><code>via</code> নেই, শুধু <code>scope link</code></strong> = "এটি সরাসরি আমার নাগালে" (directly connected route)।<br>
+    Routing table পড়ার সময় প্রথমেই এই পার্থক্যটি দেখুন — এতেই বোঝা যায় packet সরাসরি যাবে নাকি gateway পেরোবে।</p>
+  </div>
+
+  <h2>11.4 Gateway যখন থাকে না</h2>
+  <p>এই তিনটি পরিস্থিতির উপসর্গ ভিন্ন এবং সেগুলো চিনতে পারা debugging-এর জন্য মূল্যবান:</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>পরিস্থিতি</th><th>উপসর্গ</th><th>যাচাই</th></tr></thead>
+    <tbody>
+      <tr><td><strong>কোনো default route নেই</strong></td><td>Local IP-তে ping যায়, বাইরে <code>Network is unreachable</code> — তাৎক্ষণিক error, timeout নয়</td><td><code>ip route | grep default</code> — খালি?</td></tr>
+      <tr><td><strong>Gateway সেট আছে কিন্তু অকার্যকর</strong></td><td>Gateway-তেই ping যায় না। সব কিছু timeout।</td><td><code>ping &lt;gateway-IP&gt;</code></td></tr>
+      <tr><td><strong>Gateway কাজ করে, কিন্তু upstream ভাঙা</strong></td><td>Gateway-তে ping যায়, তার পরে সব timeout</td><td><code>traceroute 1.1.1.1</code> — কোথায় থামছে দেখুন</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — error message পড়া</div>
+    <p><code>Network is unreachable</code> এবং <code>Connection timed out</code> — এই দুটি সম্পূর্ণ ভিন্ন জিনিস, এবং পার্থক্যটি জানা সময় বাঁচায়:</p>
+    <ul>
+      <li><strong>Network unreachable</strong> = আপনার নিজের kernel বলছে "আমি জানিই না কোথায় পাঠাব"। Packet কখনো তারেই ওঠেনি। সমস্যা <em>আপনার</em> machine-এ — routing table-এ।</li>
+      <li><strong>Timed out</strong> = packet পাঠানো হয়েছে, কিন্তু কোনো উত্তর আসেনি। সমস্যা কোথাও পথে, বা গন্তব্যে, বা firewall-এ।</li>
+      <li><strong>Connection refused</strong> = packet পৌঁছেছে এবং গন্তব্য সক্রিয়ভাবে TCP RST দিয়ে না বলেছে। অর্থাৎ routing পুরোপুরি ঠিক আছে — শুধু ওই port-এ কেউ শুনছে না। <em>এটি আসলে একটি ভালো খবর।</em></li>
+    </ul>
+  </div>
+
+  <h2>11.5 একাধিক gateway এবং route-এর অগ্রাধিকার</h2>
+  <p>আপনার machine-এ একই সাথে Wi-Fi, Ethernet এবং VPN থাকতে পারে — প্রতিটির নিজস্ব gateway। কে জেতে?</p>
+
+  <div class="cb diagram"><pre>$ ip route
+default via 10.8.0.1   dev tun0   metric 50    ← VPN
+default via 192.168.0.1 dev wlan0 metric 600   ← Wi-Fi
+default via 192.168.1.1 dev eth0  metric 100   ← Ethernet
+
+নিয়ম: সবচেয়ে নির্দিষ্ট route আগে (longest prefix match, Ch 12)।
+      সমান নির্দিষ্টতা হলে সবচেয়ে কম metric জেতে।
+
+এখানে সব default (/0) — তাই metric 50 জেতে → VPN দিয়ে যাবে।
+
+এজন্যই "full tunnel" VPN চালু করলে সব traffic VPN-এ যায়:
+সে একটি কম-metric-এর default route বসিয়ে দেয়।
+
+"Split tunnel" VPN default route বদলায় না; শুধু নির্দিষ্ট
+prefix-এর জন্য route যোগ করে, যেমন:
+    10.0.0.0/8 via 10.8.0.1 dev tun0
+যেহেতু /8 > /0 (বেশি নির্দিষ্ট), শুধু ওই traffic VPN-এ যায়।</pre></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 11 — Gateway-এর পথ অনুসরণ করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার packet প্রথমে ঠিক কোন যন্ত্রটির কাছে যাচ্ছে, এবং local বনাম remote গন্তব্যের সিদ্ধান্তটি বাস্তবে কীভাবে ঘটছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># default route কী?
+ip route show default
+
+# একটি নির্দিষ্ট গন্তব্যের জন্য kernel কোন route বেছে নেবে —
+# সরাসরি জিজ্ঞেস করুন (packet না পাঠিয়েই):
+ip route get 1.1.1.1
+ip route get 192.168.0.50        # আপনার নিজের subnet-এর কিছু
+
+# প্রথম hop টি কে, বাস্তবে দেখুন
+traceroute -m 3 1.1.1.1          # প্রথম লাইনটিই আপনার gateway</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ip route get 1.1.1.1</code> দেখাবে <code>1.1.1.1 via 192.168.0.1 dev wlan0 src 192.168.0.107</code> — লক্ষ্য করুন <code>via</code>, অর্থাৎ gateway লাগবে। কিন্তু <code>ip route get 192.168.0.50</code>-এ কোনো <code>via</code> থাকবে না — শুধু <code>dev wlan0</code>, কারণ এটি সরাসরি পৌঁছানো যায়। <code>traceroute</code>-এর প্রথম লাইনটি ঠিক সেই gateway IP-ই দেখাবে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> <code>ip route get</code> হলো kernel-এর সিদ্ধান্ত-প্রক্রিয়ায় সরাসরি প্রশ্ন করার উপায় — কোনো packet না পাঠিয়েই আপনি জেনে নিতে পারেন সে কী করত। Debugging-এ এটি অত্যন্ত কার্যকর, কারণ এটি "কী হওয়ার কথা" নয়, "কী হবে" বলে দেয়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Default gateway = "যা আমি চিনি না তা যাকে দেব" — delegation-এর নীতি।</li>
+      <li>প্রতিটি packet-এর জন্য kernel প্রশ্ন করে: destination কি আমার subnet-এ? হ্যাঁ → সরাসরি; না → gateway।</li>
+      <li><code>via</code> সহ route = indirect (gateway লাগবে); <code>scope link</code> = directly connected।</li>
+      <li><strong>Destination IP কখনো বদলায় না; destination MAC প্রতি hop-এ বদলায়।</strong></li>
+      <li><code>Network unreachable</code> (আমার routing table-এর সমস্যা) ≠ <code>timeout</code> (পথে সমস্যা) ≠ <code>connection refused</code> (পৌঁছেছে, listener নেই)।</li>
+      <li>একাধিক default route থাকলে সবচেয়ে কম metric জেতে — VPN এভাবেই traffic দখল করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Destination local না হলে আপনার machine কার MAC address খোঁজে?</summary>
+    <div class="ans"><p>Default gateway-এর MAC। গন্তব্যের MAC কখনোই নয় — সেটি অন্য network-এ, আর ARP broadcast router পেরোয় না। Frame-এর destination MAC হয় gateway-এর, কিন্তু IP header-এর destination IP থাকে আসল চূড়ান্ত গন্তব্যের।</p></div>
+  </details>
+  <details class="qa"><summary><code>Network is unreachable</code> এবং <code>Connection timed out</code>-এর মধ্যে কোনটি বেশি "স্থানীয়" সমস্যা?</summary>
+    <div class="ans"><p><code>Network is unreachable</code> — এটি আপনার নিজের kernel তৈরি করেছে, packet তারেই ওঠেনি। কারণ routing table-এ ওই গন্তব্যের জন্য কোনো মিল নেই (সাধারণত default route অনুপস্থিত)। <code>Timed out</code> মানে packet বেরিয়ে গেছে কিন্তু উত্তর আসেনি — সমস্যা পথে, গন্তব্যে বা firewall-এ।</p></div>
+  </details>
+  <details class="qa"><summary>VPN চালু করলে হঠাৎ সব traffic কেন VPN দিয়ে যায়?</summary>
+    <div class="ans"><p>Full-tunnel VPN একটি নতুন default route (<code>0.0.0.0/0</code>) যোগ করে VPN interface-এর দিকে, এবং সেটির metric রাখে বিদ্যমান default route-এর চেয়ে কম। যেহেতু দুটোই সমান নির্দিষ্ট (<code>/0</code>), tie-break হয় metric দিয়ে — VPN জেতে। Split-tunnel VPN default route ছোঁয় না, শুধু নির্দিষ্ট prefix (যেমন <code>10.0.0.0/8</code>) যোগ করে, যা longest-prefix-match-এ জিতে শুধু সেই traffic-কে টেনে নেয়।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার router-ও কি পৃথিবীর সব route জানে?</summary>
+    <div class="ans"><p>না। বাসার router-ও প্রায় কিছুই জানে না — তার একটি default route আছে ISP-এর দিকে। ISP-এর router বেশি জানে কিন্তু সবটা নয়, সে তার upstream-কে দেয়। শুধু Internet-এর core-এর <em>default-free zone</em>-এর router-রা পুরো global table (~৯ লক্ষ prefix) রাখে এবং তাদের কোনো default route থাকে না। এটি একটি recursive delegation কাঠামো (Ch 42)।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch10"><div class="d">পূর্ববর্তী</div><div class="t">Ch 10 — Subnetting</div></a>
+    <a class="nx" href="#ch12"><div class="d">পরবর্তী</div><div class="t">Ch 12 — What Is Routing?</div></a>
+  </div>
+</section>

@@ -1,0 +1,256 @@
+<section class="chapter" id="ch39">
+  <div class="ch-eyebrow">Chapter 39</div>
+  <h1>Debugging Toolkit এবং Socket Inspection</h1>
+  <p class="ch-lede">সমস্যা নির্ণয়ের সবচেয়ে বড় দক্ষতা হলো — <em>কোন layer-এ সমস্যা তা দ্রুত সংকীর্ণ করে আনা</em>। প্রতিটি tool একটি নির্দিষ্ট layer-এর জানালা। সঠিক ক্রমে সঠিক জানালা খুললে সমস্যা মিনিটে ধরা পড়ে।</p>
+
+  <h2>39.1 Layer অনুযায়ী tool</h2>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ Layer 7 — Application                                │
+│   curl, wget, httpie, browser DevTools               │
+│   "HTTP-স্তরে কী ঘটছে?"                                │
+├──────────────────────────────────────────────────────┤
+│ Layer 4 — Transport                                  │
+│   ss, netstat, nc, telnet, lsof                      │
+│   "Port খোলা? Connection-এর অবস্থা কী?"                │
+├──────────────────────────────────────────────────────┤
+│ Layer 3 — Network                                    │
+│   ping, traceroute, mtr, ip route                    │
+│   "Host পৌঁছানো যায়? কোন পথে? কোথায় আটকাচ্ছে?"          │
+├──────────────────────────────────────────────────────┤
+│ Layer 2 — Link                                       │
+│   ip link, ip neigh, arp, ethtool                    │
+│   "Interface up? MAC জানা আছে?"                       │
+├──────────────────────────────────────────────────────┤
+│ নাম সমাধান                                            │
+│   dig, nslookup, host, resolvectl                    │
+│   "নাম থেকে সঠিক IP পাচ্ছি?"                           │
+├──────────────────────────────────────────────────────┤
+│ সব layer একসাথে                                       │
+│   tcpdump, Wireshark                                 │
+│   "তারে আসলে কী যাচ্ছে?"                               │
+└──────────────────────────────────────────────────────┘</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Debugging-এর সাধারণ ক্রম</div>
+    <p>নিচ থেকে উপরে যান — প্রতিটি ধাপ পরেরটির ভিত্তি:</p>
+    <div class="cb diagram"><pre>1. Interface up আছে?           ip link
+2. আমার IP আছে?                ip addr
+3. Gateway-তে পৌঁছাই?           ping &lt;gateway>
+4. বাইরে পৌঁছাই?                ping 1.1.1.1
+5. নাম resolve হয়?             dig example.com
+6. Port খোলা?                  nc -zv host 443
+7. HTTP উত্তর দেয়?             curl -v https://host
+8. কিছুই বোঝা যাচ্ছে না?         tcpdump
+
+★ ধাপ ৪ ও ৫-এর ক্রমটি গুরুত্বপূর্ণ: ping 1.1.1.1
+  কাজ করে কিন্তু ping google.com করে না মানে
+  ★শুধুই DNS-এর সমস্যা★ — network ঠিক আছে।</pre></div>
+  </div>
+
+  <h2>39.2 <code>ss</code> — Socket Statistics</h2>
+
+  <p><code>ss</code> হলো <code>netstat</code>-এর আধুনিক উত্তরসূরি, এবং transport layer-এ সবচেয়ে গুরুত্বপূর্ণ tool।</p>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># সবচেয়ে বেশি ব্যবহৃত: কে কোন port-এ শুনছে
+ss -tlnp
+#  -t  TCP
+#  -l  শুধু LISTEN
+#  -n  নাম resolve করো না (দ্রুত)
+#  -p  কোন process (root লাগে)
+
+$ ss -tlnp
+State  Recv-Q Send-Q  Local Address:Port  Peer Address:Port  Process
+LISTEN 0      128         127.0.0.1:5432       0.0.0.0:*      users:(("postgres",pid=890))
+LISTEN 0      511           0.0.0.0:80         0.0.0.0:*      users:(("nginx",pid=1201))
+LISTEN 0      4096          0.0.0.0:22         0.0.0.0:*      users:(("sshd",pid=755))
+         │      │              │
+         │      │              └─ ★ 127.0.0.1 না 0.0.0.0? ★
+         │      └─ backlog-এর সর্বোচ্চ আকার
+         └─ এখন queue-তে কতগুলো অপেক্ষমাণ</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ এই output থেকে যা তাৎক্ষণিকভাবে বোঝা যায়</div>
+    <ul>
+      <li><strong>PostgreSQL <code>127.0.0.1:5432</code>-এ</strong> — শুধু এই machine থেকে পৌঁছানো যাবে। বাইরে থেকে চেষ্টা করলে "connection refused"। নিরাপত্তার দিক থেকে ভালো, কিন্তু অন্য machine থেকে connect করতে চাইলে এটাই আপনার সমস্যা।</li>
+      <li><strong>nginx <code>0.0.0.0:80</code>-এ</strong> — সব interface-এ শুনছে, বাইরে থেকে পৌঁছানো যাবে।</li>
+      <li><strong><code>Recv-Q</code> ধারাবাহিকভাবে বড়</strong> — application <code>accept()</code> যথেষ্ট দ্রুত করছে না (Ch 18-এর accept queue overflow)।</li>
+      <li><strong><code>Send-Q</code> (LISTEN-এ)</strong> = backlog-এর সর্বোচ্চ মান, যা <code>listen()</code>-এ দেওয়া হয়েছিল।</li>
+    </ul>
+  </div>
+
+  <h3>Connection state গুলো</h3>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># সব connection এবং তাদের অবস্থা গুনুন
+ss -tan | awk 'NR>1 {print $1}' | sort | uniq -c | sort -rn
+
+    453 ESTAB
+     87 TIME-WAIT
+     12 LISTEN
+      3 CLOSE-WAIT
+      1 SYN-SENT</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>State</th><th>অর্থ</th><th>অস্বাভাবিকভাবে বেশি হলে</th></tr></thead>
+    <tbody>
+      <tr><td><code>LISTEN</code></td><td>Connection-এর অপেক্ষায়</td><td>—</td></tr>
+      <tr><td><code>ESTAB</code></td><td>সক্রিয় connection</td><td>স্বাভাবিক; খুব বেশি হলে fd limit দেখুন</td></tr>
+      <tr><td><code>SYN-SENT</code></td><td>SYN পাঠিয়েছি, উত্তরের অপেক্ষা</td><td><strong>গন্তব্যে পৌঁছানো যাচ্ছে না</strong> — firewall বা host down</td></tr>
+      <tr><td><code>SYN-RECV</code></td><td>SYN পেয়েছি, তৃতীয় ACK-এর অপেক্ষা</td><td><strong>SYN flood আক্রমণ</strong> হতে পারে</td></tr>
+      <tr><td><code>TIME-WAIT</code></td><td>বন্ধ হয়েছে, ৬০s অপেক্ষা (Ch 22)</td><td>Server-ই আগে close করছে → keep-alive ব্যবহার করুন</td></tr>
+      <tr><td><code>CLOSE-WAIT</code></td><td>Peer FIN পাঠিয়েছে, <strong>আমি close() করিনি</strong></td><td>★ <strong>Application-এর bug — fd leak</strong> ★</td></tr>
+      <tr><td><code>FIN-WAIT-2</code></td><td>আমি close করেছি, peer করেনি</td><td>Peer-এর application আটকে আছে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ <code>CLOSE_WAIT</code> জমে যাওয়া = আপনার code-এ bug</div>
+    <p>এটি সবচেয়ে গুরুত্বপূর্ণ diagnostic সূত্রগুলোর একটি। <code>CLOSE_WAIT</code> মানে: peer FIN পাঠিয়ে বলেছে "আমি শেষ", kernel সেটি ACK করেছে, কিন্তু <strong>আপনার application <code>close()</code> call করেনি</strong>।</p>
+    <p>Kernel নিজে থেকে এটি পরিষ্কার করতে পারে না — কারণ application হয়তো এখনো data পাঠাতে চাইতে পারে। ফলে socket ও file descriptor আটকে থাকে চিরকাল, এবং শেষ পর্যন্ত <code>EMFILE: too many open files</code>।</p>
+    <p><strong>সাধারণ কারণ:</strong> exception path-এ connection বন্ধ না করা, connection pool-এ leak, বা <code>finally</code> block-এ <code>close()</code> না থাকা। <strong>যদি <code>CLOSE_WAIT</code>-এর সংখ্যা ক্রমাগত বাড়ে, সমস্যা network-এ নয়, আপনার code-এ।</strong></p>
+  </div>
+
+  <h3>বিস্তারিত connection তথ্য</h3>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ ss -ti
+ESTAB 0 0 192.168.0.107:51234 93.184.215.14:443
+     cubic wscale:7,7 rto:236 rtt:35.5/8.2 mss:1448
+     cwnd:24 ssthresh:18 bytes_sent:4521 bytes_acked:4521
+     bytes_received:87234 segs_out:34 segs_in:78
+     send 7.8Mbps lastsnd:120 pacing_rate 9.4Mbps
+     delivery_rate 6.2Mbps retrans:0/2 rcv_space:14600
+
+পড়ার নির্দেশিকা:
+  cubic       → congestion control algorithm (Ch 21)
+  rtt:35.5/8.2→ SRTT 35.5ms, variance 8.2ms
+  rto:236     → retransmission timeout (Ch 17)
+  cwnd:24     → congestion window (MSS-এর একক)
+  ssthresh:18 → slow start threshold
+  retrans:0/2 → এখন 0, মোট 2 বার retransmit হয়েছে
+  rcv_space   → receive window (Ch 20)
+  delivery_rate → প্রকৃত অর্জিত throughput</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ ধীর transfer নির্ণয়ের সবচেয়ে দ্রুত উপায়</div>
+    <div class="cb diagram"><pre>ss -ti দেখে:
+
+  retrans বেশি?        → packet loss (Ch 38)
+  cwnd ছোট, retrans 0? → congestion control সীমাবদ্ধ করছে
+  rcv_space ছোট?       → receiver-এর window সীমাবদ্ধ (Ch 20)
+  rtt বেশি?            → দূরত্বই মূল বাধা (Ch 36)
+  cwnd বড়, তবু ধীর?    → application নিজেই ধীর</pre></div>
+  </div>
+
+  <h2>39.3 দ্রুত reference — অন্যান্য tool</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># ── Layer 2/3 ──
+ip link                      # interface up/down, MTU, MAC
+ip -brief addr               # সব IP, সংক্ষিপ্ত
+ip route                     # routing table
+ip route get 8.8.8.8         # ★ এই গন্তব্যের জন্য kernel কী করবে
+ip neigh                     # ARP table
+
+# ── পৌঁছানো যায় কি ──
+ping -c 4 host               # ICMP echo
+ping -c 4 -s 1400 -M do host # MTU পরীক্ষা (Ch 5)
+traceroute -n host           # পথ
+mtr -r -c 50 host            # ★ traceroute + ping, loss সহ
+
+# ── Port ও connection ──
+ss -tlnp                     # কে শুনছে
+ss -tan state established    # সক্রিয় connection
+nc -zv host 443              # port খোলা কি (দ্রুত)
+nc -zv host 20-25            # port range scan
+lsof -i :8080                # কোন process এই port-এ
+lsof -p PID -a -i            # একটি process-এর সব socket
+
+# ── DNS ──
+dig example.com              # সম্পূর্ণ
+dig +short example.com       # শুধু উত্তর
+dig +trace example.com       # root থেকে পুরো পথ
+dig @1.1.1.1 example.com     # নির্দিষ্ট resolver
+dig -x 1.1.1.1               # reverse
+
+# ── HTTP ──
+curl -v https://host         # সব header
+curl -I https://host         # শুধু header (HEAD)
+curl -sL -o /dev/null -w "%{http_code} %{time_total}s\n" URL
+curl --resolve host:443:1.2.3.4 https://host   # ★ DNS bypass করে
+                                               #   নির্দিষ্ট server পরীক্ষা
+
+# ── Packet capture ──
+sudo tcpdump -i any -n port 443
+sudo tcpdump -i any -n host 1.1.1.1 -w capture.pcap</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ <code>curl --resolve</code> — একটি অবমূল্যায়িত tool</div>
+    <p>একটি নির্দিষ্ট backend server সরাসরি পরীক্ষা করতে চান, load balancer বা DNS এড়িয়ে?</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre>curl --resolve api.example.com:443:10.0.1.50 https://api.example.com/health</pre></div>
+    <p>এতে DNS lookup সম্পূর্ণ বাদ যায় এবং সরাসরি <code>10.0.1.50</code>-এ connect করা হয় — কিন্তু <code>Host</code> header ও TLS-এর SNI ঠিক <code>api.example.com</code>-ই থাকে। ফলে virtual host ও certificate সঠিকভাবে কাজ করে। "একটি server খারাপ উত্তর দিচ্ছে কিন্তু কোনটি?" — এই প্রশ্নের উত্তর খোঁজার সেরা উপায়।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 39 — একটি সম্পূর্ণ diagnostic pass</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি সংগঠিত ক্রমে নিচ থেকে উপরে সব layer পরীক্ষা করা, যাতে সমস্যা থাকলে ঠিক কোথায় তা বোঝা যায়।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre>#!/bin/bash
+TARGET=${1:-example.com}
+echo "=== Layer 2: Interface ==="
+ip link show | grep -E "state (UP|DOWN)"
+
+echo -e "\n=== Layer 3: IP ও Route ==="
+ip -brief addr | grep -v " lo "
+ip route get 1.1.1.1
+
+echo -e "\n=== Layer 3: পৌঁছানো ==="
+ping -c 2 -W 2 1.1.1.1 | tail -2
+
+echo -e "\n=== DNS ==="
+dig +short $TARGET | head -3
+echo "resolver: $(grep nameserver /etc/resolv.conf | head -1)"
+
+echo -e "\n=== Layer 4: Port ==="
+nc -zv -w 3 $TARGET 443 2>&1
+
+echo -e "\n=== Layer 7: HTTP + timing ==="
+curl -sS -o /dev/null -w "code=%{http_code} dns=%{time_namelookup}s \
+tcp=%{time_connect}s tls=%{time_appconnect}s ttfb=%{time_starttransfer}s \
+total=%{time_total}s\n" https://$TARGET
+
+echo -e "\n=== আমার সক্রিয় connection ==="
+ss -tan state established | wc -l</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রতিটি ধাপ পরেরটির পূর্বশর্ত। কোনো ধাপে ব্যর্থ হলে সেখানেই থামুন — পরের ধাপগুলো পরীক্ষা করে লাভ নেই। উদাহরণ: ping কাজ করছে কিন্তু dig ব্যর্থ মানে network ঠিক আছে, শুধু DNS ভাঙা।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Debugging হলো <em>সম্ভাবনা সংকীর্ণ করার</em> প্রক্রিয়া। একটি সুসংগঠিত ক্রম এলোমেলো অনুমানের চেয়ে বহুগুণ দ্রুত — এবং এই script-টি সংরক্ষণ করে রাখলে যেকোনো সমস্যার শুরুতে চালাতে পারবেন।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>প্রতিটি tool একটি নির্দিষ্ট layer-এর জানালা — সঠিক ক্রমে ব্যবহার করলে সমস্যা দ্রুত সংকীর্ণ হয়।</li>
+      <li>Debugging-এর ক্রম: interface → IP → gateway → Internet → DNS → port → HTTP → packet capture।</li>
+      <li><code>ss -tlnp</code> — কে কোন address:port-এ শুনছে; <code>127.0.0.1</code> বনাম <code>0.0.0.0</code> সবচেয়ে গুরুত্বপূর্ণ পার্থক্য।</li>
+      <li><code>ss -ti</code> — একটি connection-এর ভেতরের অবস্থা: rtt, cwnd, retrans, rcv_space।</li>
+      <li><strong><code>CLOSE_WAIT</code> জমা = application <code>close()</code> করছে না = code-এর bug</strong>।</li>
+      <li><code>SYN-SENT</code> আটকে থাকা = গন্তব্যে পৌঁছানো যাচ্ছে না (firewall/host down)।</li>
+      <li><code>curl --resolve</code> দিয়ে DNS ও load balancer এড়িয়ে নির্দিষ্ট server পরীক্ষা করা যায়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>ss -tlnp</code>-এ <code>127.0.0.1:5432</code> দেখাচ্ছে, কিন্তু অন্য machine থেকে connect করা যাচ্ছে না। কারণ?</summary>
+    <div class="ans"><p>PostgreSQL শুধু loopback interface-এ bind করা (Ch 9)। অন্য machine থেকে আসা packet Ethernet/Wi-Fi interface-এ পৌঁছায়, কিন্তু সেখানে ওই port-এ কোনো listener নেই — তাই kernel RST পাঠায় ("connection refused")। সমাধান: <code>listen_addresses = '0.0.0.0'</code> (বা নির্দিষ্ট IP) করে PostgreSQL restart করুন — এবং অবশ্যই firewall দিয়ে সুরক্ষিত করুন।</p></div>
+  </details>
+  <details class="qa"><summary>একটি service-এ <code>CLOSE_WAIT</code>-এর সংখ্যা ক্রমাগত বাড়ছে। এটি কার সমস্যা?</summary>
+    <div class="ans"><p><strong>আপনার application-এর।</strong> <code>CLOSE_WAIT</code> মানে peer FIN পাঠিয়েছে এবং kernel সেটি ACK করেছে, কিন্তু আপনার code <code>close()</code> call করেনি। Kernel নিজে এটি পরিষ্কার করতে পারে না। এটি একটি file descriptor leak — সাধারণত exception path-এ বা connection pool-এ connection বন্ধ না করার ফল। শেষ পর্যন্ত <code>EMFILE: too many open files</code>-এ পৌঁছাবে।</p></div>
+  </details>
+  <details class="qa"><summary><code>ping 1.1.1.1</code> কাজ করে কিন্তু <code>ping google.com</code> করে না। কোন layer-এ সমস্যা?</summary>
+    <div class="ans"><p>শুধুমাত্র <strong>নাম সমাধানে (DNS)</strong>। IP-তে ping কাজ করা প্রমাণ করে Layer 2, 3 এবং routing সব ঠিক আছে — packet বাইরে যাচ্ছে ও ফিরে আসছে। সমস্যা DNS-এ: <code>/etc/resolv.conf</code>-এ ভুল বা অপ্রাপ্য resolver, DNS server বন্ধ, বা port 53 firewall-এ আটকানো। <code>dig @1.1.1.1 google.com</code> দিয়ে যাচাই করুন — এটি কাজ করলে আপনার configured resolver-ই সমস্যা।</p></div>
+  </details>
+  <details class="qa"><summary>একটি download ধীর। <code>ss -ti</code>-তে <code>retrans:0/0</code> এবং <code>cwnd:180</code>। সম্ভাব্য কারণ?</summary>
+    <div class="ans"><p>Packet loss নেই এবং congestion window বড় — তাই network-এর দিক থেকে সব ঠিক। সন্দেহ করুন: (১) receive window ছোট (<code>rcv_space</code> দেখুন) — receiver ধীরে পড়ছে; (২) server-এর দিক থেকে সীমাবদ্ধতা (disk I/O, CPU, rate limiting); (৩) আপনার নিজের application ধীরে data process করছে, ফলে buffer ভরে যাচ্ছে। মোটকথা bottleneck TCP-তে নয়, দুই প্রান্তের কোনো একটিতে।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch38"><div class="d">পূর্ববর্তী</div><div class="t">Ch 38 — Packet Loss &amp; Jitter</div></a>
+    <a class="nx" href="#ch40"><div class="d">পরবর্তী</div><div class="t">Ch 40 — DNS Debugging</div></a>
+  </div>
+</section>

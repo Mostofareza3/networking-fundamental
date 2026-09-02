@@ -1,0 +1,214 @@
+<section class="chapter" id="ch6">
+  <div class="ch-eyebrow">Chapter 6</div>
+  <h1>MAC Addresses and Ethernet</h1>
+  <p class="ch-lede">IP address থাকতে আবার আলাদা একটি address কেন লাগে? কারণ এই দুটি address সম্পূর্ণ ভিন্ন প্রশ্নের উত্তর দেয় — একটি বলে "কোন machine, পৃথিবীর যেকোনো জায়গায়", অন্যটি বলে "এই তারের কোন যন্ত্রটি"।</p>
+
+  <h2>6.1 Why does this exist?</h2>
+  <p>একটি switch-এ ২৪টি computer যুক্ত। PC1 একটি frame পাঠাল। প্রশ্ন: <strong>বাকি ২৩টি machine কীভাবে বুঝবে এটি তাদের জন্য নাকি নয়?</strong></p>
+
+  <p>একটি সমাধান হতে পারত — সবাই সব কিছু নিক এবং IP address দেখে সিদ্ধান্ত নিক। কিন্তু এতে সমস্যা:</p>
+  <ul>
+    <li>প্রতিটি machine-এর CPU-কে প্রতিটি frame process করতে হবে, এমনকি অপ্রাসঙ্গিকগুলোও।</li>
+    <li>Switch তো IP পড়ে না — সে কীভাবে জানবে কোন port-এ পাঠাতে হবে?</li>
+    <li>IP address বদলায় (DHCP, network পরিবর্তন) — কিন্তু আপনার machine তারে physically একই জায়গায় আছে।</li>
+    <li>যে device গুলোর IP নেই (একটি dumb switch, একটি bridge) তাদেরও তো addressing লাগতে পারে।</li>
+  </ul>
+
+  <div class="box why">
+    <div class="bt">💡 Why দুটি address</div>
+    <p><strong>MAC address উত্তর দেয়: "এই physical segment-এর কোন interface?"</strong> — অর্থাৎ স্থানীয়, hardware-স্তরের পরিচয়।<br>
+    <strong>IP address উত্তর দেয়: "পৃথিবীর কোন network-এর কোন host?"</strong> — অর্থাৎ যৌক্তিক, routable ঠিকানা।</p>
+    <p>উপমা: MAC হলো আপনার <em>জাতীয় পরিচয়পত্র নম্বর</em> — জন্ম থেকে অপরিবর্তিত, আপনার সাথেই থাকে, কিন্তু এটা দিয়ে চিঠি পাঠানো যায় না। IP হলো আপনার <em>বর্তমান ঠিকানা</em> — বাসা বদলালে বদলায়, কিন্তু এটা দিয়েই ডাক ব্যবস্থা আপনাকে খুঁজে পায়। ডাকপিয়ন এলাকায় পৌঁছে গেলে তখন সে জিজ্ঞেস করে "রেজা সাহেব কে?" — ওটাই ARP।</p>
+  </div>
+
+  <h2>6.2 MAC Address-এর গঠন</h2>
+  <p>একটি <strong>MAC address</strong> (Media Access Control address) হলো ৪৮-bit (৬-byte) একটি সংখ্যা, যা প্রতিটি network interface-এ থাকে। লেখা হয় ছয়টি hex জোড়া হিসেবে:</p>
+
+  <div class="cb diagram"><pre>        A4 : 83 : E7 : 2B : 91 : 4C
+        └──────────┘   └──────────┘
+             OUI          Device ID
+        (প্রস্তুতকারক)    (প্রস্তুতকারকের
+         3 bytes           serial) 3 bytes
+
+  OUI = Organizationally Unique Identifier
+        IEEE প্রতিটি প্রস্তুতকারককে বরাদ্দ করে
+        A4:83:E7 → Apple
+        00:1A:11 → Google
+        DC:A6:32 → Raspberry Pi Foundation
+
+  লেখার বিভিন্ন রীতি (একই জিনিস):
+        a4:83:e7:2b:91:4c     ← Linux
+        A4-83-E7-2B-91-4C     ← Windows
+        a483.e72b.914c        ← Cisco</pre></div>
+
+  <p>প্রথম byte-এর সবচেয়ে কম-গুরুত্বপূর্ণ দুটি bit-এর বিশেষ অর্থ আছে:</p>
+  <div class="cb diagram"><pre>প্রথম byte:  A4  =  1010 0100
+                         │  │
+                         │  └── bit 0 (I/G): 0 = unicast
+                         │                   1 = multicast
+                         └───── bit 1 (U/L): 0 = globally unique
+                                             1 = locally administered</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ MAC "চিরস্থায়ী" নয়</div>
+    <p>MAC address NIC-এর firmware-এ লেখা থাকে (burned-in address), কিন্তু প্রায় সব OS-এ সেটি software দিয়ে বদলানো যায় — একে বলে <em>MAC spoofing</em>। বাস্তবে আধুনিক ফোন ও laptop এখন <strong>ইচ্ছাকৃতভাবে random MAC</strong> ব্যবহার করে প্রতিটি নতুন Wi-Fi network-এ, যাতে দোকান বা বিমানবন্দর আপনার device-কে চিনে ফেলে track করতে না পারে। তাই "MAC address স্থায়ী ও অনন্য" — এটি আজকের বাস্তবতা নয়।</p>
+  </div>
+
+  <h2>6.3 Unicast, Broadcast, Multicast</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>ধরন</th><th>Destination MAC</th><th>কারা গ্রহণ করে</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Unicast</strong></td><td>নির্দিষ্ট একটি MAC</td><td>শুধু সেই একটি interface</td><td>স্বাভাবিক সব traffic</td></tr>
+      <tr><td><strong>Broadcast</strong></td><td><code>FF:FF:FF:FF:FF:FF</code></td><td>segment-এর <em>প্রত্যেকে</em></td><td>ARP request, DHCP Discover</td></tr>
+      <tr><td><strong>Multicast</strong></td><td><code>01:00:5E:...</code> ধরনের</td><td>যারা ওই group-এ যোগ দিয়েছে</td><td>IPTV, mDNS, OSPF</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="cb diagram"><pre>UNICAST — একজনকে
+    PC1 ──▶ [dst: BB:BB] ──▶ Switch ──▶ PC2 ✓
+                                        PC3 ✗ (পায় না)
+
+BROADCAST — সবাইকে
+    PC1 ──▶ [dst: FF:FF:FF:FF:FF:FF] ──▶ Switch
+                                          ├──▶ PC2 ✓
+                                          ├──▶ PC3 ✓
+                                          └──▶ PC4 ✓
+
+MULTICAST — একটি দলকে
+    PC1 ──▶ [dst: 01:00:5E:00:00:FB] ──▶ Switch
+                                          ├──▶ PC2 ✓ (group-এ আছে)
+                                          ├──▶ PC3 ✗ (নেই)
+                                          └──▶ PC4 ✓ (group-এ আছে)</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Broadcast কেন scale করে না</div>
+    <p>Broadcast frame segment-এর <em>প্রতিটি</em> device-এর CPU-কে জাগায়। ৫০টি machine-এর network-এ এটি সহনীয়। ৫,০০০ machine-এর একটি সমতল network-এ ARP আর DHCP-র broadcast-ই bandwidth ও CPU খেয়ে ফেলে — একে বলে <em>broadcast storm</em>। এজন্যই বড় network-কে VLAN বা subnet দিয়ে ছোট ছোট <strong>broadcast domain</strong>-এ ভাগ করা হয় (Ch 7, Ch 10)। "একটি বড় সমতল network" খারাপ design — এই কারণেই।</p>
+  </div>
+
+  <h2>6.4 Ethernet Frame-এর গঠন</h2>
+
+  <div class="cb diagram"><pre>┌──────────┬──────────┬───────────┬─────────────────┬───────┐
+│ Dest MAC │ Src MAC  │ EtherType │    Payload      │  FCS  │
+│  6 bytes │ 6 bytes  │  2 bytes  │  46–1500 bytes  │ 4 B   │
+└──────────┴──────────┴───────────┴─────────────────┴───────┘
+     ↑          ↑           ↑              ↑            ↑
+     │          │           │              │            └ CRC32 checksum
+     │          │           │              └ IP packet (সাধারণত)
+     │          │           └ ভেতরে কী আছে:
+     │          │               0x0800 = IPv4
+     │          │               0x0806 = ARP
+     │          │               0x86DD = IPv6
+     │          │               0x8100 = VLAN tag
+     │          └ কে পাঠাল (switch এটা দিয়েই শেখে)
+     └ কে পাবে
+
+লক্ষণীয়: Destination আগে, Source পরে।
+কারণ — switch-কে দ্রুত সিদ্ধান্ত নিতে হয়, তাই প্রথম যে
+তথ্যটা দরকার সেটাই সবার আগে রাখা হয়েছে।</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — EtherType হলো "demultiplexing key"</div>
+    <p>এই ২ bytes-এর ছোট field-টি একটি বড় ধারণার প্রতিনিধি। গ্রহণকারী machine-কে জানতে হবে payload-টি কোন উপরের layer-কে দেবে। EtherType সেটাই বলে। ঠিক একই কাজ করে IP header-এর <code>Protocol</code> field (6 = TCP, 17 = UDP) এবং TCP header-এর <code>destination port</code> (443 → nginx process)। <strong>প্রতিটি layer-এ একটি করে "পরের জনকে কে পাবে" field আছে</strong> — এটাই encapsulation-কে কাজ করায়।</p>
+  </div>
+
+  <h2>6.5 একটি frame তৈরি হওয়ার ধাপে ধাপে গল্প</h2>
+  <p>Computer A (<code>192.168.1.5</code>, MAC <code>AA:AA:AA:AA:AA:AA</code>) একই network-এর Computer B (<code>192.168.1.10</code>, MAC <code>BB:BB:BB:BB:BB:BB</code>)-কে data পাঠাতে চায়।</p>
+
+  <div class="stepper" data-steps="6" id="st-frame">
+    <div class="sp-head"><strong>Frame তৈরির যাত্রা</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+      <div class="sp-step" data-i="0">
+        <h4>ধাপ ১ — Application data দেয়</h4>
+        <p>A-এর একটি process <code>send()</code> call করল ৫০ bytes data নিয়ে। এই data kernel-এর socket buffer-এ গেল। এখনো কোনো MAC, কোনো IP-র প্রশ্নই ওঠেনি — শুধু bytes।</p>
+      </div>
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ২ — TCP header যুক্ত হয়</h4>
+        <p>Kernel-এর TCP layer source port (ধরুন 51000), destination port (8080), sequence number, ACK number যোগ করে। এখন এটি একটি <strong>segment</strong>।</p>
+      </div>
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ৩ — IP header যুক্ত হয়</h4>
+        <p>IP layer লেখে: source <code>192.168.1.5</code>, destination <code>192.168.1.10</code>, TTL 64, protocol 6 (TCP)। এখন এটি একটি <strong>packet</strong>। কিন্তু packet তো তারে যেতে পারে না — তার জানে না IP কী।</p>
+      </div>
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৪ — গুরুত্বপূর্ণ সিদ্ধান্ত: এটি কি local?</h4>
+        <p>Kernel তার routing table দেখে: destination <code>192.168.1.10</code> কি আমার subnet <code>192.168.1.0/24</code>-এর ভেতরে? <strong>হ্যাঁ।</strong> তার মানে সরাসরি পাঠানো যাবে, gateway লাগবে না। এখন দরকার B-এর MAC address।</p>
+      </div>
+      <div class="sp-step" data-i="4">
+        <h4>ধাপ ৫ — ARP: MAC address খোঁজা</h4>
+        <p>Kernel তার ARP cache দেখে। যদি না থাকে, সে একটি ARP request broadcast করে: <em>"192.168.1.10 কার?"</em> B উত্তর দেয়: <em>"আমার, আমি BB:BB:BB:BB:BB:BB"</em>। এই উত্তর cache-এ জমা হয়। → Chapter 8</p>
+      </div>
+      <div class="sp-step" data-i="5">
+        <h4>ধাপ ৬ — Frame সম্পূর্ণ, NIC পাঠায়</h4>
+        <div class="cb diagram"><pre>┌──────────────┬──────────────┬────────┬─────────┬─────┐
+│ BB:BB:BB:... │ AA:AA:AA:... │ 0x0800 │ IP pkt  │ FCS │
+│  (dest B)    │  (src A)     │ (IPv4) │         │     │
+└──────────────┴──────────────┴────────┴─────────┴─────┘</pre></div>
+        <p>NIC এই bytes-গুলোকে বৈদ্যুতিক signal-এ রূপান্তর করে তারে ছাড়ে। Switch frame-এর প্রথম ৬ byte পড়েই জানে কোথায় পাঠাতে হবে।</p>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <h2>6.6 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>MAC address আর IP address একই কাজ করে; একটা থাকলেই চলত।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>MAC address <strong>সমতল (flat)</strong> — এতে কোনো কাঠামো নেই, কোনো "এলাকা"-র তথ্য নেই। পৃথিবীর সব MAC address routing-এর জন্য একটি table-এ রাখতে হলে সেটি হতো কয়েক শ কোটি entry-র table — অসম্ভব। IP address <strong>শ্রেণিবদ্ধ (hierarchical)</strong> — <code>203.0.113.0/24</code> একটি entry দিয়ে ২৫৪টি host-কে বোঝানো যায়। এই সংক্ষেপণ (aggregation) ছাড়া Internet-এর routing অসম্ভব হতো। উল্টোদিকে, IP দিয়ে তারের ভেতরে ঠিক কোন NIC তা বোঝানো যায় না — কারণ IP বদলানো যায় এবং move করে। তাই দুটোই দরকার।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>MAC address সারা পৃথিবীতে অনন্য এবং কখনো বদলায় না।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>IEEE-র বরাদ্দ ব্যবস্থা অনন্যতার <em>লক্ষ্য</em> রাখে, কিন্তু সেটি নিশ্চিত নয়: software দিয়ে বদলানো যায়, সস্তা NIC-এ duplicate থাকে, VM/container-রা random MAC তৈরি করে, এবং আধুনিক ফোন প্রতিটি Wi-Fi network-এ ইচ্ছাকৃতভাবে ভিন্ন random MAC দেখায় (privacy-র জন্য)। MAC-কে কখনো নিরাপত্তার ভিত্তি হিসেবে ব্যবহার করবেন না — "MAC filtering" কার্যত অকার্যকর।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Packet পুরো পথে একই MAC address বহন করে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>MAC address <strong>কেবল এক hop-এর জন্য</strong>। আপনার machine যখন Google-এ packet পাঠায়, frame-এর destination MAC হলো <em>আপনার router-এর</em> MAC — Google-এর server-এর নয়। Router সেই frame খুলে ফেলে দেয় এবং পরের hop-এর MAC দিয়ে নতুন frame বানায়। Google-এর server-এর MAC আপনার machine কোনোদিন জানেও না, জানার দরকারও নেই। → Chapter 13</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 6 — MAC address এবং প্রস্তুতকারক</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার নিজের interface-এর MAC, তার OUI অংশ, এবং local network-এ কোন কোন device আছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># নিজের সব interface-এর MAC
+ip link show                    # Linux — "link/ether" এর পরে
+ifconfig | grep ether           # macOS
+
+# আপনার machine যাদের সাথে সম্প্রতি কথা বলেছে তাদের MAC
+ip neigh                        # Linux
+arp -a                          # macOS / Linux দুটোতেই</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ip neigh</code>-এর প্রতিটি লাইনে একটি IP এবং তার বিপরীতে একটি MAC — এটিই ARP cache (Ch 8)। প্রথম তিনটি byte নিয়ে ইন্টারনেটে "OUI lookup" করলে প্রস্তুতকারকের নাম পাবেন। আপনার gateway-এর MAC দেখুন — সেটির প্রস্তুতকারক TP-Link/Netgear/Huawei জাতীয় কিছু হবে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> MAC address কোনো বিমূর্ত ধারণা নয় — এটি নির্দিষ্ট hardware-এর নির্দিষ্ট পরিচয়, এবং আপনার machine এই মুহূর্তে যাদের সাথে কথা বলছে তাদের তালিকা সে নিজে রেখে দিয়েছে। লক্ষ্য করুন — <strong>এই তালিকায় শুধু local network-এর address আছে</strong>, কোনো দূরবর্তী server-এর নয়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>MAC address = ৪৮-bit, interface-এর (machine-এর নয়) hardware-স্তরের পরিচয়; প্রথম ৩ byte প্রস্তুতকারকের OUI।</li>
+      <li>MAC সমতল, IP শ্রেণিবদ্ধ — এজন্যই MAC দিয়ে global routing অসম্ভব, আর IP দিয়ে তারে সরাসরি delivery অসম্ভব।</li>
+      <li>Ethernet frame: Dest MAC | Src MAC | EtherType | Payload | FCS।</li>
+      <li>EtherType বলে ভেতরের payload কোন protocol-এর — এটি প্রতিটি layer-এর demultiplexing-এর একটি উদাহরণ।</li>
+      <li>Broadcast (<code>FF:FF:...:FF</code>) সবার CPU-কে জাগায় — তাই বড় সমতল network খারাপ।</li>
+      <li><strong>MAC address এক hop-এর জন্য</strong> — প্রতিটি router-এ নতুন করে লেখা হয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>MAC address থাকতেও IP address কেন দরকার?</summary>
+    <div class="ans"><p>কারণ MAC address সমতল ও অকাঠামোবদ্ধ — এতে "কোন network" এই তথ্যটি নেই। Router-কে তাহলে পৃথিবীর প্রতিটি device-এর জন্য আলাদা entry রাখতে হতো (কয়েক শ কোটি)। IP address-এ network portion থাকায় লক্ষ লক্ষ host-কে একটি prefix (<code>10.0.0.0/8</code>) দিয়ে সংক্ষেপ করা যায়। এই aggregation-ই Internet-এর routing-কে সম্ভব করেছে।</p></div>
+  </details>
+  <details class="qa"><summary>Ethernet frame-এ destination MAC কেন source-এর আগে?</summary>
+    <div class="ans"><p>গতির জন্য। Switch frame পুরোটা না পড়েই সিদ্ধান্ত নিতে চায় (cut-through switching)। প্রথম ৬ bytes পড়ামাত্রই সে জানে কোন port-এ পাঠাতে হবে এবং forwarding শুরু করে দিতে পারে — বাকি frame তখনো আসছে। Destination পরে থাকলে পুরো header পড়ার জন্য অপেক্ষা করতে হতো।</p></div>
+  </details>
+  <details class="qa"><summary>আপনি <code>curl google.com</code> চালালেন। আপনার frame-এর destination MAC কার?</summary>
+    <div class="ans"><p>আপনার <strong>default gateway (router)</strong>-এর MAC address। Google-এর server আপনার local network-এ নেই, তাই তার MAC আপনার কাছে অপ্রাসঙ্গিক এবং অজানা। Destination <em>IP</em> অবশ্যই Google-এর, কিন্তু destination <em>MAC</em> পরের hop-এর। এই দুটি একসাথে থাকাই স্বাভাবিক এবং এটিই layering-এর মূল কথা।</p></div>
+  </details>
+  <details class="qa"><summary>একটি network-এ ৫০০টি device broadcast করতে থাকলে সমস্যা কী?</summary>
+    <div class="ans"><p>প্রতিটি broadcast frame ৪৯৯টি machine-এর NIC গ্রহণ করে এবং CPU-কে interrupt দেয় — এমনকি frame-টি তাদের কোনো কাজে না লাগলেও। ARP, DHCP, mDNS, NetBIOS মিলে এই traffic দ্রুত বাড়ে (broadcast storm), bandwidth ও CPU নষ্ট হয়। সমাধান: subnet/VLAN দিয়ে ছোট ছোট broadcast domain তৈরি করা।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch5"><div class="d">পূর্ববর্তী</div><div class="t">Ch 5 — MTU and Packet Size</div></a>
+    <a class="nx" href="#ch7"><div class="d">পরবর্তী</div><div class="t">Ch 7 — Switches</div></a>
+  </div>
+</section>

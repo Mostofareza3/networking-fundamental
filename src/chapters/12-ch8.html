@@ -1,0 +1,219 @@
+<section class="chapter" id="ch8">
+  <div class="ch-eyebrow">Chapter 8</div>
+  <h1>ARP — IP এবং MAC-এর মাঝের সেতু</h1>
+  <p class="ch-lede">আপনার application একটি IP address জানে। আপনার NIC শুধু MAC address বোঝে। এই দুটোর মাঝখানে একটি অনুবাদ দরকার — এবং সেই অনুবাদ কোনো কেন্দ্রীয় ডিরেক্টরি থেকে আসে না, আসে চিৎকার করে জিজ্ঞেস করার মাধ্যমে।</p>
+
+  <h2>8.1 Why does this exist?</h2>
+  <p>Chapter 6-এ frame তৈরির ধাপগুলোতে আমরা একটি ফাঁকে এসে থেমেছিলাম:</p>
+
+  <div class="cb diagram"><pre>Application জানে :  "192.168.1.10-এ পাঠাও"
+                          ↓
+IP layer লেখে    :  dst IP = 192.168.1.10   ✓
+                          ↓
+Ethernet-এর দরকার:  dst MAC = ???           ✗  ← এখানেই সমস্যা
+                          ↓
+NIC পাঠাতে পারে না, কারণ frame অসম্পূর্ণ</pre></div>
+
+  <p>কোনো কেন্দ্রীয় সার্ভার নেই যে বলে দেবে কোন IP-এর বিপরীতে কোন MAC। তাহলে উপায়?</p>
+
+  <div class="box why">
+    <div class="bt">💡 Why ARP</div>
+    <p>সমাধানটি সরল এবং কিছুটা অসভ্য: <strong>পুরো local network-এ চিৎকার করে জিজ্ঞেস করো।</strong> যেহেতু broadcast frame সবার কাছে পৌঁছায়, তাই একজন জিজ্ঞেস করে "192.168.1.10 কার?" এবং যার সেই IP, সে উত্তর দেয়। এটি কাজ করে কারণ local segment ছোট এবং broadcast সস্তা — এবং ঠিক এই কারণেই ARP <strong>শুধুমাত্র local network-এই সীমাবদ্ধ</strong>।</p>
+  </div>
+
+  <h2>8.2 Core Concept</h2>
+  <p><strong>ARP</strong> (Address Resolution Protocol, অ্যাড্রেস রেজোলিউশন প্রোটোকল) হলো সেই protocol যা একটি local network-এ একটি IPv4 address-এর বিপরীতে সংশ্লিষ্ট MAC address খুঁজে বের করে।</p>
+
+  <div class="chips">
+    <span class="chip">Layer: 2 এবং 3-এর মাঝামাঝি</span>
+    <span class="chip">EtherType: 0x0806</span>
+    <span class="chip">Scope: শুধু local segment</span>
+    <span class="chip">IPv4 only</span>
+  </div>
+
+  <h2>8.3 কীভাবে কাজ করে — একটি কথোপকথন</h2>
+
+  <div class="cb diagram"><pre>ধাপ ১ — ARP REQUEST (broadcast, সবাই পায়)
+
+  ┌─────────────────────────────────────────────┐
+  │ Ethernet:  dst = FF:FF:FF:FF:FF:FF  (সবাই)  │
+  │            src = AA:AA:AA:AA:AA:AA          │
+  │            type = 0x0806 (ARP)              │
+  ├─────────────────────────────────────────────┤
+  │ ARP:       "Who has 192.168.1.10?           │
+  │             Tell 192.168.1.5"               │
+  │            sender MAC = AA:AA:AA:AA:AA:AA   │
+  │            sender IP  = 192.168.1.5         │
+  │            target MAC = 00:00:00:00:00:00   │
+  │            target IP  = 192.168.1.10        │
+  └─────────────────────────────────────────────┘
+
+           A ──▶ Switch ──┬──▶ B  (আমারই তো!)
+                          ├──▶ C  (আমার না, উপেক্ষা)
+                          └──▶ D  (আমার না, উপেক্ষা)
+
+
+ধাপ ২ — ARP REPLY (unicast, শুধু A-এর কাছে)
+
+  ┌─────────────────────────────────────────────┐
+  │ Ethernet:  dst = AA:AA:AA:AA:AA:AA  (শুধু A)│
+  │            src = BB:BB:BB:BB:BB:BB          │
+  ├─────────────────────────────────────────────┤
+  │ ARP:       "192.168.1.10 is at              │
+  │             BB:BB:BB:BB:BB:BB"              │
+  └─────────────────────────────────────────────┘
+
+           B ──▶ Switch ──▶ A  (শুধু A পায়)
+
+
+ধাপ ৩ — Cache-এ সংরক্ষণ, এবং তারপর আসল data
+
+  A-এর ARP cache:
+  ┌────────────────┬───────────────────┬─────────┐
+  │ 192.168.1.10   │ BB:BB:BB:BB:BB:BB │ 60s     │
+  └────────────────┴───────────────────┴─────────┘
+
+  এখন A-এর আসল frame পাঠানো সম্ভব:
+  [dst BB:BB | src AA:AA | 0x0800 | IP packet ...]</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>ARP-কে ভাবুন একটি ভরা ঘরে ঢুকে চিৎকার করা: <em>"এখানে ১০ নম্বর টেবিলে কে বসেছে?"</em> সবাই শোনে, কিন্তু শুধু সেই একজন হাত তোলে এবং <em>ব্যক্তিগতভাবে</em> এসে বলে "আমি, আমার নাম রহিম"। বাকিরা প্রশ্নটা শুনে ভুলে যায়। আর আপনি রহিমের নামটা মনে রাখেন — যাতে পরেরবার আবার চিৎকার করতে না হয়।</p>
+    <p>লক্ষ্য করুন: <strong>প্রশ্নটা broadcast, উত্তরটা unicast</strong>। এটি একটি সচেতন optimization — উত্তরও broadcast হলে network-এ দ্বিগুণ শব্দ হতো।</p>
+  </div>
+
+  <h2>8.4 ARP Cache</h2>
+  <p>প্রতিবার ARP করলে প্রতিটি packet-এর আগে একটি round trip লাগত — অগ্রহণযোগ্য। তাই প্রতিটি OS একটি <strong>ARP cache</strong> (বা neighbor table) রাখে।</p>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ ip neigh
+192.168.1.1  dev wlan0 lladdr a4:2b:b0:11:22:33 REACHABLE
+192.168.1.10 dev wlan0 lladdr bb:bb:bb:bb:bb:bb STALE
+192.168.1.55 dev wlan0  FAILED</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>State</th><th>অর্থ</th></tr></thead>
+    <tbody>
+      <tr><td><code>REACHABLE</code></td><td>সম্প্রতি যাচাই হয়েছে, নির্ভরযোগ্য</td></tr>
+      <tr><td><code>STALE</code></td><td>জানা আছে কিন্তু কিছুক্ষণ ব্যবহার হয়নি; পরের বার ব্যবহারের সময় যাচাই হবে</td></tr>
+      <tr><td><code>DELAY</code> / <code>PROBE</code></td><td>এই মুহূর্তে যাচাই চলছে</td></tr>
+      <tr><td><code>FAILED</code></td><td>জিজ্ঞেস করা হয়েছিল, কেউ উত্তর দেয়নি — ওই IP-তে কেউ নেই</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Entry গুলোর একটি নির্দিষ্ট আয়ু আছে (সাধারণত কয়েক সেকেন্ড থেকে কয়েক মিনিট)। কারণটি switch-এর aging-এর মতোই — <strong>device বদলাতে পারে, IP পুনর্বণ্টিত হতে পারে</strong>, তাই পুরনো তথ্য চিরকাল বিশ্বাস করা যায় না।</p>
+
+  <h2>8.5 সবচেয়ে গুরুত্বপূর্ণ কথা — ARP কখনো router পেরোয় না</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ ARP কেন শুধু local</div>
+    <p>ARP request একটি <strong>broadcast frame</strong>। আর router কখনো broadcast forward করে না (সেটিই তো broadcast domain ভাঙার মানে, Ch 7)। ফলে ARP-এর পরিধি ঠিক এক subnet।</p>
+    <p>তাহলে দূরের কোনো IP-তে পাঠাতে চাইলে কী হয়? <strong>আপনি সেই দূরের IP-এর MAC কোনোদিন জানেন না এবং জানার দরকারও নেই</strong> — আপনি gateway-এর MAC জানেন, ব্যস।</p>
+  </div>
+
+  <div class="cb diagram"><pre>দৃশ্য A — Destination আমার subnet-এ (192.168.1.10)
+
+  ARP জিজ্ঞেস করে: "192.168.1.10 কার?"
+  উত্তর আসে সরাসরি ওই host থেকে।
+  Frame: [dst = host-এর MAC]
+
+
+দৃশ্য B — Destination দূরে (142.250.190.14 = google.com)
+
+  Routing table বলে: local নয় → gateway 192.168.1.1
+  ARP জিজ্ঞেস করে: "192.168.1.1 কার?"      ← gateway-এর MAC!
+  Frame: [dst = router-এর MAC | IP dst = 142.250.190.14]
+                    ↑                       ↑
+              এক hop-এর জন্য          end-to-end
+
+  অর্থাৎ: MAC = পরের hop, IP = চূড়ান্ত গন্তব্য</pre></div>
+
+  <p>এই একটি ছবিই Chapter 11 (default gateway) এবং Chapter 13 (packet journey)-এর ভিত্তি। <strong>যদি এই বই থেকে একটি ছবি মনে রাখেন, এটি সেই ছবি হোক।</strong></p>
+
+  <h2>8.6 Gratuitous ARP এবং ARP Spoofing</h2>
+
+  <h3>Gratuitous ARP — কেউ জিজ্ঞেস না করলেও ঘোষণা</h3>
+  <p>একটি host কখনো কখনো নিজের IP-MAC মানচিত্র স্বপ্রণোদিতভাবে broadcast করে। কেন?</p>
+  <ul>
+    <li><strong>IP conflict শনাক্তকরণ:</strong> boot-এর সময় "এই IP কি অন্য কারো?" — কেউ উত্তর দিলে সংঘাত আছে।</li>
+    <li><strong>Failover:</strong> একটি HA setup-এ backup server virtual IP গ্রহণ করলে সে gratuitous ARP পাঠায়, যাতে সবার cache তৎক্ষণাৎ নতুন MAC-এ update হয়। এটি keepalived/VRRP-এর মূল কৌশল।</li>
+  </ul>
+
+  <h3>ARP Spoofing — protocol-টির জন্মগত দুর্বলতা</h3>
+  <div class="box warn">
+    <div class="bt">⚠️ ARP-এ কোনো প্রমাণীকরণ নেই</div>
+    <p>ARP reply-তে কোনো signature নেই, কোনো যাচাই নেই। যে কেউ যেকোনো সময় বলতে পারে "192.168.1.1 আমার" — এবং সবাই বিশ্বাস করে ফেলে। এতে আক্রমণকারী নিজেকে gateway হিসেবে জাহির করে সব traffic নিজের মধ্য দিয়ে চালাতে পারে (man-in-the-middle)।</p>
+    <p>এটি ARP-এর নকশাগত সীমাবদ্ধতা — ১৯৮২ সালে যখন এটি লেখা হয়, তখন local network মানেই ছিল বিশ্বস্ত পরিবেশ। আজ এটি আর সত্য নয়।</p>
+  </div>
+
+  <div class="box tip">
+    <div class="bt">✓ Developer-এর জন্য উপসংহার</div>
+    <p>Local network-এর নিরাপত্তার উপর ভরসা করবেন না। আপনার café-র Wi-Fi-তে যে কেউ ARP spoofing করে আপনার সব unencrypted traffic পড়তে পারে। এটিই <strong>TLS-এর প্রকৃত যৌক্তিকতা</strong> (Ch 31) — নিরাপত্তা আসে end-to-end encryption থেকে, network-এর "বিশ্বস্ততা" থেকে নয়।</p>
+  </div>
+
+  <h2>8.7 IPv6-এ ARP নেই</h2>
+  <p>IPv6-এ ARP-এর জায়গায় আছে <strong>NDP</strong> (Neighbor Discovery Protocol), যা ICMPv6-এর উপর চলে।</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>IPv4 (ARP)</th><th>IPv6 (NDP)</th></tr></thead>
+    <tbody>
+      <tr><td>ARP Request</td><td>Neighbor Solicitation (NS)</td></tr>
+      <tr><td>ARP Reply</td><td>Neighbor Advertisement (NA)</td></tr>
+      <tr><td>Broadcast ব্যবহার করে</td><td><strong>Multicast</strong> ব্যবহার করে — শুধু সম্ভাব্য প্রাপকদের বিরক্ত করে</td></tr>
+      <tr><td>আলাদা EtherType (0x0806)</td><td>ICMPv6-এর ভেতরে</td></tr>
+      <tr><td>শুধু address resolution</td><td>router discovery, autoconfiguration-ও করে</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>ধারণাগতভাবে দুটি একই কাজ করে — "এই address-এর যন্ত্রটি কে?" পার্থক্য মূলত দক্ষতায় (broadcast-এর বদলে multicast) এবং পরিধিতে (NDP আরও অনেক কিছু করে)। এই বইয়ে আমরা IPv4/ARP দিয়েই মূল ধারণাগুলো তৈরি করব, কারণ mental model একই।</p>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 8 — একটি ARP কথোপকথন সরাসরি দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি বাস্তব ARP request ও reply, এবং local বনাম দূরবর্তী গন্তব্যের ক্ষেত্রে আচরণের পার্থক্য।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># Terminal 1 — ARP traffic শুনুন
+sudo tcpdump -i any -n arp
+
+# Terminal 2 — cache থেকে একটি entry মুছে আবার ping দিন
+sudo ip neigh flush all           # Linux
+ping -c 1 192.168.1.1             # আপনার নিজের gateway
+
+# তারপর একটি দূরবর্তী গন্তব্যে
+ping -c 1 1.1.1.1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রথম ping-এ tcpdump-এ দেখবেন <code>ARP, Request who-has 192.168.1.1 tell 192.168.1.5</code> এবং তারপর <code>ARP, Reply 192.168.1.1 is-at a4:2b:...</code>। কিন্তু <code>ping 1.1.1.1</code>-এ <strong>1.1.1.1-এর জন্য কোনো ARP হবে না</strong> — কারণ সেটি local নয়। বড়জোর gateway-এর জন্য ARP হবে (যদি cache-এ না থাকে)।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> ARP-এর পরিধি হাতে-কলমে প্রমাণিত। আপনার machine দূরবর্তী কোনো host-এর MAC কখনো জিজ্ঞেসই করে না — সে শুধু gateway-এর MAC চায়। "MAC = পরের hop, IP = গন্তব্য" — এটি আর তত্ত্ব নয়, এখন আপনি নিজের চোখে দেখেছেন।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>ARP IPv4 address থেকে MAC address বের করে — IP layer এবং Link layer-এর মধ্যে অনুপস্থিত সংযোগটি পূরণ করে।</li>
+      <li>Request হয় <strong>broadcast</strong>, reply হয় <strong>unicast</strong>।</li>
+      <li>ফলাফল ARP cache-এ জমা হয় সীমিত সময়ের জন্য (aging), যাতে পুরনো তথ্যে আটকে না থাকে।</li>
+      <li><strong>ARP কখনো router পেরোয় না</strong> — এটি সম্পূর্ণভাবে local segment-এর protocol।</li>
+      <li>দূরবর্তী গন্তব্যের জন্য আপনি gateway-এর MAC ARP করেন, গন্তব্যের নয়। MAC = পরের hop, IP = চূড়ান্ত গন্তব্য।</li>
+      <li>ARP-এ কোনো প্রমাণীকরণ নেই → ARP spoofing সম্ভব → local network কখনো "বিশ্বস্ত" নয় → TLS দরকার।</li>
+      <li>IPv6-এ ARP-এর জায়গায় NDP, যা multicast ব্যবহার করে — কিন্তু ধারণাটি অভিন্ন।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>ARP request broadcast কিন্তু reply unicast — কেন এই অসামঞ্জস্য?</summary>
+    <div class="ans"><p>Request-কে broadcast হতেই হবে, কারণ জিজ্ঞাসাকারী জানে না কার কাছে জিজ্ঞেস করবে — সেটাই তো প্রশ্ন। কিন্তু উত্তরদাতা ঠিক জানে কার কাছে উত্তর পাঠাতে হবে, কারণ request-এর ভেতরেই sender-এর IP ও MAC দেওয়া আছে। তাই reply unicast করাই যথেষ্ট এবং তাতে অপ্রয়োজনীয় network-শব্দ এড়ানো যায়।</p></div>
+  </details>
+  <details class="qa"><summary>আপনি <code>curl https://github.com</code> চালালেন। GitHub-এর server-এর MAC address জানতে কি ARP হয়?</summary>
+    <div class="ans"><p>না, কখনোই না। GitHub-এর server আপনার local segment-এ নেই, আর ARP broadcast router পেরোয় না। আপনার machine শুধু <em>default gateway</em>-এর MAC জানতে ARP করে (তাও যদি cache-এ না থাকে)। GitHub-এর server-এর MAC address আপনার machine কোনোদিন জানে না — এবং সেটির প্রয়োজনও নেই, কারণ MAC কেবল এক hop-এর ব্যাপার।</p></div>
+  </details>
+  <details class="qa"><summary>ARP cache-এ কোনো aging না থাকলে কী কী সমস্যা হতো?</summary>
+    <div class="ans"><p>(১) কোনো device-এর NIC বদলালে বা IP অন্য device-এ গেলে আপনি চিরকাল ভুল MAC-এ পাঠাতেন। (২) HA failover কাজ করত না — নতুন server virtual IP নিলেও আপনি পুরনোটাতেই পাঠাতেন। (৩) DHCP-তে IP পুনর্বণ্টন হলে ভুল host-এ traffic যেত। Aging হলো ভুল থেকে স্বয়ংক্রিয় পুনরুদ্ধারের ব্যবস্থা।</p></div>
+  </details>
+  <details class="qa"><summary>ARP spoofing সম্ভব হয় কেন, এবং এর বাস্তব প্রতিকার কী?</summary>
+    <div class="ans"><p>সম্ভব হয় কারণ ARP-এ কোনো প্রমাণীকরণ নেই — যেকোনো host যেকোনো IP-এর দাবি করতে পারে এবং সবাই বিনা প্রশ্নে বিশ্বাস করে। Network-স্তরে কিছু প্রশমন আছে (switch-এ Dynamic ARP Inspection, static ARP entry, 802.1X), কিন্তু <strong>একজন developer-এর জন্য প্রকৃত প্রতিকার হলো end-to-end encryption</strong> — TLS। আক্রমণকারী traffic নিজের মধ্য দিয়ে চালাতে পারলেও encrypted content পড়তে বা বদলাতে পারবে না।</p></div>
+  </details>
+  <details class="qa"><summary>Gratuitous ARP কী এবং কখন এটি দরকার হয়?</summary>
+    <div class="ans"><p>কেউ জিজ্ঞেস না করলেও নিজের IP-MAC মানচিত্র broadcast করা। দুটি প্রধান ব্যবহার: (১) boot-এর সময় IP conflict শনাক্ত করা, (২) HA failover-এ — backup server virtual IP গ্রহণ করে gratuitous ARP পাঠায়, যাতে সবার ARP cache তৎক্ষণাৎ নতুন MAC-এ update হয় এবং traffic সেকেন্ডের মধ্যে নতুন server-এ চলে যায়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch7"><div class="d">পূর্ববর্তী</div><div class="t">Ch 7 — Switches</div></a>
+    <a class="nx" href="#ch9"><div class="d">পরবর্তী</div><div class="t">Ch 9 — IP Addresses</div></a>
+  </div>
+</section>

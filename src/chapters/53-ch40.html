@@ -1,0 +1,278 @@
+<section class="chapter" id="ch40">
+  <div class="ch-eyebrow">Chapter 40</div>
+  <h1>DNS Debugging</h1>
+  <p class="ch-lede">"DNS-এর সমস্যা" এতটাই সাধারণ যে এটি প্রায় একটি কৌতুক হয়ে গেছে। কিন্তু DNS সমস্যা নির্ণয় আসলে সহজ — কারণ <code>dig</code> আপনাকে ঠিক দেখায় প্রতিটি স্তরে কী ঘটছে।</p>
+
+  <h2>40.1 <code>dig</code>-এর output সম্পূর্ণভাবে পড়া</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>$ dig example.com
+
+; &lt;&lt;&gt;&gt; DiG 9.18.1 &lt;&lt;&gt;&gt; example.com
+;; global options: +cmd
+
+;; Got answer:
+;; ->>HEADER&lt;&lt;- opcode: QUERY, status: NOERROR, id: 43521
+;;                              ↑
+;;                   ★ সবচেয়ে গুরুত্বপূর্ণ field ★
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 1
+
+;; QUESTION SECTION:
+;example.com.                   IN      A
+
+;; ANSWER SECTION:
+example.com.            285     IN      A       93.184.215.14
+     │                   │      │       │              │
+   নাম                  TTL   class   type          উত্তর
+
+;; Query time: 2 msec        ← 0-5ms মানে cache, 50ms+ মানে প্রকৃত lookup
+;; SERVER: 127.0.0.53#53     ← কোন resolver ব্যবহার হলো
+;; WHEN: Wed Sep 02 20:30:00 +06 2026
+;; MSG SIZE  rcvd: 56</pre></div>
+
+  <h3>Status code — প্রথমেই যা দেখবেন</h3>
+
+  <div class="tw"><table>
+    <thead><tr><th>Status</th><th>অর্থ</th><th>কী করবেন</th></tr></thead>
+    <tbody>
+      <tr><td><code>NOERROR</code></td><td>সফল</td><td>ANSWER section খালি? তাহলে নাম আছে কিন্তু ওই type-এর record নেই</td></tr>
+      <tr><td><code>NXDOMAIN</code></td><td><strong>নামটিই নেই</strong></td><td>বানান দেখুন; record তৈরি হয়েছে কি; negative cache (Ch 27)</td></tr>
+      <tr><td><code>SERVFAIL</code></td><td>Resolver ব্যর্থ হয়েছে</td><td>Authoritative server বন্ধ, বা DNSSEC যাচাই ব্যর্থ</td></tr>
+      <tr><td><code>REFUSED</code></td><td>Server উত্তর দিতে অস্বীকার করেছে</td><td>আপনি এই resolver ব্যবহার করার অনুমতি পাননি</td></tr>
+      <tr><td><code>TIMEOUT</code></td><td>কোনো উত্তরই এল না</td><td>Resolver পৌঁছানো যাচ্ছে না; port 53 firewall-এ আটকানো?</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ NXDOMAIN এবং "NOERROR কিন্তু ANSWER: 0" — সম্পূর্ণ ভিন্ন</div>
+    <div class="cb diagram"><pre>NXDOMAIN:
+  "এই নামটি অস্তিত্বেই নেই"
+  → typo, বা record কখনো তৈরি হয়নি
+
+NOERROR, ANSWER: 0:
+  "নামটি আছে, কিন্তু তুমি যে type চেয়েছ সেটি নেই"
+  → যেমন: AAAA (IPv6) চেয়েছেন কিন্তু শুধু A আছে
+  → বা MX চেয়েছেন কিন্তু email configure করা নেই
+
+এই পার্থক্যটি না বুঝলে ভুল দিকে খোঁজা শুরু হয়।</pre></div>
+  </div>
+
+  <h3>Flags-এর অর্থ</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Flag</th><th>অর্থ</th></tr></thead>
+    <tbody>
+      <tr><td><code>qr</code></td><td>Query Response — এটি একটি উত্তর (query নয়)</td></tr>
+      <tr><td><code>aa</code></td><td><strong>Authoritative Answer</strong> — সরাসরি record-এর মালিকের কাছ থেকে, cache নয়</td></tr>
+      <tr><td><code>rd</code></td><td>Recursion Desired — আমি চেয়েছিলাম resolver পুরো কাজ করুক</td></tr>
+      <tr><td><code>ra</code></td><td>Recursion Available — resolver সেটি করতে সক্ষম</td></tr>
+      <tr><td><code>tc</code></td><td><strong>Truncated</strong> — উত্তর UDP-তে আঁটেনি, TCP-তে আবার চাইতে হবে</td></tr>
+      <tr><td><code>ad</code></td><td>Authenticated Data — DNSSEC যাচাই সফল</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>40.2 সাধারণ DNS সমস্যা ও তাদের নির্ণয়</h2>
+
+  <div class="tabs" id="tabs-dnsdebug">
+    <div class="tab-btns">
+      <button class="on" data-t="dd1">পুরনো উত্তর</button>
+      <button data-t="dd2">কাজই করছে না</button>
+      <button data-t="dd3">ভিন্ন উত্তর</button>
+      <button data-t="dd4">ধীর</button>
+    </div>
+    <div class="tab-body">
+      <div class="tab-pane on" id="dd1">
+        <h4>"Record বদলেছি কিন্তু পুরনো IP আসছে"</h4>
+        <div class="cb"><span class="cb-lang">bash</span><pre># ধাপ ১ — Authoritative server কী বলছে? (সব cache এড়িয়ে)
+NS=$(dig +short NS example.com | head -1)
+dig @$NS example.com
+# এখানে পুরনো হলে → আপনার DNS provider-এ পরিবর্তনই হয়নি
+
+# ধাপ ২ — Public resolver গুলো?
+dig @8.8.8.8 example.com
+dig @1.1.1.1 example.com
+# পুরনো হলে → TTL শেষ হওয়ার অপেক্ষা করুন
+
+# ধাপ ৩ — আপনার নিজের resolver?
+dig example.com
+
+# ধাপ ৪ — OS cache পরিষ্কার করুন
+sudo resolvectl flush-caches      # systemd
+sudo dscacheutil -flushcache      # macOS
+ipconfig /flushdns                # Windows
+
+# ধাপ ৫ — Browser cache
+# chrome://net-internals/#dns</pre></div>
+        <p>এই ক্রমটি সমস্যাটিকে ঠিক একটি স্তরে সংকীর্ণ করে আনে। প্রতিটি ধাপে TTL-এর মানও দেখুন — কমতে থাকলে সেটি cache থেকে আসছে (Ch 27)।</p>
+      </div>
+      <div class="tab-pane" id="dd2">
+        <h4>"DNS একেবারেই কাজ করছে না"</h4>
+        <div class="cb"><span class="cb-lang">bash</span><pre># ধাপ ১ — Network কি ঠিক আছে? (DNS ছাড়া পরীক্ষা)
+ping -c 2 1.1.1.1
+# ব্যর্থ হলে → এটি DNS-এর সমস্যা নয়, network-এর
+
+# ধাপ ২ — আমার configured resolver কে?
+cat /etc/resolv.conf
+resolvectl status | head -20      # systemd
+
+# ধাপ ৩ — সেই resolver-এ পৌঁছাই?
+ping -c 2 $(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+
+# ধাপ ৪ — একটি ভিন্ন resolver দিয়ে চেষ্টা
+dig @1.1.1.1 example.com
+# কাজ করলে → আপনার configured resolver-ই সমস্যা
+
+# ধাপ ৫ — Port 53 কি খোলা?
+nc -zvu 1.1.1.1 53
+sudo tcpdump -i any -n port 53 -c 5 &
+dig example.com
+# কোনো packet না দেখলে → firewall আটকাচ্ছে
+
+# ধাপ ৬ — /etc/hosts কি হস্তক্ষেপ করছে?
+grep example.com /etc/hosts</pre></div>
+      </div>
+      <div class="tab-pane" id="dd3">
+        <h4>"বিভিন্ন জায়গায় ভিন্ন IP আসছে"</h4>
+        <div class="cb"><span class="cb-lang">bash</span><pre>dig @8.8.8.8 +short cdn.example.com
+dig @1.1.1.1 +short cdn.example.com
+dig @9.9.9.9 +short cdn.example.com
+# ভিন্ন উত্তর এলে — এটি প্রায়ই ★স্বাভাবিক ও উদ্দেশ্যপ্রণোদিত★</pre></div>
+        <p><strong>কেন ভিন্ন হয়:</strong></p>
+        <ul>
+          <li><strong>GeoDNS / CDN</strong> — resolver-এর অবস্থান অনুযায়ী নিকটতম edge-এর IP দেওয়া হয় (Ch 46)।</li>
+          <li><strong>Load balancing</strong> — একাধিক A record ঘুরিয়ে ঘুরিয়ে দেওয়া (round-robin)।</li>
+          <li><strong>Split-horizon DNS</strong> — internal ও external ব্যবহারকারীর জন্য ইচ্ছাকৃতভাবে ভিন্ন উত্তর।</li>
+          <li><strong>Anycast</strong> — একই IP, কিন্তু ভিন্ন ভৌগোলিক অবস্থানের server (Ch 27)।</li>
+        </ul>
+        <p>একটি VPN চালু করে আবার পরীক্ষা করুন — উত্তর বদলে গেলে GeoDNS নিশ্চিত।</p>
+      </div>
+      <div class="tab-pane" id="dd4">
+        <h4>"DNS lookup ধীর"</h4>
+        <div class="cb"><span class="cb-lang">bash</span><pre># সময় মাপুন
+dig example.com | grep "Query time"
+
+# বিভিন্ন resolver-এর তুলনা
+for r in 8.8.8.8 1.1.1.1 9.9.9.9 208.67.222.222; do
+  t=$(dig @$r example.com | grep "Query time" | awk '{print $4}')
+  echo "$r → ${t}ms"
+done
+
+# একটি application-এ DNS কত সময় নিচ্ছে
+curl -w "DNS: %{time_namelookup}s\n" -o /dev/null -s https://example.com</pre></div>
+        <p><strong>সাধারণ কারণ:</strong></p>
+        <ul>
+          <li><strong>IPv6 timeout</strong> — system AAAA record চাইছে কিন্তু IPv6 কাজ করছে না, তাই timeout-এর অপেক্ষা করে তারপর IPv4-এ যায়। উপসর্গ: ঠিক ৫ সেকেন্ডের বিলম্ব।</li>
+          <li><strong>দূরবর্তী resolver</strong> — একটি কাছের resolver ব্যবহার করুন।</li>
+          <li><strong>Kubernetes-এ <code>ndots:5</code></strong> — <code>example.com</code>-এর জন্যও প্রথমে <code>example.com.default.svc.cluster.local</code>, তারপর আরও কয়েকটি চেষ্টা করা হয় — একটি external lookup-এ ৫টি ব্যর্থ query! সমাধান: FQDN ব্যবহার করুন (শেষে dot দিয়ে), বা pod-এ <code>ndots</code> কমান।</li>
+          <li><strong>Cache কাজ করছে না</strong> — প্রতিটি query-ই প্রকৃত lookup হচ্ছে।</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <h2>40.3 <code>dig</code>-এর দরকারি বিকল্প</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre>dig +short example.com          # শুধু উত্তর, script-এর জন্য আদর্শ
+dig +trace example.com          # root থেকে সম্পূর্ণ delegation পথ
+dig +noall +answer example.com  # শুধু ANSWER section
+dig +nssearch example.com       # সব authoritative server-কে জিজ্ঞেস
+dig +dnssec example.com         # DNSSEC record সহ
+dig +tcp example.com            # UDP-র বদলে TCP-তে
+dig -t ANY example.com          # সব record (অনেক server এখন অস্বীকার করে)
+dig -x 93.184.215.14            # reverse lookup
+
+# একাধিক record type একসাথে
+dig example.com A AAAA MX NS TXT +noall +answer
+
+# সব authoritative server একই উত্তর দিচ্ছে কি? (গুরুত্বপূর্ণ)
+for ns in $(dig +short NS example.com); do
+  echo "$ns → $(dig @$ns +short example.com | head -1)"
+done</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Nameserver-দের মধ্যে অসঙ্গতি — একটি নীরব ঘাতক</div>
+    <p>উপরের শেষ command-টি অত্যন্ত মূল্যবান। যদি আপনার দুটি nameserver ভিন্ন উত্তর দেয় (যেমন zone transfer ব্যর্থ হয়েছে বা একটিতে পরিবর্তন হয়নি), তাহলে <strong>ব্যবহারকারীরা এলোমেলোভাবে</strong> কখনো সঠিক কখনো ভুল উত্তর পাবেন — কারণ resolver যেকোনো একটি nameserver বেছে নেয়।</p>
+    <p>উপসর্গ: "কিছু ব্যবহারকারীর কাজ করছে, কিছুর করছে না", বা "refresh করলে কখনো কাজ করে কখনো করে না"। এটি নির্ণয় করা কঠিন যদি না আপনি প্রতিটি nameserver আলাদাভাবে পরীক্ষা করেন।</p>
+  </div>
+
+  <h2>40.4 DNS নিয়ে চেনা ফাঁদ</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>উপসর্গ</th><th>সম্ভাব্য কারণ</th></tr></thead>
+    <tbody>
+      <tr><td>Server-এ কাজ করে, laptop-এ করে না</td><td><code>/etc/hosts</code> entry, বা split-horizon DNS, বা ভিন্ন resolver</td></tr>
+      <tr><td>নতুন subdomain "নেই" দেখাচ্ছে</td><td>Record তৈরির আগে query করা হয়েছিল → negative caching (Ch 27)</td></tr>
+      <tr><td>ঠিক ৫ সেকেন্ড বিলম্ব</td><td>IPv6 (AAAA) lookup timeout হয়ে তারপর IPv4</td></tr>
+      <tr><td>Kubernetes-এ external DNS ধীর</td><td><code>ndots:5</code> — search domain গুলো আগে চেষ্টা করা হচ্ছে</td></tr>
+      <tr><td>Java app DNS পরিবর্তন দেখে না</td><td>JVM-এর DNS cache (পুরনো version-এ চিরকালীন)</td></tr>
+      <tr><td>কিছু ব্যবহারকারীর কাজ করে, কিছুর না</td><td>Nameserver-দের মধ্যে অসঙ্গতি, বা ভিন্ন TTL অবস্থা</td></tr>
+      <tr><td>SERVFAIL</td><td>DNSSEC যাচাই ব্যর্থ, বা authoritative server বন্ধ</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 40 — একটি DNS সমস্যা নির্ণয় করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — DNS-এর প্রতিটি স্তর আলাদাভাবে পরীক্ষা করে সমস্যা সংকীর্ণ করার একটি পুনরাবৃত্তিযোগ্য পদ্ধতি।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre>#!/bin/bash
+D=${1:-example.com}
+
+echo "=== 1. আমার resolver ==="
+grep nameserver /etc/resolv.conf
+
+echo -e "\n=== 2. আমার resolver কী বলে ==="
+dig +short $D | head -3
+echo "status: $(dig $D | grep -o 'status: [A-Z]*')"
+
+echo -e "\n=== 3. Public resolver গুলো ==="
+for r in 8.8.8.8 1.1.1.1; do
+  echo "$r → $(dig @$r +short $D | head -1)"
+done
+
+echo -e "\n=== 4. Authoritative nameserver গুলো ==="
+for ns in $(dig +short NS $D); do
+  echo "$ns → $(dig @$ns +short $D | head -1)"
+done
+
+echo -e "\n=== 5. TTL (cache-এর অবস্থা) ==="
+dig $D | grep -E "^$D" | head -1
+
+echo -e "\n=== 6. /etc/hosts-এ কিছু আছে? ==="
+grep -i "$D" /etc/hosts || echo "(কিছু নেই)"
+
+echo -e "\n=== 7. সময় ==="
+dig $D | grep "Query time"</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> ধাপ ৩ ও ৪-এর উত্তর ভিন্ন হলে সেটি cache-এর সমস্যা (TTL শেষ হওয়ার অপেক্ষা)। ধাপ ৪-এর ভেতরেই ভিন্নতা থাকলে সেটি nameserver-এর অসঙ্গতি — অনেক বেশি গুরুতর। ধাপ ৬-এ কিছু পাওয়া গেলে DNS-এর দোষ দেওয়া বন্ধ করুন।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> DNS-এর সমস্যা নির্ণয় মূলত "কোন স্তরে ভুল উত্তরটি ঢুকল" খুঁজে বের করা। Authoritative থেকে শুরু করে নিচে নামলে (বা নিচ থেকে উপরে উঠলে) সেই স্তরটি স্পষ্টভাবে চিহ্নিত হয়।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li><code>dig</code>-এর <code>status</code> প্রথমেই দেখুন: NOERROR, NXDOMAIN, SERVFAIL, REFUSED।</li>
+      <li><strong>NXDOMAIN</strong> (নাম নেই) ≠ <strong>NOERROR + ANSWER: 0</strong> (নাম আছে, এই type নেই)।</li>
+      <li><code>aa</code> flag = authoritative উত্তর; <code>tc</code> = truncated, TCP-তে যেতে হবে।</li>
+      <li>Query time ০–৫ms মানে cache; ৫০ms+ মানে প্রকৃত resolution।</li>
+      <li>পুরনো উত্তরের নির্ণয়: authoritative → public resolver → নিজের resolver → OS cache → browser।</li>
+      <li>সব authoritative nameserver একই উত্তর দিচ্ছে কিনা পরীক্ষা করুন — অসঙ্গতি এলোমেলো ব্যর্থতা তৈরি করে।</li>
+      <li>ঠিক ৫ সেকেন্ডের বিলম্ব প্রায় সবসময় IPv6 (AAAA) timeout।</li>
+      <li>Kubernetes-এ <code>ndots:5</code> external DNS lookup-কে বহুগুণ ধীর করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>dig</code> NXDOMAIN দিচ্ছে কিন্তু আপনি record টি তৈরি করেছেন। কী ঘটছে?</summary>
+    <div class="ans"><p>সম্ভবত <strong>negative caching</strong> (Ch 27) — record তৈরির <em>আগে</em> কেউ query করেছিল, তখন NXDOMAIN উত্তরটি cache হয়ে গেছে এবং SOA-র minimum TTL পর্যন্ত থাকবে। যাচাই: authoritative server-কে সরাসরি জিজ্ঞেস করুন (<code>dig @ns1.example.com ...</code>)। সেখানে ঠিক থাকলে শুধু অপেক্ষা করতে হবে। অন্য সম্ভাবনা: ভুল zone-এ record তৈরি, বা প্রকাশ (publish) করা হয়নি।</p></div>
+  </details>
+  <details class="qa"><summary><code>NOERROR</code> কিন্তু <code>ANSWER: 0</code> — এর মানে কী?</summary>
+    <div class="ans"><p>নামটি অস্তিত্বশীল, কিন্তু আপনি যে record type চেয়েছেন সেটি নেই। উদাহরণ: <code>dig example.com AAAA</code> দিলে NOERROR + ANSWER 0 আসবে যদি domain-টির শুধু IPv4 (A record) থাকে। এটি NXDOMAIN থেকে সম্পূর্ণ ভিন্ন — সেখানে নামটিই নেই। এই পার্থক্য না বুঝলে আপনি ভুল সমস্যা সমাধানের চেষ্টা করবেন।</p></div>
+  </details>
+  <details class="qa"><summary>দুটি nameserver ভিন্ন IP ফেরত দিচ্ছে। কেন এটি বিপজ্জনক?</summary>
+    <div class="ans"><p>Resolver গুলো এলোমেলোভাবে যেকোনো একটি nameserver বেছে নেয়। ফলে কিছু ব্যবহারকারী সঠিক server-এ যাবেন, কিছু ভুল/পুরনো server-এ — এবং একই ব্যবহারকারীও refresh করলে ভিন্ন ফল পেতে পারেন। উপসর্গটি অসামঞ্জস্যপূর্ণ ও বিভ্রান্তিকর ("কখনো কাজ করে কখনো করে না")। সাধারণ কারণ: zone transfer ব্যর্থ, একটি nameserver-এ পরিবর্তন প্রয়োগ হয়নি, বা ভুল configuration।</p></div>
+  </details>
+  <details class="qa"><summary>একটি application-এ প্রতিটি request-এ ঠিক ৫ সেকেন্ডের অতিরিক্ত বিলম্ব। DNS-এর দিক থেকে সন্দেহ কী?</summary>
+    <div class="ans"><p><strong>IPv6 (AAAA) lookup timeout।</strong> System প্রথমে AAAA record চায়; IPv6 configure করা থাকলেও কাজ না করলে (বা resolver উত্তর না দিলে) ৫ সেকেন্ডের default timeout-এর পরে A record-এ যায়। যাচাই: <code>dig AAAA yourhost</code> এবং <code>curl -4</code> দিয়ে তুলনা করুন। সমাধান: IPv6 ঠিক করুন, বা application-এ IPv4 বাধ্যতামূলক করুন, বা resolver configuration ঠিক করুন।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch39"><div class="d">পূর্ববর্তী</div><div class="t">Ch 39 — Debugging Toolkit</div></a>
+    <a class="nx" href="#ch41"><div class="d">পরবর্তী</div><div class="t">Ch 41 — Packet Capture</div></a>
+  </div>
+</section>

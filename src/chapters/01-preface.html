@@ -1,0 +1,107 @@
+<section class="chapter" id="preface">
+  <div class="ch-eyebrow">Preface</div>
+  <h1>এই বইটি কীভাবে পড়বেন</h1>
+  <p class="ch-lede">Networking শেখার সবচেয়ে বড় সমস্যা হলো — বেশিরভাগ resource শুরু করে terminology দিয়ে। OSI-এর সাতটি layer মুখস্থ করানো হয়, subnet mask-এর table দেওয়া হয়, protocol-এর acronym-এর তালিকা ধরিয়ে দেওয়া হয়। তারপর reader আটকে যায়, কারণ সে জানে <em>নাম</em>, কিন্তু বোঝে না <em>কেন</em>।</p>
+
+  <p>এই বইয়ের approach উল্টো। প্রতিটি chapter শুরু হয় একটি <strong>problem</strong> দিয়ে — এমন একটি সমস্যা যেটি সমাধান করতে গিয়েই মানুষ এই technology-টি আবিষ্কার করেছিল। তারপর আসে সেই সমাধানের নাম, তারপর mechanism, তারপর command।</p>
+
+  <div class="box why">
+    <div class="bt">📐 Core Philosophy</div>
+    <p><strong>Memorization নয়, Mental Model।</strong> আপনি যদি TCP-এর header-এর প্রতিটি field মুখস্থ করেন কিন্তু বুঝতে না পারেন কেন sequence number দরকার — আপনি কিছুই শেখেননি। আর আপনি যদি sequence number-এর প্রয়োজনীয়তা বোঝেন, header-এর details পাঁচ মিনিটে খুঁজে নেওয়া যায়।</p>
+  </div>
+
+  <h2>আপনি কোথায় আছেন</h2>
+  <p>এই বইটি একটি বড় systems learning journey-এর তৃতীয় ধাপ:</p>
+
+  <div class="cb diagram"><pre>Linux Fundamentals
+        ↓
+    (process, file, permission, shell, kernel)
+        ↓
+Operating Systems Fundamentals
+        ↓
+    (process, memory, syscall, scheduling, I/O)
+        ↓
+Networking Fundamentals   ← আপনি এখানে
+        ↓
+    (packet, IP, TCP, DNS, HTTP, TLS)</pre></div>
+
+  <p>আপনার কাছ থেকে যা ধরে নেওয়া হচ্ছে: আপনি programming জানেন, Linux terminal-এ কাজ করতে পারেন, process এবং system call কী তা জানেন। যা ধরে নেওয়া হচ্ছে না: আপনি networking-এর কিছুই জানেন। প্রতিটি networking concept শূন্য থেকে শুরু হবে।</p>
+
+  <h2>প্রতিটি chapter-এর গঠন</h2>
+  <p>সব chapter-এ সব section থাকবে না — যেটি প্রাসঙ্গিক, সেটিই থাকবে। কিন্তু সাধারণ progression এটি:</p>
+
+  <div class="cb diagram"><pre>Why does this exist?     ← কোন সমস্যার সমাধান?
+        ↓
+Core Concept             ← আসলে জিনিসটা কী
+        ↓
+Mental Model             ← মাথায় কীভাবে ধরে রাখবেন
+        ↓
+How It Works             ← mechanism
+        ↓
+Visual Diagram
+        ↓
+Practical Example
+        ↓
+Developer Perspective    ← আপনার code-এ এর প্রভাব
+        ↓
+Common Confusions        ← MYTH vs REALITY
+        ↓
+Linux Experiment         ← নিজের চোখে দেখা
+        ↓
+Chapter Summary
+        ↓
+Quick Check</pre></div>
+
+  <h2>দুটি mental model যা পুরো বই জুড়ে ফিরে আসবে</h2>
+  <p>যদি এই বই থেকে আপনি মাত্র দুটি জিনিস মনে রাখেন, সেগুলো এই দুটি হোক। এগুলো প্রথমবার অর্ধেক বুঝলেও সমস্যা নেই — প্রতিটি chapter এদের একটু একটু করে পরিষ্কার করবে।</p>
+
+  <div class="cb diagram"><pre>MODEL 1 — Vertical Stack (একটি machine-এর ভেতরে)
+
+    Process          ← আপনার application code
+       ↓
+    Socket           ← OS-এর দেওয়া network handle
+       ↓
+    System Call      ← user space থেকে kernel space
+       ↓
+    Kernel           ← TCP/IP stack এখানে থাকে
+       ↓
+    TCP/IP Stack     ← segment → packet → frame
+       ↓
+    NIC              ← hardware, bits পাঠায়
+       ↓
+    Ethernet / Wi-Fi ← physical medium
+       ↓
+    Switch → Router → Internet → Server
+
+
+MODEL 2 — Protocol Layering (একটি byte-এর মোড়ক)
+
+    HTTP             ← "GET /users দাও"
+       ↓
+    TLS              ← "কিন্তু encrypted করে"
+       ↓
+    TCP / QUIC       ← "reliable, ordered ভাবে"
+       ↓
+    IP               ← "এই address-এ পাঠাও"
+       ↓
+    Ethernet / Wi-Fi ← "পরের hop-এ পৌঁছে দাও"
+       ↓
+    Physical medium  ← "0 আর 1 হিসেবে"</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>Model 1 বলে <strong>data কোন কোন component-এর মধ্য দিয়ে যায়</strong>। Model 2 বলে <strong>data-এর গায়ে কোন কোন header জড়ানো হয়</strong>। দুটো একই ঘটনার দুই দৃষ্টিকোণ। বইয়ের শেষে (Chapter 48) আমরা এই দুটোকে এক করে একটি single end-to-end journey দেখব।</p>
+  </div>
+
+  <h2>Labs সম্পর্কে</h2>
+  <p>প্রতিটি major section-এর শেষে ছোট experiment আছে। এগুলো Linux/macOS terminal-এ চলবে। প্রতিটি lab-এর আগে বলা হবে <strong>আমরা কী observe করার চেষ্টা করছি</strong>, আর শেষে <strong>আমরা কী শিখলাম</strong>। Lab গুলো skip করলেও বই বোঝা যাবে — কিন্তু নিজের machine-এ packet দেখলে concept-টা যেভাবে স্থায়ী হয়, পড়ে সেভাবে হয় না।</p>
+
+  <div class="box note">
+    <div class="bt">ℹ️ macOS ব্যবহারকারীদের জন্য</div>
+    <p>বইয়ে মূলত Linux command ব্যবহার করা হয়েছে (<code>ip</code>, <code>ss</code>)। macOS-এ সমতুল্য command হলো <code>ifconfig</code>/<code>netstat -rn</code> এবং <code>netstat -an</code>/<code>lsof -i</code>। যেখানে পার্থক্য গুরুত্বপূর্ণ, সেখানে উল্লেখ করা আছে।</p>
+  </div>
+
+  <div class="chnav">
+    <a class="nx" href="#ch1"><div class="d">পরবর্তী</div><div class="t">Chapter 1 — What Is a Computer Network?</div></a>
+  </div>
+</section>

@@ -1,0 +1,156 @@
+<section class="chapter" id="ch25">
+  <div class="ch-eyebrow">Chapter 25</div>
+  <h1>Why DNS Exists</h1>
+  <p class="ch-lede">DNS-কে প্রায়ই "Internet-এর ফোনবুক" বলা হয়। উপমাটি ভুল নয়, কিন্তু এটি DNS-এর সবচেয়ে আকর্ষণীয় দিকটি লুকিয়ে ফেলে — কোনো কেন্দ্রীয় ফোনবুক নেই, এবং সেটাই মূল নকশা।</p>
+
+  <h2>25.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>মানুষ মনে রাখে:      example.com
+                     github.com
+                     আমার-কোম্পানি.com
+
+Machine-এর দরকার:   93.184.215.14
+                     140.82.121.4
+                     2606:2800:21f:cb07:6820:80da:af6b:8b2c
+
+এই দুটোর মাঝে একটি অনুবাদ ব্যবস্থা দরকার।</pre></div>
+
+  <p>এখানেই থামলে বিষয়টি তুচ্ছ মনে হয় — একটি lookup table। কিন্তু সমস্যাটি আসলে অনেক গভীর:</p>
+
+  <div class="box why">
+    <div class="bt">💡 প্রকৃত সমস্যাগুলো</div>
+    <ul>
+      <li><strong>IP address বদলায়।</strong> Server migrate হয়, hosting provider বদলায়, IP পুনর্বণ্টিত হয়। নাম স্থির থাকে — এই স্থিতিশীলতাই DNS-এর প্রধান মূল্য।</li>
+      <li><strong>একটি নামের একাধিক IP।</strong> Load balancing, geographic routing, redundancy — সবই একটি নামের পেছনে বহু server।</li>
+      <li><strong>Scale।</strong> কয়েক শ কোটি নাম, প্রতি সেকেন্ডে কোটি কোটি query।</li>
+      <li><strong>বণ্টিত নিয়ন্ত্রণ।</strong> <code>example.com</code>-এর ভেতরে কী থাকবে তা example.com-এর মালিক ঠিক করবে — কোনো কেন্দ্রীয় কর্তৃপক্ষ নয়।</li>
+      <li><strong>একক ব্যর্থতা-বিন্দু না থাকা।</strong> একটি কেন্দ্রীয় server হলে সেটি বন্ধ হলে পুরো Internet অচল হতো।</li>
+    </ul>
+  </div>
+
+  <h2>25.2 ইতিহাস — HOSTS.TXT-এর মৃত্যু</h2>
+
+  <div class="cb diagram"><pre>১৯৭০-৮০ দশক: ARPANET-এ কয়েকশ computer
+
+  Stanford-এর একটি machine-এ একটি ফাইল: HOSTS.TXT
+  10.0.0.1    mit-machine
+  10.0.0.2    stanford-lab
+  10.0.0.3    ucla-node
+
+  প্রতিটি site সপ্তাহে একবার FTP দিয়ে এটি নামাত।
+
+সমস্যা যখন network বাড়ল:
+  ✗ ফাইলটি বিশাল হয়ে গেল
+  ✗ সবাই একই server থেকে নামাচ্ছে → bottleneck
+  ✗ নতুন host যোগ হলে সবার update-এর অপেক্ষা
+  ✗ নামের সংঘাত — দুজন একই নাম চাইলে?
+  ✗ একটি ফাইল, একটি কর্তৃপক্ষ — scale করে না
+
+১৯৮৩ — Paul Mockapetris DNS design করলেন।
+মূল ধারণা: কেন্দ্রীভূত করো না, বরং
+             শ্রেণিবদ্ধভাবে দায়িত্ব বণ্টন করো।</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ HOSTS.TXT আজও আছে</div>
+    <p>আপনার machine-এ <code>/etc/hosts</code> (Windows-এ <code>C:\Windows\System32\drivers\etc\hosts</code>) সেই ফাইলটিরই উত্তরাধিকারী। DNS query করার <em>আগে</em> OS এই ফাইলটি দেখে। এজন্যই local development-এ এটি এত কার্যকর:</p>
+    <div class="cb"><span class="cb-lang">text</span><pre>127.0.0.1    api.myapp.local
+127.0.0.1    dashboard.myapp.local
+10.0.0.50    staging-db</pre></div>
+    <p>এখানে একটি entry থাকলে DNS-এ কখনো query-ই যাবে না। Debugging-এর সময় মনে রাখবেন — "DNS ভুল উত্তর দিচ্ছে" মনে হলে প্রথমে <code>/etc/hosts</code> দেখুন।</p>
+  </div>
+
+  <h2>25.3 Domain Name-এর শ্রেণিবিন্যাস</h2>
+
+  <div class="cb diagram"><pre>            www.api.example.com.
+             │   │      │     │ │
+             │   │      │     │ └─ root (অদৃশ্য বিন্দু)
+             │   │      │     └─── TLD (Top Level Domain)
+             │   │      └───────── Second Level Domain
+             │   └──────────────── Subdomain
+             └──────────────────── Subdomain / host
+
+পড়তে হয় ★ ডান থেকে বামে ★ — এটিই মূল কথা:
+
+                    . (root)
+                    │
+        ┌───────────┼───────────┬────────┐
+       com         org          net      bd
+        │           │            │        │
+   ┌────┼────┐      │            │     ┌──┴──┐
+example github  wikipedia      ...    com   edu
+   │       │
+   │    ┌──┴──┐
+  www   api  gist
+
+
+প্রতিটি স্তর নিচের স্তরের দায়িত্ব "অর্পণ" (delegate) করে:
+
+  root বলে      : ".com-এর জন্য Verisign-এর server-এ যাও"
+  .com বলে      : "example.com-এর জন্য ns1.example.com-এ যাও"
+  example.com   : "api.example.com এর IP হলো 1.2.3.4"
+
+★ কেউ সবকিছু জানে না। প্রত্যেকে জানে
+  "পরের ধাপে কার কাছে যেতে হবে।"</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — চেনা প্যাটার্ন</div>
+    <p>এই "কেউ সব জানে না, প্রত্যেকে পরের ধাপ জানে" কাঠামোটি চেনা লাগছে? এটি ঠিক <strong>routing</strong>-এর মতো (Ch 12)। Router জানে না পুরো পথ, শুধু next hop জানে। DNS server জানে না চূড়ান্ত উত্তর, শুধু জানে পরে কাকে জিজ্ঞেস করতে হবে।</p>
+    <p><strong>Delegation এবং hierarchy — এই দুটি নকশা-নীতি বারবার ফিরে আসছে</strong>, কারণ এগুলোই বৈশ্বিক scale-এ কাজ করে। কেন্দ্রীভূত কিছু এত বড় হতে পারে না।</p>
+  </div>
+
+  <h2>25.4 DNS কী কী সমাধান করে</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>সমস্যা</th><th>DNS-এর সমাধান</th></tr></thead>
+    <tbody>
+      <tr><td>মানুষ IP মনে রাখতে পারে না</td><td>নাম → IP অনুবাদ</td></tr>
+      <tr><td>Server-এর IP বদলায়</td><td>নাম অপরিবর্তিত রেখে record-এ নতুন IP</td></tr>
+      <tr><td>একটি service, বহু server</td><td>একাধিক A record, বা geo-ভিত্তিক ভিন্ন উত্তর</td></tr>
+      <tr><td>Failover দরকার</td><td>TTL কমিয়ে দ্রুত অন্য IP-তে সরানো</td></tr>
+      <tr><td>Global scale</td><td>Hierarchy + delegation + caching</td></tr>
+      <tr><td>IPv6-এ রূপান্তর</td><td>একই নামে A (IPv4) ও AAAA (IPv6) record</td></tr>
+      <tr><td>Email routing</td><td>MX record</td></tr>
+      <tr><td>Service discovery</td><td>SRV record (Kubernetes-এ ব্যাপকভাবে ব্যবহৃত)</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — DNS একটি নিয়ন্ত্রণ-ব্যবস্থা</div>
+    <p>DNS শুধু অনুবাদ নয় — এটি traffic নিয়ন্ত্রণের একটি স্তর:</p>
+    <ul>
+      <li><strong>Blue-green deployment:</strong> DNS record নতুন environment-এ ঘুরিয়ে দিন।</li>
+      <li><strong>CDN:</strong> আপনার ভৌগোলিক অবস্থান অনুযায়ী DNS ভিন্ন IP ফেরত দেয় (Ch 46)।</li>
+      <li><strong>Failover:</strong> Health check ব্যর্থ হলে DNS provider স্বয়ংক্রিয়ভাবে অন্য IP দেয়।</li>
+      <li><strong>Kubernetes:</strong> ভেতরে <code>my-service.default.svc.cluster.local</code> — সম্পূর্ণ DNS-ভিত্তিক service discovery।</li>
+    </ul>
+    <p><strong>কিন্তু সতর্কতা:</strong> DNS-ভিত্তিক failover তাৎক্ষণিক নয়, কারণ TTL। ৩০০ সেকেন্ড TTL মানে পুরনো IP ৫ মিনিট পর্যন্ত cache-এ থাকতে পারে — এবং কিছু client TTL সম্পূর্ণ উপেক্ষা করে (Java-র পুরনো default ছিল চিরকালীন cache)। দ্রুত failover-এর জন্য load balancer বা anycast বেশি নির্ভরযোগ্য।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>DNS নাম ও IP-র মধ্যে একটি স্তর তৈরি করে — IP বদলালেও নাম অপরিবর্তিত থাকে।</li>
+      <li>HOSTS.TXT-এর কেন্দ্রীভূত মডেল scale করেনি; DNS তার বদলে hierarchy ও delegation ব্যবহার করে।</li>
+      <li>Domain name পড়তে হয় <strong>ডান থেকে বামে</strong>: root → TLD → domain → subdomain।</li>
+      <li>প্রতিটি স্তর পরের স্তরের দায়িত্ব অর্পণ করে — কেউ সম্পূর্ণ তথ্য রাখে না।</li>
+      <li><code>/etc/hosts</code> DNS-এর আগে দেখা হয় — local development ও debugging-এ কার্যকর।</li>
+      <li>DNS একটি traffic নিয়ন্ত্রণ-স্তরও — deployment, CDN, failover, service discovery-তে ব্যবহৃত।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>DNS কেন একটি কেন্দ্রীয় database নয়?</summary>
+    <div class="ans"><p>(১) <strong>Scale</strong> — কয়েক শ কোটি নাম ও প্রতি সেকেন্ডে কোটি কোটি query একটি system সামলাতে পারত না। (২) <strong>একক ব্যর্থতা-বিন্দু</strong> — সেটি বন্ধ হলে পুরো Internet অচল হতো। (৩) <strong>নিয়ন্ত্রণ</strong> — প্রতিটি প্রতিষ্ঠান নিজের domain-এর ভেতরের record নিজে নিয়ন্ত্রণ করতে চায়, কোনো কেন্দ্রীয় কর্তৃপক্ষের অনুমতি ছাড়া। Hierarchy + delegation তিনটিরই সমাধান।</p></div>
+  </details>
+  <details class="qa"><summary><code>www.api.example.com</code>-এ কোন অংশটি TLD এবং কে এটি নিয়ন্ত্রণ করে?</summary>
+    <div class="ans"><p>TLD হলো <code>com</code>। এটি নিয়ন্ত্রণ করে Verisign (ICANN-এর তত্ত্বাবধানে)। <code>example.com</code> নিবন্ধিত হয় একটি registrar-এর মাধ্যমে, এবং তারপর <code>api.example.com</code> ও <code>www.api.example.com</code> সম্পূর্ণভাবে example.com-এর মালিকের নিয়ন্ত্রণে — নতুন subdomain তৈরি করতে কারো অনুমতি লাগে না।</p></div>
+  </details>
+  <details class="qa"><summary>Domain name ডান থেকে বামে পড়া হয় কেন?</summary>
+    <div class="ans"><p>কারণ শ্রেণিবিন্যাসটি ডান থেকে শুরু হয়। সবচেয়ে ডানে root (অদৃশ্য <code>.</code>), তারপর TLD, তারপর ক্রমে সংকীর্ণ হতে থাকে। Resolution-ও এই ক্রমেই ঘটে: প্রথমে root-কে জিজ্ঞেস, তারপর TLD, তারপর domain। এটি ফাইল path-এর উল্টো (<code>/usr/local/bin</code> বাম থেকে সংকীর্ণ হয়) — যা প্রথমে বিভ্রান্তিকর লাগতে পারে।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch24"><div class="d">পূর্ববর্তী</div><div class="t">Ch 24 — TCP vs UDP</div></a>
+    <a class="nx" href="#ch26"><div class="d">পরবর্তী</div><div class="t">Ch 26 — DNS Resolution</div></a>
+  </div>
+</section>

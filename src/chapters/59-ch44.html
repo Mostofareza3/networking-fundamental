@@ -1,0 +1,158 @@
+<section class="chapter" id="ch44">
+  <div class="ch-eyebrow">Chapter 44</div>
+  <h1>HTTP/2 — গভীরে</h1>
+  <p class="ch-lede">Chapter 30-এ আমরা HTTP/2-এর ভূমিকা দেখেছি। এখানে দেখব তার প্রকৃত যন্ত্রপাতি — binary framing, stream, এবং HPACK — এবং কেন এগুলো আপনার application-এর নকশাকে প্রভাবিত করে।</p>
+
+  <h2>44.1 Binary Framing Layer</h2>
+
+  <div class="cb diagram"><pre>HTTP/1.1 — text, একটি request একটি connection দখল করে:
+
+  GET /users HTTP/1.1\r\n
+  Host: api.example.com\r\n
+  \r\n
+
+HTTP/2 — সবকিছু ছোট ছোট binary FRAME:
+
+  ┌──────────────────────────────────────┐
+  │ Length (24 bit) │ Type (8) │Flags(8) │
+  ├──────────────────────────────────────┤
+  │ R │      Stream Identifier (31 bit)  │  ★ কোন stream ★
+  ├──────────────────────────────────────┤
+  │            Frame Payload             │
+  └──────────────────────────────────────┘
+
+Frame-এর ধরন:
+  HEADERS       — HTTP header (HPACK-এ compressed)
+  DATA          — body-র অংশ
+  SETTINGS      — connection-এর parameter
+  WINDOW_UPDATE — flow control (stream-প্রতি!)
+  RST_STREAM    — একটি stream বাতিল
+  PRIORITY      — অগ্রাধিকার
+  PING          — জীবিত আছে কি
+  GOAWAY        — connection বন্ধ করছি</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Binary কেন — শুধু "দ্রুত" নয়</div>
+    <p>Binary format-এর প্রকৃত সুবিধা parsing-এর গতি নয় (যদিও সেটিও আছে), বরং <strong>দ্ব্যর্থহীনতা</strong>। Text protocol-এ whitespace, line ending, header folding, encoding — এই সব নিয়ে ব্যাখ্যার ভিন্নতা তৈরি হয়। সেই ভিন্নতাই <em>HTTP request smuggling</em>-এর মতো নিরাপত্তা-দুর্বলতার উৎস (Ch 28)।</p>
+    <p>Binary frame-এ length স্পষ্টভাবে দেওয়া — কোনো parsing-এর দ্ব্যর্থতা নেই। এটি একই সাথে দ্রুত এবং নিরাপদ।</p>
+  </div>
+
+  <h2>44.2 Stream — সমান্তরাল কথোপকথন</h2>
+
+  <div class="cb diagram"><pre>একটি TCP connection = বহু stream
+
+  Stream 1 ─── HEADERS ── DATA ── DATA ──────▶
+  Stream 3 ────── HEADERS ─── DATA ──────────▶
+  Stream 5 ─ HEADERS ─── DATA ── DATA ── DATA▶
+
+তারে frame গুলো মিশে যায়:
+
+  [H:1][H:3][D:1][H:5][D:3][D:1][D:5][D:5][D:3]
+     │    │    │    │
+     └────┴────┴────┴─ stream ID দিয়ে আলাদা করা যায়
+
+Stream ID-র নিয়ম:
+  বিজোড় (1,3,5...) → client শুরু করেছে
+  জোড়  (2,4,6...) → server শুরু করেছে (push, এখন অপ্রচলিত)
+
+প্রতিটি stream-এর নিজস্ব:
+  • state machine (idle → open → closed)
+  • flow control window ★
+  • priority
+
+★ Stream-প্রতি flow control একটি গুরুত্বপূর্ণ বৈশিষ্ট্য:
+  একটি ধীর consumer শুধু নিজের stream-কে ধীর করে,
+  পুরো connection-কে নয়।</pre></div>
+
+  <h2>44.3 HPACK — Header Compression</h2>
+
+  <div class="cb diagram"><pre>সমস্যা: HTTP header-এ প্রচুর পুনরাবৃত্তি
+
+  Request 1:                  Request 2:
+    :method: GET                :method: GET
+    :path: /users               :path: /orders    ← শুধু এটাই ভিন্ন
+    :authority: api.example.com :authority: api.example.com
+    user-agent: Mozilla/5.0...  user-agent: Mozilla/5.0...
+    accept: application/json    accept: application/json
+    cookie: session=abc123...   cookie: session=abc123...
+
+  একটি সাধারণ page-এ ১০০টি request × ~৮০০ bytes header
+  = ৮০ KB শুধু header-এ, যার ৯৫% হুবহু একই!
+
+HPACK-এর তিনটি কৌশল:
+
+১. STATIC TABLE — ৬১টি প্রচলিত header পূর্বনির্ধারিত
+     index 2  = :method: GET
+     index 4  = :path: /
+     index 16 = accept-encoding: gzip, deflate
+
+২. DYNAMIC TABLE — connection-এর জীবনকালে শেখা
+     প্রথমবার পুরো header পাঠান, একটি index পান
+     পরেরবার শুধু সেই index
+
+৩. HUFFMAN CODING — বাকি string গুলোর জন্য
+
+ফল:
+  Request 1: ~800 bytes
+  Request 2: ~30 bytes   ★ ৯৬% সাশ্রয় ★</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ HPACK এবং CRIME/HEARTBLEED-জাতীয় ঝুঁকি</div>
+    <p>Compression এবং encryption একসাথে থাকলে একটি সূক্ষ্ম ঝুঁকি তৈরি হয়: compressed data-র <em>আকার</em> থেকে তার বিষয়বস্তু সম্পর্কে অনুমান করা যায় (CRIME/BREACH আক্রমণ)। HPACK এই সমস্যা মাথায় রেখেই নকশা করা হয়েছে — এটি DEFLATE-এর মতো সাধারণ compression নয়, বরং একটি সীমিত, নিয়ন্ত্রিত ব্যবস্থা যেখানে আক্রমণকারীর নিয়ন্ত্রিত data ও গোপন data-র মধ্যে cross-reference সীমিত।</p>
+    <p><strong>শিক্ষা:</strong> "compression যোগ করলেই ভালো" — এটি নিরাপত্তার প্রেক্ষিতে সবসময় সত্য নয়।</p>
+  </div>
+
+  <h2>44.4 HTTP/2 আপনার নকশা কীভাবে বদলায়</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>HTTP/1.1-এর কৌশল</th><th>HTTP/2-তে</th><th>কেন</th></tr></thead>
+    <tbody>
+      <tr><td>Domain sharding</td><td><strong>ক্ষতিকর</strong></td><td>Multiplexing-এর সুবিধা নষ্ট, অতিরিক্ত handshake, HPACK table ভাগ হয়ে যায়</td></tr>
+      <tr><td>File concatenation (bundle)</td><td><strong>কম প্রয়োজনীয়</strong></td><td>ছোট ফাইল আলাদা রাখলে cache invalidation ভালো হয়</td></tr>
+      <tr><td>Image sprite</td><td><strong>অপ্রয়োজনীয়</strong></td><td>একই কারণ</td></tr>
+      <tr><td>Inline (base64) asset</td><td><strong>ক্ষতিকর</strong></td><td>আলাদাভাবে cache করা যায় না, HTML বড় হয়</td></tr>
+      <tr><td>Cookie ছোট রাখা</td><td><strong>কম গুরুত্বপূর্ণ</strong></td><td>HPACK পুনরাবৃত্তি দূর করে (প্রথম request-এ তবু বড়)</td></tr>
+      <tr><td>Connection pool বড় করা</td><td><strong>অপ্রয়োজনীয়</strong></td><td>একটি connection-ই যথেষ্ট</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — gRPC এবং HTTP/2</div>
+    <p>gRPC সম্পূর্ণভাবে HTTP/2-এর উপর নির্মিত, এবং এটি HTTP/2-এর বৈশিষ্ট্যগুলোর সবচেয়ে ভালো ব্যবহার:</p>
+    <ul>
+      <li><strong>Streaming</strong> — একটি stream দীর্ঘ সময় খোলা রেখে দুই দিকেই message পাঠানো (bidirectional streaming)।</li>
+      <li><strong>Multiplexing</strong> — একটি TCP connection-এ হাজারো সমান্তরাল RPC।</li>
+      <li><strong>Long-lived connection</strong> — handshake ও slow start-এর খরচ একবারই।</li>
+      <li><strong>HPACK</strong> — metadata-র পুনরাবৃত্তি প্রায় বিনামূল্যে।</li>
+    </ul>
+    <p><strong>কিন্তু একটি ফাঁদ:</strong> HTTP/2-এর long-lived connection load balancing-এর সাথে খারাপভাবে মেশে। একটি L4 load balancer connection-স্তরে বণ্টন করে — কিন্তু gRPC-তে একটি connection-ই হাজারো request বহন করে, তাই সব request একটি backend-এ চলে যায়। সমাধান: L7 (gRPC-সচেতন) load balancer, বা client-side load balancing।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>HTTP/2 সবকিছুকে binary frame-এ ভাগ করে, প্রতিটিতে একটি stream ID।</li>
+      <li>Binary format দ্রুত <em>এবং</em> দ্ব্যর্থহীন — request smuggling-এর মতো দুর্বলতা কমায়।</li>
+      <li>একটি connection-এ বহু stream; প্রতিটির নিজস্ব state ও flow control window।</li>
+      <li>HPACK static table, dynamic table ও Huffman coding দিয়ে header ৯০%+ সংকুচিত করে।</li>
+      <li>Domain sharding, sprite, inline asset — HTTP/2-তে এগুলো এখন ক্ষতিকর।</li>
+      <li>gRPC HTTP/2-এর সবচেয়ে পূর্ণ ব্যবহার, কিন্তু L4 load balancing-এর সাথে সমস্যা তৈরি করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>HTTP/2-তে stream ID-র বিজোড়/জোড় বিভাজন কেন?</summary>
+    <div class="ans"><p>যাতে client ও server স্বাধীনভাবে নতুন stream শুরু করতে পারে, কোনো সমন্বয় বা সংঘাত ছাড়াই। Client শুধু বিজোড় সংখ্যা (1, 3, 5...) ব্যবহার করে, server শুধু জোড় (2, 4, 6...)। এটি একটি সরল কিন্তু কার্যকর কৌশল — distributed ID বণ্টনের একটি ধ্রুপদী সমাধান।</p></div>
+  </details>
+  <details class="qa"><summary>HTTP/2 ব্যবহার করলে JavaScript bundle করা কি বন্ধ করে দেওয়া উচিত?</summary>
+    <div class="ans"><p>সম্পূর্ণ নয়, কিন্তু ভারসাম্য বদলে যায়। HTTP/1.1-এ ৫০টি ফাইল মানে ছিল ৫০টি request-এর queue — তাই bundle অপরিহার্য ছিল। HTTP/2-তে সেই খরচ প্রায় নেই, এবং আলাদা ফাইল রাখলে <strong>cache invalidation অনেক ভালো</strong> হয় (একটি module বদলালে শুধু সেটিই আবার নামাতে হয়)। তবে অতিরিক্ত ছোট ফাইলে (শত শত) compression-এর কার্যকারিতা কমে এবং প্রতিটির নিজস্ব overhead থাকে। ব্যবহারিক পরামর্শ: যুক্তিসঙ্গত আকারের কয়েকটি chunk — চরম কোনোটিই নয়।</p></div>
+  </details>
+  <details class="qa"><summary>gRPC-তে L4 load balancer ব্যবহার করলে কী সমস্যা?</summary>
+    <div class="ans"><p>L4 load balancer <em>connection</em>-স্তরে বণ্টন করে। কিন্তু gRPC একটি long-lived HTTP/2 connection খুলে তার উপর হাজারো RPC পাঠায়। ফলে একটি client-এর সব request একটিই backend-এ যায় — load সম্পূর্ণ অসম হয়ে পড়ে, এবং নতুন backend যোগ করলেও পুরনো connection সেখানে যায় না। সমাধান: L7 (gRPC-সচেতন) proxy যেমন Envoy, বা client-side load balancing।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch43"><div class="d">পূর্ববর্তী</div><div class="t">Ch 43 — Crossing the Internet</div></a>
+    <a class="nx" href="#ch45"><div class="d">পরবর্তী</div><div class="t">Ch 45 — HTTP/3 and QUIC</div></a>
+  </div>
+</section>

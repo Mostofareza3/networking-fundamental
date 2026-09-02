@@ -1,0 +1,219 @@
+<section class="chapter" id="ch50">
+  <div class="ch-eyebrow">Chapter 50</div>
+  <h1>Final Knowledge Check</h1>
+  <p class="ch-lede">৪০টি scenario-ভিত্তিক প্রশ্ন। কোনোটিরই উত্তর মুখস্থ তথ্য নয় — প্রতিটির জন্য দরকার একটি mental model প্রয়োগ করা। প্রতিটি প্রশ্নে নিজে ভাবুন, তারপর উত্তর খুলুন।</p>
+
+  <div class="quiz-title">Part A — নির্ণয় ও সমস্যা সমাধান</div>
+
+  <details class="qa"><summary>১. আপনি <code>example.com</code>-কে একটি IP-তে resolve করতে পারছেন, কিন্তু <code>curl</code> timeout হয়ে যাচ্ছে। কোন কোন স্তর তদন্ত করবেন এবং কোন ক্রমে?</summary>
+    <div class="ans">
+      <p>Timeout মানে packet গেছে কিন্তু কিছু ফেরেনি — অর্থাৎ কেউ নীরবে ফেলে দিচ্ছে (DROP), REJECT করছে না।</p>
+      <ol>
+        <li><strong>L3:</strong> <code>ping</code> ও <code>traceroute &lt;IP&gt;</code> — কোথায় থামছে? (ICMP block থাকতে পারে, তাই নিশ্চায়ক নয়)</li>
+        <li><strong>L4:</strong> <code>nc -zv IP 443</code> — TCP handshake কি হচ্ছে?</li>
+        <li><strong>Packet:</strong> <code>tcpdump</code> — SYN যাচ্ছে? SYN-ACK আসছে? না এলে বুঝবেন প্রশ্নটি "কোথায় হারাচ্ছে"।</li>
+        <li><strong>Firewall:</strong> local (<code>iptables</code>), cloud security group, <strong>NACL</strong> (stateless — outbound নিয়মও লাগে)।</li>
+        <li><strong>Server-side:</strong> service কি চলছে? <code>0.0.0.0</code>-তে bind? Server-এ <code>tcpdump</code> চালিয়ে দেখুন SYN আদৌ পৌঁছাচ্ছে কিনা — এটিই নির্ণায়ক।</li>
+        <li><strong>MTU:</strong> handshake হয় কিন্তু বড় data আটকায়? PMTUD black hole।</li>
+      </ol>
+    </div>
+  </details>
+
+  <details class="qa"><summary>২. দুটি application port 3000-এ listen করতে চায়। কেন সাধারণত পারে না, এবং কোন ক্ষেত্রে পারে?</summary>
+    <div class="ans"><p>Kernel-এর socket lookup table-এ (protocol, IP, port) একটি অনন্য key — দুটি listener থাকলে আগত packet কাকে দেবে তা অনির্ধারিত। ব্যতিক্রম: (১) ভিন্ন protocol (TCP 3000 ও UDP 3000), (২) ভিন্ন IP (<code>127.0.0.1:3000</code> ও <code>192.168.1.5:3000</code>), (৩) <code>SO_REUSEPORT</code> — ইচ্ছাকৃত sharing, kernel load balance করে, (৪) ভিন্ন network namespace (container)।</p></div>
+  </details>
+
+  <details class="qa"><summary>৩. Ping কাজ করে কিন্তু HTTPS করে না। কী কী তদন্ত করবেন?</summary>
+    <div class="ans"><p>ping (ICMP, L3) সফল মানে host পৌঁছানো যায় এবং routing ঠিক। সমস্যা L4 বা তার উপরে: (১) port 443-এ কি কিছু শুনছে? <code>nc -zv host 443</code>; (২) firewall কি শুধু ICMP অনুমোদন করছে? (৩) TLS handshake ব্যর্থ? <code>openssl s_client</code>; (৪) certificate সমস্যা? (৫) Server চলছে কিন্তু overloaded? (৬) SNI-ভিত্তিক routing ভুল?</p></div>
+  </details>
+
+  <details class="qa"><summary>৪. একটি API কখনো কখনো ৫ সেকেন্ড ধীর, কখনো ৫০ms। কারণ কী হতে পারে?</summary>
+    <div class="ans"><p>ঠিক ৫ সেকেন্ডের ধরন খুবই ইঙ্গিতবাহী — এটি সাধারণত একটি <strong>timeout-এর মান</strong>, বিলম্ব নয়। সন্দেহ: (১) <strong>DNS-এ AAAA lookup timeout</strong> (IPv6 configure আছে কিন্তু কাজ করে না) — সবচেয়ে সম্ভাব্য; (২) একটি backend response দিচ্ছে না, ৫s timeout-এর পর অন্যটিতে retry; (৩) connection pool খালি, ৫s অপেক্ষা করে নতুন connection। যাচাই: <code>curl -w</code>-এর timing breakdown দেখুন — <code>time_namelookup</code>-এ ৫s হলে DNS নিশ্চিত।</p></div>
+  </details>
+
+  <details class="qa"><summary>৫. একটি service-এ <code>CLOSE_WAIT</code> socket-এর সংখ্যা ক্রমাগত বাড়ছে। কারণ ও প্রতিকার?</summary>
+    <div class="ans"><p>Peer FIN পাঠিয়েছে, kernel ACK করেছে, কিন্তু <strong>আপনার application <code>close()</code> call করেনি</strong>। এটি একটি file descriptor leak — code-এর bug, network-এর সমস্যা নয়। Kernel নিজে পরিষ্কার করতে পারে না। সাধারণ কারণ: exception path-এ connection বন্ধ না করা, connection pool-এ leak, <code>finally</code>/<code>defer</code> ছাড়া resource management। শেষ পরিণতি <code>EMFILE: too many open files</code>। → Ch 39</p></div>
+  </details>
+
+  <details class="qa"><summary>৬. Homepage দ্রুত খোলে কিন্তু একটি বড় file download সবসময় ৩০ সেকেন্ডে আটকে যায়। প্রথম সন্দেহ?</summary>
+    <div class="ans"><p><strong>PMTUD black hole</strong>। ছোট packet (handshake, ছোট response) MTU-র নিচে থাকায় নির্বিঘ্নে যায়। বড় data-র packet পথের কোনো সংকীর্ণ link-এ (VPN, tunnel) আটকায়, router সেগুলো ফেলে দেয়, কিন্তু ICMP "Fragmentation Needed" কোথাও block থাকায় sender কখনো জানতে পারে না — শুধু retransmit করতে থাকে। যাচাই: <code>ping -M do -s 1400</code>। সমাধান: MTU কমান বা ICMP type 3 code 4 অনুমোদন করুন। → Ch 5</p></div>
+  </details>
+
+  <details class="qa"><summary>৭. একই request browser-এ কাজ করে কিন্তু আপনার backend service থেকে "unable to verify certificate" দেয়।</summary>
+    <div class="ans"><p>Server <strong>অসম্পূর্ণ certificate chain</strong> পাঠাচ্ছে — intermediate certificate বাদ পড়েছে। Browser AIA extension দেখে অনুপস্থিত intermediate নিজে ডাউনলোড করে নেয়; curl, Java, Go, Python করে না। যাচাই: <code>openssl s_client -showcerts</code> — কতগুলো certificate আসছে (অন্তত ২টি হওয়া উচিত)। সমাধান: nginx-এ <code>fullchain.pem</code> ব্যবহার করুন। → Ch 33</p></div>
+  </details>
+
+  <details class="qa"><summary>৮. AWS-এ security group-এ port খোলা, service <code>0.0.0.0</code>-তে চলছে, তবু connection timeout। আর কী দেখবেন?</summary>
+    <div class="ans"><p><strong>Network ACL</strong> — এটি stateless, তাই inbound নিয়মের পাশাপাশি <em>outbound</em> নিয়মও দরকার (response-এর জন্য ephemeral port range 1024–65535)। এটি সবচেয়ে বেশি উপেক্ষিত। এছাড়া: route table-এ Internet Gateway আছে কি? Instance কি public subnet-এ? Public IP আছে? Host firewall (iptables/ufw)? সবশেষে instance-এ <code>tcpdump</code> চালিয়ে দেখুন SYN আসছে কিনা — এটিই সবচেয়ে নির্ণায়ক পরীক্ষা।</p></div>
+  </details>
+
+  <details class="qa"><summary>৯. <code>mtr</code>-এ ৪ নম্বর hop-এ ৩০% loss কিন্তু শেষ hop-এ ০%। উদ্বেগের কারণ আছে?</summary>
+    <div class="ans"><p>না। ওই router শুধু <em>নিজের উদ্দেশ্যে আসা</em> ICMP-র উত্তর rate limit করছে — একটি সাধারণ ও যুক্তিসঙ্গত নীতি। প্রকৃত packet loss হলে সেটি ওই hop থেকে <strong>শেষ পর্যন্ত সব hop-এ</strong> দেখাত, কারণ packet সেখানেই হারিয়ে যেত। মাঝের hop-এর loss উপেক্ষা করুন যদি শেষ hop পরিষ্কার থাকে। → Ch 38</p></div>
+  </details>
+
+  <details class="qa"><summary>১০. Deploy-এর পর কিছু ব্যবহারকারী পুরনো version দেখছেন, কিছু নতুন। ব্যাখ্যা করুন।</summary>
+    <div class="ans"><p>একাধিক স্তরের cache: (১) <strong>CDN edge</strong> — কিছু edge-এ এখনো পুরনো copy; (২) <strong>Browser cache</strong> — <code>max-age</code> শেষ হয়নি; (৩) <strong>DNS</strong> — কিছু ব্যবহারকারী পুরনো IP-তে যাচ্ছেন (blue-green deploy হলে); (৪) <strong>Rolling deployment</strong> — কিছু server এখনো পুরনো code চালাচ্ছে। প্রতিরোধ: content hash সহ ফাইলের নাম (Ch 46), HTML-এ <code>no-cache</code>, deploy-এর সাথে CDN purge, এবং backward-compatible API।</p></div>
+  </details>
+
+  <div class="quiz-title">Part B — ধারণাগত</div>
+
+  <details class="qa"><summary>১১. TCP handshake-এ তিনটি packet কেন প্রয়োজন?</summary>
+    <div class="ans"><p>দুই দিকেই ISN প্রতিষ্ঠা ও নিশ্চিত করতে। SYN-এ client-এর ISN যায়; SYN-ACK-এ server তা স্বীকার করে ও নিজেরটা পাঠায়; ACK-এ client server-এর ISN স্বীকার করে। দুটি packet-এ server নিশ্চিত হতে পারত না যে তার নিজের ISN পৌঁছেছে। → Ch 18</p></div>
+  </details>
+
+  <details class="qa"><summary>১২. TCP sequence number byte গোনে, packet নয় — কেন?</summary>
+    <div class="ans"><p>কারণ segment-এর আকার স্থির নয়: MTU বদলাতে পারে, এবং retransmission-এর সময় TCP ভিন্ন আকারে ভাগ করতে পারে (repacketization)। Byte-ভিত্তিক গণনা এই পুনর্বিন্যাসে অক্ষত থাকে; packet-ভিত্তিক হলে ভেঙে পড়ত। → Ch 17</p></div>
+  </details>
+
+  <details class="qa"><summary>১৩. Flow control এবং congestion control-এর মৌলিক পার্থক্য?</summary>
+    <div class="ans"><p>Flow control <strong>receiver</strong>-কে রক্ষা করে, সংকেত <strong>স্পষ্ট</strong> (receiver window ঘোষণা করে)। Congestion control <strong>network</strong>-কে রক্ষা করে, সংকেত <strong>অনুমাননির্ভর</strong> (loss বা delay দেখে sender নিজে সিদ্ধান্ত নেয়)। কার্যকর সীমা = min(rwnd, cwnd)। → Ch 20, 21</p></div>
+  </details>
+
+  <details class="qa"><summary>১৪. HTTP/2-তে multiplexing থাকা সত্ত্বেও একটি packet loss কেন সব stream আটকায়?</summary>
+    <div class="ans"><p>কারণ সব stream একটি TCP connection-এর উপর, এবং TCP নিচের স্তরে কঠোরভাবে ক্রম রক্ষা করে। TCP জানেই না ভেতরে একাধিক stream আছে — তার কাছে সবটাই একটি byte stream। একটি segment হারালে পরের সব byte আটকে যায়। QUIC transport layer-এই stream-এর ধারণা এনে এটি সমাধান করে। → Ch 30, 45</p></div>
+  </details>
+
+  <details class="qa"><summary>১৫. NAT-কে state রাখতে হয় কিন্তু সাধারণ router-কে হয় না — কেন?</summary>
+    <div class="ans"><p>সাধারণ router প্রতিটি packet স্বাধীনভাবে বিচার করে: destination IP দেখে table lookup, ব্যস। NAT-কে মনে রাখতে হয় কোন external port কোন internal (IP, port)-এ mapped — নাহলে ফেরত আসা packet কাকে দেবে তা জানা অসম্ভব। এই state memory খায়, timeout-এ মুছে যায় (তাই idle connection মরে), এবং router reboot হলে সব connection ভাঙে। → Ch 34</p></div>
+  </details>
+
+  <details class="qa"><summary>১৬. ARP request broadcast কিন্তু reply unicast — কেন?</summary>
+    <div class="ans"><p>জিজ্ঞাসাকারী জানে না কার কাছে জিজ্ঞেস করবে (সেটাই তো প্রশ্ন), তাই broadcast ছাড়া উপায় নেই। কিন্তু উত্তরদাতা ঠিক জানে কাকে উত্তর দিতে হবে, কারণ request-এর ভেতরেই sender-এর IP ও MAC আছে। তাই unicast যথেষ্ট এবং তাতে অপ্রয়োজনীয় network-শব্দ এড়ানো যায়। → Ch 8</p></div>
+  </details>
+
+  <details class="qa"><summary>১৭. TLS-এ certificate পাঠানোই যথেষ্ট নয় কেন?</summary>
+    <div class="ans"><p>Certificate public — যে কেউ ডাউনলোড করে নিজের বলে পাঠাতে পারে। প্রশ্ন হলো সে কি সংশ্লিষ্ট <em>private key</em>-র মালিক? <strong>CertificateVerify</strong> সেটি প্রমাণ করে: server তার private key দিয়ে এখন পর্যন্ত সব handshake message-এর signature তৈরি করে, যা কেবল প্রকৃত মালিকই পারে। → Ch 33</p></div>
+  </details>
+
+  <details class="qa"><summary>১৮. Forward secrecy না থাকলে কী ঝুঁকি?</summary>
+    <div class="ans"><p>আক্রমণকারী আজকের encrypted traffic রেকর্ড করে রাখতে পারে, এবং ভবিষ্যতে (হয়তো বছর পরে) server-এর private key চুরি করে <em>সব পুরনো traffic</em> decrypt করতে পারে। Forward secrecy (ECDHE)-তে প্রতিটি session-এর key আলাদা ও ephemeral, তাই private key চুরি হলেও পুরনো traffic নিরাপদ। TLS 1.3-এ এটি বাধ্যতামূলক। → Ch 32</p></div>
+  </details>
+
+  <details class="qa"><summary>১৯. DNS root server কি কখনো একটি website-এর IP জানে?</summary>
+    <div class="ans"><p>না। Root server শুধু TLD-দের nameserver জানে এবং সবসময় একটি referral দেয় — কখনো প্রকৃত উত্তর নয়। এই সীমিত দায়িত্বের কারণেই মাত্র ১৩টি root server "নাম" (anycast-এর কারণে বাস্তবে ১৫০০+ যন্ত্র) দিয়ে পুরো Internet চলে। → Ch 26</p></div>
+  </details>
+
+  <details class="qa"><summary>২০. Switch এবং router — কে broadcast domain ভাঙে?</summary>
+    <div class="ans"><p><strong>Router</strong>। Switch প্রতি port-এ আলাদা collision domain তৈরি করে কিন্তু broadcast frame সব port-এ পাঠায় — তাই সব port একই broadcast domain-এ। Router broadcast forward করে না, তাই প্রতিটি interface একটি আলাদা broadcast domain। এজন্যই ARP router পেরোয় না। → Ch 7</p></div>
+  </details>
+
+  <div class="quiz-title">Part C — নকশা ও সিদ্ধান্ত</div>
+
+  <details class="qa"><summary>২১. একটি real-time multiplayer game-এর জন্য TCP না UDP? যুক্তি দিন।</summary>
+    <div class="ans"><p>খেলোয়াড়ের অবস্থান/গতিবিধির জন্য <strong>UDP</strong> — কারণ ৫০ms পুরনো একটি update-এর কোনো মূল্য নেই, এবং TCP-র retransmission ও HOL blocking নতুন update গুলোকে আটকে রাখত (rubber-banding)। কিন্তু chat, inventory, লেনদেনের জন্য নির্ভরযোগ্যতা দরকার — সেগুলো TCP বা QUIC-এ। বাস্তবে আধুনিক game-রা প্রায়ই QUIC বা নিজস্ব UDP protocol ব্যবহার করে যেখানে বার্তা-ভেদে ভিন্ন reliability দেওয়া যায়। → Ch 23, 24</p></div>
+  </details>
+
+  <details class="qa"><summary>২২. ৫০০টি device-এর একটি অফিসে কোন subnet নকশা বেছে নেবেন?</summary>
+    <div class="ans"><p><code>/23</code> দিলে ৫১০টি host — গাণিতিকভাবে মানানসই। কিন্তু ভালো নকশা হলো <strong>বিভাগ অনুযায়ী একাধিক <code>/24</code></strong> এবং তাদের মাঝে router/VLAN: broadcast domain ছোট থাকে, নিরাপত্তা-নীতি প্রয়োগ করা যায় (guest Wi-Fi আলাদা, server আলাদা), এবং একটি সমস্যা সবাইকে প্রভাবিত করে না। → Ch 10</p></div>
+  </details>
+
+  <details class="qa"><summary>২৩. আপনার API-র ব্যবহারকারীরা তিনটি মহাদেশে। Latency কমাতে কী করবেন, অগ্রাধিকার অনুযায়ী?</summary>
+    <div class="ans"><p>(১) <strong>CDN/edge</strong> — static তো বটেই, dynamic API-র জন্যও (TLS handshake কাছে হওয়ায় বড় সাশ্রয়)। (২) <strong>Connection reuse</strong> — keep-alive, HTTP/2। (৩) <strong>Round trip কমানো</strong> — ধারাবাহিক call-এর waterfall ভাঙা, একটি aggregate endpoint। (৪) <strong>Multi-region deployment</strong> — read replica কাছে। (৫) HTTP/3। শেষে server-এর code optimization — কারণ সেখানে লাভ সবচেয়ে কম। → Ch 36, 43, 46</p></div>
+  </details>
+
+  <details class="qa"><summary>২৪. gRPC service-এর সামনে কোন load balancer এবং কেন?</summary>
+    <div class="ans"><p><strong>L7 (gRPC-সচেতন)</strong> — যেমন Envoy, বা client-side load balancing। L4 LB connection বণ্টন করে, কিন্তু gRPC একটি long-lived HTTP/2 connection-এ হাজারো RPC পাঠায় — ফলে একটি client-এর সব request একটিই backend-এ যায়, ভারসাম্য নষ্ট হয়, এবং নতুন backend যোগ করলেও traffic পায় না। → Ch 44, 47</p></div>
+  </details>
+
+  <details class="qa"><summary>২৫. Health check endpoint-এ কী কী পরীক্ষা করবেন এবং কী করবেন না?</summary>
+    <div class="ans"><p><strong>Liveness</strong>: শুধু "process সাড়া দিচ্ছে কি" — একটি সরল <code>200 OK</code>। <strong>কখনো dependency পরীক্ষা করবেন না</strong>, কারণ database সাময়িকভাবে ধীর হলে সব server একসাথে pool থেকে বেরিয়ে যাবে বা restart হবে — cascading failure। <strong>Readiness</strong>: dependency-র অবস্থা দেখতে পারেন, কিন্তু সেখানেও graceful degradation-এর কথা ভাবুন — dependency ছাড়াও যতটুকু সেবা সম্ভব ততটুকু দিন। → Ch 47</p></div>
+  </details>
+
+  <details class="qa"><summary>২৬. একটি static asset-এ কোন Cache-Control নীতি এবং কেন?</summary>
+    <div class="ans"><p>ফাইলের নামে content hash থাকলে: <code>Cache-Control: public, max-age=31536000, immutable</code> — এক বছর, যাচাইও করার দরকার নেই। কারণ content বদলালে নামই বদলে যায়, তাই পুরনো URL-এ ভুল content আসার সম্ভাবনা শূন্য। আর যে HTML এই নামগুলো উল্লেখ করে সেটিতে <code>no-cache</code> — সবসময় যাচাই, কিন্তু 304 হলে সস্তা। → Ch 46</p></div>
+  </details>
+
+  <details class="qa"><summary>২৭. একটি payment API-তে idempotency কীভাবে নিশ্চিত করবেন?</summary>
+    <div class="ans"><p>Client প্রতিটি নতুন লেনদেনের জন্য একটি অনন্য <code>Idempotency-Key</code> (UUID) তৈরি করে header-এ পাঠায়। Server সেই key ও ফলাফল সংরক্ষণ করে (একটি নির্দিষ্ট সময়ের জন্য)। একই key-তে দ্বিতীয় request এলে নতুন লেনদেন না করে <em>আগের ফলাফলটিই</em> ফেরত দেয়। এতে network timeout-এর পর নিরাপদে retry করা যায়। POST নিজে idempotent নয় বলেই এই ব্যবস্থা প্রয়োজন। → Ch 29</p></div>
+  </details>
+
+  <details class="qa"><summary>২৮. Internal microservice-এর মধ্যে TLS দরকার? "আমাদের private network তো"।</summary>
+    <div class="ans"><p>হ্যাঁ, দরকার। Local network কখনোই স্বতঃসিদ্ধভাবে বিশ্বস্ত নয়: ARP spoofing (Ch 8), MAC flooding (Ch 7), একটি compromised host, বা একটি ভুল configure করা VLAN — যেকোনোটিই traffic উন্মুক্ত করে দেয়। Zero-trust নীতি বলে: network-এর অবস্থান দিয়ে বিশ্বাস নির্ধারণ করবেন না। mTLS (দুই পক্ষেরই certificate) internal service-এর জন্য আদর্শ, এবং service mesh এটি স্বয়ংক্রিয় করে। → Ch 31</p></div>
+  </details>
+
+  <details class="qa"><summary>২৯. Server migration-এর আগে DNS TTL নিয়ে কী পরিকল্পনা?</summary>
+    <div class="ans"><p>(১) Migration-এর অন্তত <em>পুরনো TTL-এর সমান সময়</em> আগে TTL কমিয়ে ৩০০ বা ৬০ করুন (IP অপরিবর্তিত রেখে)। (২) পুরনো TTL-এর সমান সময় অপেক্ষা করুন যাতে সব cache নতুন কম TTL গ্রহণ করে। (৩) এবার IP বদলান — কয়েক মিনিটে ছড়াবে। (৪) পুরনো server কয়েক ঘণ্টা চালু রাখুন (কিছু client TTL উপেক্ষা করে)। (৫) স্থিতিশীল হলে TTL বাড়ান। → Ch 27</p></div>
+  </details>
+
+  <details class="qa"><summary>৩০. আপনার team "custom reliable UDP protocol" লিখতে চায়। কী প্রশ্ন করবেন?</summary>
+    <div class="ans"><p>(১) TCP বা QUIC ঠিক কোন জায়গায় যথেষ্ট নয় — সুনির্দিষ্টভাবে? (২) Congestion control কে লিখবে ও কীভাবে পরীক্ষা করা হবে? (এটি ছাড়া আপনার protocol network-এর প্রতি অন্যায্য ও ক্ষতিকর।) (৩) NAT traversal, MTU discovery, retransmission timing, security — এসব কে সামলাবে? (৪) QUIC কি ব্যবহার করা যায়, যেখানে এসব ইতিমধ্যে সমাধান করা? বেশিরভাগ ক্ষেত্রে উত্তর — QUIC ব্যবহার করুন। → Ch 24</p></div>
+  </details>
+
+  <div class="quiz-title">Part D — গভীর সংযোগ</div>
+
+  <details class="qa"><summary>৩১. Encapsulation-এর ধারণা ব্যবহার করে ব্যাখ্যা করুন কেন HTTP/3-এ যাওয়ার জন্য application code বদলাতে হয় না।</summary>
+    <div class="ans"><p>Layering-এর সংজ্ঞা অনুযায়ী প্রতিটি layer উপরেরটির কাছে একটি নির্দিষ্ট <em>service interface</em> দেয় এবং তার ভেতরের বাস্তবায়ন লুকিয়ে রাখে। HTTP-র semantics (method, header, status) transport-নিরপেক্ষ। HTTP/3 সেই একই semantics ধরে রেখে নিচের transport বদলে দিয়েছে (TCP → QUIC)। যেহেতু আপনার code শুধু HTTP-র interface ব্যবহার করে, নিচে কী আছে তা তার জানার দরকার নেই। এটিই separation of concerns-এর সবচেয়ে মূল্যবান সুফল — স্বাধীন বিবর্তন। → Ch 3, 45</p></div>
+  </details>
+
+  <details class="qa"><summary>৩২. "ARP cache-এর aging" এবং "DNS-এর TTL" — এই দুটি ধারণার মিল কোথায়?</summary>
+    <div class="ans"><p>দুটিই একই নকশা-নীতির প্রয়োগ: <strong>প্রয়োজনমতো শেখো, cache করো, এবং সময়ের সাথে ভুলে যাও</strong>। Cache কার্যক্ষমতা দেয়, কিন্তু পুরনো তথ্যে আটকে থাকার ঝুঁকি তৈরি করে। মেয়াদ নির্ধারণ করে সেই ঝুঁকি সীমিত করা হয় — ভুল তথ্য থেকে স্বয়ংক্রিয় পুনরুদ্ধারের ব্যবস্থা। Switch-এর MAC table aging, routing table, TLS session ticket, এমনকি HTTP cache — একই নীতি। → Ch 7, 8, 27</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৩. TCP-র backpressure এবং আপনার application-এর stream API-র সম্পর্ক ব্যাখ্যা করুন।</summary>
+    <div class="ans"><p>একটি অবিচ্ছিন্ন শৃঙ্খল: receiver-এর application ধীরে <code>read()</code> করছে → তার kernel buffer ভরছে → rwnd ছোট হয়ে ACK-এ ঘোষিত হচ্ছে → sender-এর kernel পাঠানো কমাচ্ছে → sender-এর send buffer ভরছে → <code>write()</code> block করছে বা <code>false</code> ফেরত দিচ্ছে → Node.js-এ <code>'drain'</code>-এর অপেক্ষা। অর্থাৎ receiver-এর ধীরগতি network পেরিয়ে sender-এর application পর্যন্ত পৌঁছাচ্ছে। এটি উপেক্ষা করলে data application-এর heap-এ জমে (আপাত memory leak)। → Ch 16, 20</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৪. "Delegation" নীতিটি এই বইয়ের কোন কোন জায়গায় ফিরে এসেছে?</summary>
+    <div class="ans"><p>অন্তত পাঁচ জায়গায়: (১) <strong>Default gateway</strong> — "যা জানি না তা gateway-কে দাও" (Ch 11)। (২) <strong>Routing</strong> — প্রতিটি router শুধু next hop জানে, পুরো পথ নয় (Ch 12)। (৩) <strong>DNS hierarchy</strong> — root → TLD → authoritative, প্রত্যেকে "পরে ওকে জিজ্ঞেস করো" (Ch 26)। (৪) <strong>BGP</strong> — ISP তার upstream-কে (Ch 42)। (৫) <strong>Certificate chain</strong> — root → intermediate → leaf (Ch 32)। প্রতিটি ক্ষেত্রেই কেউ সবকিছু জানে না, এবং সেটিই ব্যবস্থাটিকে scalable করে।</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৫. Head-of-line blocking কোন কোন স্তরে দেখা যায় এবং কীভাবে সমাধান হয়েছে?</summary>
+    <div class="ans"><p><strong>HTTP/1.1-এ application-স্তরে</strong> — একটি connection-এ একবারে একটি request; সমাধান HTTP/2-র multiplexing। <strong>TCP-স্তরে</strong> — একটি segment হারালে পরের সব byte আটকে; HTTP/2-তে এটি আরও তীব্র হয় (সব stream আটকায়); সমাধান QUIC-এর stream-প্রতি স্বাধীন reliability। এটি একটি চমৎকার উদাহরণ যে <strong>একটি layer-এর সমস্যা কখনো কখনো সেই layer-এ সমাধান করা যায় না</strong> — নিচের layer বদলাতে হয়। → Ch 19, 30, 45</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৬. "State রাখা" কোথায় কোথায় সমস্যা তৈরি করে?</summary>
+    <div class="ans"><p>(১) <strong>NAT</strong> — mapping-এর state timeout-এ মরে, তাই idle connection ভাঙে; router reboot-এ সব হারায় (Ch 34)। (২) <strong>Stateful firewall</strong> — একই সমস্যা। (৩) <strong>Sticky session</strong> — load অসম, server মরলে session হারায় (Ch 47)। (৪) <strong>TIME_WAIT</strong> — port আটকে থাকে (Ch 22)। বিপরীতে IP-র statelessness (Ch 12) এবং HTTP-র statelessness (Ch 28) — এই দুটিই তাদের নিজ নিজ স্তরকে অসাধারণভাবে scalable করেছে।</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৭. একটি packet-এর যাত্রায় কোন কোন "নাম/ঠিকানা" ব্যবস্থা জড়িত, এবং প্রতিটির পরিধি কত?</summary>
+    <div class="ans"><p><strong>Domain name</strong> — মানুষের জন্য, global, DNS দিয়ে IP-তে অনুবাদ। <strong>IP address</strong> — end-to-end, পুরো যাত্রায় অপরিবর্তিত (NAT ছাড়া)। <strong>MAC address</strong> — এক hop, প্রতিটি link-এ নতুন। <strong>Port</strong> — একটি host-এর ভেতরে process নির্বাচন। <strong>4-tuple</strong> — একটি নির্দিষ্ট connection-এর পরিচয়। <strong>TLS session</strong> — দুটি application-এর মধ্যে নিরাপদ চ্যানেল। প্রতিটির পরিধি বোঝাই networking বোঝার মূল।</p></div>
+  </details>
+
+  <details class="qa"><summary>৩৮. একটি ৫ KB JSON API response ধীর। কোন কোন সম্ভাবনা, অগ্রাধিকার অনুযায়ী?</summary>
+    <div class="ans"><p>৫ KB-তে bandwidth কোনো বিষয়ই নয় — এটি স্পষ্টভাবে latency বা server-bound। ক্রম অনুযায়ী: (১) <code>curl -w</code> দিয়ে ভাগ করুন — DNS? TCP? TLS? TTFB? (২) নতুন connection প্রতিবার? → keep-alive; (৩) দূরত্ব? → CDN/edge; (৪) TTFB বড়? → server-side (database query, N+1, cache miss); (৫) ধারাবাহিক downstream call? → সমান্তরাল করুন। <strong>মাপার আগে optimize করবেন না।</strong></p></div>
+  </details>
+
+  <details class="qa"><summary>৩৯. আপনি একটি নতুন junior developer-কে networking-এর সবচেয়ে গুরুত্বপূর্ণ তিনটি ধারণা শেখাতে চান। কোনগুলো?</summary>
+    <div class="ans"><p>একটি যুক্তিসঙ্গত উত্তর: (১) <strong>Layering ও encapsulation</strong> — প্রতিটি layer একটি সমস্যা সমাধান করে এবং উপরেরটির data-কে অস্বচ্ছ payload হিসেবে দেখে; এটি বাকি সব কিছুর কাঠামো। (২) <strong>MAC = এক hop, IP = end-to-end, port = process</strong> — পরিচয়ের পরিধি। (৩) <strong>Error message-এর অর্থ</strong> — refused (পৌঁছেছে, listener নেই) বনাম timeout (নীরবে হারাচ্ছে) বনাম unreachable (আমার routing table); এটি প্রতিদিনের কাজে সবচেয়ে বেশি ব্যবহৃত।</p></div>
+  </details>
+
+  <details class="qa"><summary>৪০. <code>GET https://api.example.com/users</code> — এই এক লাইন দেখে আপনি এখন কী কী দেখতে পান?</summary>
+    <div class="ans">
+      <p>সম্পূর্ণ যাত্রাটি:</p>
+      <div class="cb diagram"><pre>URL parse → HSTS check
+  ↓
+DNS: browser cache → OS → resolver → root → TLD → auth
+  ↓
+IP পাওয়া গেল → routing: local? না → gateway
+  ↓
+ARP: gateway-এর MAC (গন্তব্যের নয়)
+  ↓
+socket() → ephemeral port → 4-tuple নির্ধারিত
+  ↓
+TCP handshake (1 RTT) — MSS, window scale, SACK
+  ↓
+TLS handshake (1 RTT) — SNI, certificate, chain যাচাই,
+                        ECDHE, session key
+  ↓
+HTTP request → TLS encrypt → TCP segment → IP packet
+             → Ethernet frame → bits
+  ↓
+NAT (src IP+port বদল) → ISP → BGP → cable → data center
+   প্রতি hop: নতুন MAC, TTL−1, IP অপরিবর্তিত
+  ↓
+LB → switch → NIC → kernel → 4-tuple → socket buffer
+  ↓
+nginx read() → TLS decrypt → HTTP parse → app → database
+  ↓
+Response → পুরো পথ উল্টো → sequence অনুযায়ী পুনর্বিন্যাস
+  ↓
+আপনার await সম্পন্ন হলো</pre></div>
+      <p>এবং প্রতিটি ধাপের জন্য আপনি এখন বলতে পারেন — <strong>এখানে কী হচ্ছে, কেন হচ্ছে, এবং কোন component এটি করছে।</strong> সেটাই ছিল এই বইয়ের লক্ষ্য।</p>
+    </div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch49"><div class="d">পূর্ববর্তী</div><div class="t">Ch 49 — Developer Mental Models</div></a>
+    <a class="nx" href="#cheatsheet"><div class="d">পরবর্তী</div><div class="t">Cheat Sheet</div></a>
+  </div>
+</section>

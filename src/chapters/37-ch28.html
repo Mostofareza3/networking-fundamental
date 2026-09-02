@@ -1,0 +1,261 @@
+<section class="chapter" id="ch28">
+  <div class="ch-eyebrow">Chapter 28</div>
+  <h1>HTTP Fundamentals</h1>
+  <p class="ch-lede">HTTP-র সবচেয়ে বিস্ময়কর দিক হলো এর সরলতা। পৃথিবীর প্রায় সমস্ত application traffic যে protocol-এ চলে, সেটি মূলত কয়েক লাইন text — যা আপনি নিজের হাতে লিখতে পারেন।</p>
+
+  <h2>28.1 Why does this exist?</h2>
+  <p>TCP আপনাকে একটি নির্ভরযোগ্য byte stream দিয়েছে। কিন্তু এখন দুটি program-কে ঠিক করতে হবে:</p>
+  <ul>
+    <li>একটি request কোথায় শুরু, কোথায় শেষ? (framing)</li>
+    <li>Client কী চাইছে তা কীভাবে বলবে?</li>
+    <li>Server সফল হয়েছে না ব্যর্থ, তা কীভাবে জানাবে?</li>
+    <li>Data-র ধরন (JSON? HTML? ছবি?) কীভাবে বোঝাবে?</li>
+    <li>Authentication, caching, compression — এসব কীভাবে আলোচনা করবে?</li>
+  </ul>
+
+  <div class="box why">
+    <div class="bt">💡 Why HTTP</div>
+    <p>HTTP এই সব প্রশ্নের একটি সাধারণ, text-ভিত্তিক উত্তর দেয়। এর সাফল্যের মূল কারণ তিনটি নকশাগত সিদ্ধান্ত:</p>
+    <ol>
+      <li><strong>সরল ও মানুষ-পাঠযোগ্য</strong> — telnet দিয়ে হাতে টাইপ করা যায়, তাই শেখা ও debug করা সহজ।</li>
+      <li><strong>Stateless</strong> — প্রতিটি request স্বয়ংসম্পূর্ণ। Server-কে আগের request মনে রাখতে হয় না, তাই load balancing ও horizontal scaling সহজ।</li>
+      <li><strong>সম্প্রসারণযোগ্য</strong> — নতুন header, নতুন method, নতুন status code যোগ করা যায় পুরনো client ভাঙা ছাড়াই।</li>
+    </ol>
+  </div>
+
+  <h2>28.2 Request-এর গঠন</h2>
+
+  <div class="cb"><span class="cb-lang">http</span><pre>GET /api/users/123?fields=name,email HTTP/1.1
+Host: api.example.com
+User-Agent: curl/8.4.0
+Accept: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Accept-Encoding: gzip, deflate
+
+</pre></div>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ REQUEST LINE                                         │
+│   GET /api/users/123?fields=name,email HTTP/1.1      │
+│    │              │                          │       │
+│  method         path + query              version    │
+├──────────────────────────────────────────────────────┤
+│ HEADERS (প্রতিটি "Name: value", CRLF দিয়ে শেষ)         │
+│   Host: api.example.com          ★ HTTP/1.1-এ বাধ্যতামূলক│
+│   Accept: application/json                           │
+│   Authorization: Bearer ...                          │
+├──────────────────────────────────────────────────────┤
+│ ফাঁকা লাইন (CRLF) ← header শেষের সংকেত                 │
+├──────────────────────────────────────────────────────┤
+│ BODY (ঐচ্ছিক — GET-এ সাধারণত থাকে না)                  │
+└──────────────────────────────────────────────────────┘
+
+লাইনের শেষে থাকে \r\n (CRLF), শুধু \n নয়।</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ <code>Host</code> header কেন বাধ্যতামূলক</div>
+    <p>HTTP/1.0-তে <code>Host</code> ছিল না — কারণ ধরে নেওয়া হতো একটি IP মানে একটি website। কিন্তু আজ একটি server-এ শত শত site চলে (virtual hosting)।</p>
+    <div class="cb diagram"><pre>203.0.113.50 এই একটি IP-তে:
+    example.com
+    myblog.com
+    shop.example.org
+
+TCP connection-এ শুধু IP আছে, নাম নেই।
+Server কীভাবে জানবে কোন site চাওয়া হচ্ছে?
+
+    → Host header।</pre></div>
+    <p>এজন্যই <code>Host</code> ছাড়া HTTP/1.1 request পাঠালে server <code>400 Bad Request</code> দেয়। HTTP/2-তে এটি <code>:authority</code> pseudo-header হিসেবে এসেছে, এবং HTTPS-এ TLS-এর SNI extension একই কাজ করে encryption শুরুর আগে (Ch 33)।</p>
+  </div>
+
+  <h2>28.3 Response-এর গঠন</h2>
+
+  <div class="cb"><span class="cb-lang">http</span><pre>HTTP/1.1 200 OK
+Date: Wed, 02 Sep 2026 14:30:00 GMT
+Content-Type: application/json; charset=utf-8
+Content-Length: 87
+Cache-Control: max-age=300
+ETag: "a1b2c3d4"
+Server: nginx/1.24.0
+
+{"id":123,"name":"রেজা","email":"reza@example.com","created":"2026-01-15"}</pre></div>
+
+  <div class="cb diagram"><pre>┌──────────────────────────────────────────────────────┐
+│ STATUS LINE                                          │
+│   HTTP/1.1 200 OK                                    │
+│      │      │   │                                    │
+│   version  code  reason phrase (মানুষের জন্য)          │
+├──────────────────────────────────────────────────────┤
+│ HEADERS                                              │
+│   Content-Type: application/json   ← ভেতরে কী আছে      │
+│   Content-Length: 87               ← কত bytes         │
+│   Cache-Control: max-age=300       ← কতক্ষণ cache      │
+├──────────────────────────────────────────────────────┤
+│ ফাঁকা লাইন                                            │
+├──────────────────────────────────────────────────────┤
+│ BODY                                                 │
+│   {"id":123,...}                                     │
+└──────────────────────────────────────────────────────┘</pre></div>
+
+  <h2>28.4 Message Framing — HTTP কীভাবে TCP-র byte stream-কে ভাগ করে</h2>
+
+  <p>Chapter 4-এ আমরা দেখেছি TCP একটি byte stream — message-এর কোনো সীমানা নেই। তাহলে HTTP কীভাবে জানে একটি response কোথায় শেষ?</p>
+
+  <div class="cb diagram"><pre>তিনটি পদ্ধতি:
+
+১. Content-Length (সবচেয়ে সাধারণ)
+   Content-Length: 87
+   → "header-এর পরে ঠিক ৮৭ bytes পড়ো, তারপর শেষ"
+   ✓ সরল    ✗ আগে থেকে আকার জানতে হবে
+
+২. Transfer-Encoding: chunked
+   Transfer-Encoding: chunked
+
+   1a\r\n              ← এই chunk-এ 0x1a = 26 bytes
+   {"partial":"data..."}\r\n
+   f\r\n               ← পরের chunk 15 bytes
+   more content\r\n
+   0\r\n               ← 0 মানে শেষ
+   \r\n
+
+   ✓ আকার আগে জানার দরকার নেই — streaming সম্ভব
+   ✓ Server তৈরি হতে হতেই পাঠাতে পারে
+   এজন্যই streaming API, SSE, বড় generated response
+   এতে ব্যবহার হয়।
+
+৩. Connection close (HTTP/1.0-র পদ্ধতি)
+   Connection: close
+   → "connection বন্ধ হওয়া মানেই response শেষ"
+   ✗ প্রতিটি response-এ নতুন connection — অত্যন্ত অদক্ষ</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — কেন এটি জানা দরকার</div>
+    <p>"আমার API response কেটে যাচ্ছে" বা "client hang করে আছে" — এই সমস্যাগুলোর মূল প্রায়ই framing-এ:</p>
+    <ul>
+      <li><code>Content-Length</code> প্রকৃত body-র চেয়ে বড় → client বাকি bytes-এর জন্য অপেক্ষা করতে থাকে → timeout।</li>
+      <li><code>Content-Length</code> ছোট → response কেটে যায়, বা পরের response-এর সাথে মিশে যায়।</li>
+      <li>Proxy যদি response পরিবর্তন করে (compression, injection) কিন্তু <code>Content-Length</code> update না করে → একই সমস্যা।</li>
+      <li><strong>HTTP Request Smuggling</strong> — একটি নিরাপত্তা-দুর্বলতা যেখানে <code>Content-Length</code> ও <code>Transfer-Encoding</code> দুটোই থাকে এবং frontend ও backend ভিন্নভাবে ব্যাখ্যা করে। এজন্যই আধুনিক server দুটো একসাথে থাকলে request প্রত্যাখ্যান করে।</li>
+    </ul>
+  </div>
+
+  <h2>28.5 URL-এর গঠন</h2>
+
+  <div class="cb diagram"><pre>https://user:pass@api.example.com:8443/v1/users?limit=10&sort=name#top
+└─┬─┘   └───┬───┘ └──────┬───────┘ └┬─┘└───┬───┘└──────┬───────┘└┬─┘
+scheme   userinfo      host        port   path       query    fragment
+                                                                  │
+                                              ★ কখনো server-এ পাঠানো হয় না!
+                                                শুধু browser ব্যবহার করে
+
+প্রতিটি অংশ কে ব্যবহার করে:
+
+  scheme   → কোন protocol, default port (http=80, https=443)
+  host     → ★ DNS resolution ★ এবং Host header
+  port     → TCP connect
+  path     → request line-এ যায়, server routing-এ ব্যবহৃত
+  query    → path-এর সাথে যায়, application parse করে
+  fragment → শুধু browser-এর ভেতরে (scroll position, SPA route)</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ Fragment কখনো তারে যায় না</div>
+    <p><code>#</code>-এর পরের অংশ HTTP request-এ অন্তর্ভুক্ত হয় না। <code>https://example.com/docs#section-3</code>-এ server শুধু <code>/docs</code> দেখে; <code>#section-3</code> সম্পূর্ণভাবে browser-এর ব্যাপার। এজন্যই server-এর log-এ fragment কখনো দেখবেন না, এবং এজন্যই পুরনো SPA-রা routing-এর জন্য hash ব্যবহার করত — server-এ কোনো পরিবর্তন ছাড়াই client-side navigation সম্ভব হতো।</p>
+  </div>
+
+  <h2>28.6 গুরুত্বপূর্ণ header গুলো</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Header</th><th>দিক</th><th>কাজ</th></tr></thead>
+    <tbody>
+      <tr><td><code>Host</code></td><td>Request</td><td>কোন virtual host — HTTP/1.1-এ বাধ্যতামূলক</td></tr>
+      <tr><td><code>Content-Type</code></td><td>উভয়</td><td>Body-র MIME type (<code>application/json</code>)</td></tr>
+      <tr><td><code>Content-Length</code></td><td>উভয়</td><td>Body-র আকার bytes-এ</td></tr>
+      <tr><td><code>Accept</code></td><td>Request</td><td>"আমি এই format গুলো নিতে পারি"</td></tr>
+      <tr><td><code>Accept-Encoding</code></td><td>Request</td><td>"gzip, br — compression চলবে"</td></tr>
+      <tr><td><code>Content-Encoding</code></td><td>Response</td><td>"এই body gzip করা"</td></tr>
+      <tr><td><code>Authorization</code></td><td>Request</td><td>Credential (<code>Bearer &lt;token&gt;</code>)</td></tr>
+      <tr><td><code>Cookie</code> / <code>Set-Cookie</code></td><td>Req/Res</td><td>State ধরে রাখা (stateless protocol-এ state-এর কৌশল)</td></tr>
+      <tr><td><code>Cache-Control</code></td><td>উভয়</td><td>Caching নীতি (<code>max-age</code>, <code>no-store</code>)</td></tr>
+      <tr><td><code>ETag</code> / <code>If-None-Match</code></td><td>Res/Req</td><td>Conditional request → 304</td></tr>
+      <tr><td><code>Location</code></td><td>Response</td><td>Redirect-এর গন্তব্য (3xx-এর সাথে)</td></tr>
+      <tr><td><code>X-Forwarded-For</code></td><td>Request</td><td>Proxy-র পেছনের প্রকৃত client IP</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>28.7 HTTP-র statelessness এবং cookie</h2>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>HTTP <strong>stateless</strong> — server-কে কিছু মনে রাখতে হয় না। প্রতিটি request স্বয়ংসম্পূর্ণ।</p>
+    <p>কিন্তু বাস্তবে login, shopping cart, session — সবই state। সমাধান: <strong>state-টি প্রতিটি request-এর সাথে পাঠিয়ে দাও।</strong></p>
+    <div class="cb diagram"><pre>Request 1:  POST /login {user, pass}
+Response 1: 200 OK
+            Set-Cookie: session=abc123; HttpOnly; Secure; SameSite=Lax
+
+Request 2:  GET /profile
+            Cookie: session=abc123      ← client নিজেই পাঠাচ্ছে
+Response 2: 200 OK {profile data}
+
+Request 3:  GET /orders
+            Cookie: session=abc123      ← আবার পাঠাচ্ছে
+
+★ Server প্রতিটি request-এ নতুন করে session=abc123
+  দেখে সিদ্ধান্ত নেয়। সে "মনে রাখেনি" — তাকে
+  প্রতিবার বলে দেওয়া হচ্ছে।</pre></div>
+    <p>এই নকশার সুবিধা বিশাল: যেকোনো server যেকোনো request handle করতে পারে, তাই load balancing তুচ্ছ ব্যাপার। JWT-ভিত্তিক authentication এই ধারণাটিকে আরও এগিয়ে নেয় — token-এর ভেতরেই সব তথ্য থাকে, তাই server-এ কোনো session store-ও লাগে না।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 28 — হাতে HTTP লিখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — HTTP যে সত্যিই কয়েক লাইন text, তা নিজের হাতে টাইপ করে প্রমাণ করা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># netcat দিয়ে হাতে একটি HTTP request
+printf 'GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n' \
+  | nc example.com 80
+
+# বা interactive ভাবে (টাইপ করে দুবার Enter দিন)
+nc example.com 80
+GET / HTTP/1.1
+Host: example.com
+
+# curl-এ সবকিছু দেখুন
+curl -v http://example.com 2>&1 | head -30
+#   > দিয়ে শুরু = আপনার পাঠানো
+#   < দিয়ে শুরু = server-এর উত্তর
+
+# Host header ছাড়া কী হয়?
+printf 'GET / HTTP/1.1\r\n\r\n' | nc example.com 80</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> আপনার হাতে টাইপ করা তিনটি লাইনের বিনিময়ে একটি সম্পূর্ণ HTML page ফেরত আসছে। <code>Host</code> ছাড়া পাঠালে <code>400 Bad Request</code> পাবেন — HTTP/1.1-এর নিয়ম। curl-এর <code>-v</code>-তে <code>&gt;</code> এবং <code>&lt;</code> দিয়ে দুই দিকের প্রতিটি লাইন আলাদা করে দেখা যায়।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> HTTP কোনো রহস্যময় binary protocol নয় — এটি কয়েক লাইন text, যা মানুষ পড়তে ও লিখতে পারে। এই সরলতাই HTTP-র বিশ্বজয়ের একটি বড় কারণ, এবং এজন্যই HTTP debug করা তুলনামূলকভাবে সহজ।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>HTTP request = request line + headers + ফাঁকা লাইন + (ঐচ্ছিক) body।</li>
+      <li>Response = status line + headers + ফাঁকা লাইন + body।</li>
+      <li><code>Host</code> header HTTP/1.1-এ বাধ্যতামূলক — virtual hosting-এর জন্য অপরিহার্য।</li>
+      <li>Framing-এর তিনটি উপায়: <code>Content-Length</code>, <code>chunked</code>, বা connection close।</li>
+      <li>URL-এর fragment (<code>#...</code>) কখনো server-এ যায় না।</li>
+      <li>HTTP stateless; cookie/token দিয়ে state প্রতিটি request-এ বহন করা হয়।</li>
+      <li>এই statelessness-ই horizontal scaling ও load balancing-কে সহজ করেছে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary><code>Host</code> header ছাড়া HTTP/1.1 request পাঠালে কী হয় এবং কেন?</summary>
+    <div class="ans"><p>Server <code>400 Bad Request</code> দেয়। কারণ একটি IP address-এ শত শত website চলতে পারে (virtual hosting), এবং TCP connection-এ শুধু IP আছে, কোনো নাম নেই। <code>Host</code> header ছাড়া server জানতেই পারে না কোন site-এর জন্য request এসেছে। HTTP/1.0-তে এটি ঐচ্ছিক ছিল, কারণ তখন এক IP মানে এক site ধরে নেওয়া হতো।</p></div>
+  </details>
+  <details class="qa"><summary>Chunked transfer encoding কখন <code>Content-Length</code>-এর চেয়ে ভালো?</summary>
+    <div class="ans"><p>যখন response-এর আকার আগে থেকে জানা নেই — যেমন database থেকে stream করা বড় result, real-time generated content, বা server-sent events। <code>Content-Length</code> ব্যবহার করতে হলে পুরো response তৈরি করে memory-তে রাখতে হতো আকার জানার জন্য। Chunked-এ server তৈরি হতে হতেই পাঠাতে পারে — কম memory, দ্রুত first byte।</p></div>
+  </details>
+  <details class="qa"><summary>URL-এর <code>#section-2</code> অংশটি কি server-এর log-এ দেখা যাবে?</summary>
+    <div class="ans"><p>না। Fragment (<code>#</code>-এর পরের অংশ) কখনো HTTP request-এ অন্তর্ভুক্ত হয় না — এটি সম্পূর্ণভাবে client-side। Browser এটি ব্যবহার করে page-এর ভেতরে scroll করতে বা SPA-র রুটিং-এ। Server শুধু path ও query দেখে।</p></div>
+  </details>
+  <details class="qa"><summary>HTTP stateless হলে login কীভাবে কাজ করে?</summary>
+    <div class="ans"><p>State টি client-এর কাছে রাখা হয় এবং প্রতিটি request-এর সাথে পাঠানো হয় — সাধারণত cookie-তে একটি session ID, বা <code>Authorization</code> header-এ একটি token। Server প্রতিবার সেটি দেখে সিদ্ধান্ত নেয়; সে আগের request "মনে রাখে" না। এই নকশার সুবিধা: যেকোনো server যেকোনো request handle করতে পারে, তাই load balancing ও scaling সহজ।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch27"><div class="d">পূর্ববর্তী</div><div class="t">Ch 27 — DNS Caching</div></a>
+    <a class="nx" href="#ch29"><div class="d">পরবর্তী</div><div class="t">Ch 29 — Methods &amp; Status Codes</div></a>
+  </div>
+</section>

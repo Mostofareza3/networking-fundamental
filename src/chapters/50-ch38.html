@@ -1,0 +1,194 @@
+<section class="chapter" id="ch38">
+  <div class="ch-eyebrow">Chapter 38</div>
+  <h1>Packet Loss এবং Jitter</h1>
+  <p class="ch-lede">০.১% packet loss শুনতে নগণ্য মনে হয়। কিন্তু TCP-র জন্য এটি throughput অর্ধেক করে দিতে পারে। আর jitter — যা গড় latency-তে ধরাই পড়ে না — real-time application ধ্বংস করে দেয়।</p>
+
+  <h2>38.1 Packet Loss</h2>
+
+  <div class="cb diagram"><pre>কেন packet হারায়:
+
+  ১. Queue overflow (সবচেয়ে সাধারণ)
+     Router-এর buffer ভরা → নতুন packet ফেলে দাও
+
+  ২. Bit error
+     Wireless-এ interference, খারাপ cable
+     → checksum ব্যর্থ → frame ফেলে দাও
+
+  ৩. Firewall / policy
+     ইচ্ছাকৃতভাবে DROP
+
+  ৪. Routing সমস্যা
+     Loop → TTL শেষ; বা কোনো route নেই
+
+  ৫. Hardware সমস্যা
+     ত্রুটিপূর্ণ NIC, port, বা transceiver</pre></div>
+
+  <h3>Loss-এর অসমানুপাতিক প্রভাব</h3>
+
+  <div class="cb diagram"><pre>একটি loss হলে TCP যা করে:
+
+  1. শনাক্ত করতে সময় (3 dup ACK বা RTO)
+  2. Retransmit — আরও ১ RTT
+  3. ★ cwnd অর্ধেক ★ — throughput তাৎক্ষণিকভাবে অর্ধেক
+  4. ধীরে ধীরে আবার বাড়ানো (linear, +1 MSS/RTT)
+
+একটি আনুমানিক সূত্র (Mathis equation):
+
+           MSS
+  BW ≈ ─────────────
+        RTT × √loss
+
+উদাহরণ: MSS 1460, RTT 100ms
+
+  loss 0.001% → ~117 Mbps
+  loss 0.01%  →  ~37 Mbps
+  loss 0.1%   →  ~12 Mbps    ★ ১০ গুণ কম!
+  loss 1%     →   ~1.2 Mbps
+
+★ Loss ১০ গুণ বাড়লে throughput ~৩ গুণ কমে
+  (√ এর কারণে)। কিন্তু এমনকি ০.১%-ও নাটকীয়।
+
+আর RTT বাড়লে প্রভাব আরও খারাপ — এজন্যই
+দীর্ঘ পথে loss বিশেষভাবে ধ্বংসাত্মক।</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Wireless-এ TCP-র ভুল অনুমান</div>
+    <p>TCP ধরে নেয় loss = congestion (Ch 21)। কিন্তু Wi-Fi বা mobile-এ loss হয় radio interference থেকে — congestion-এর সাথে কোনো সম্পর্ক নেই। তবু TCP গতি অর্ধেক করে দেয়, যদিও bandwidth মুক্তই ছিল।</p>
+    <p>এজন্যই: (১) BBR-এর মতো algorithm loss-এর বদলে bandwidth ও RTT মাপে; (২) Wi-Fi ও cellular নিজেরাই link-layer retransmission করে যাতে loss TCP পর্যন্ত না পৌঁছায় (কিন্তু এতে latency ও jitter বাড়ে — একটি ট্রেড-অফ)।</p>
+  </div>
+
+  <h2>38.2 Jitter</h2>
+
+  <div class="cb diagram"><pre>Jitter = latency-র ★ওঠানামা★
+
+দুটি সংযোগ, একই গড় latency 50ms:
+
+  A (স্থিতিশীল):
+    50, 51, 49, 50, 52, 48, 50, 51 ms
+    → jitter কম (~1ms)
+
+  B (অস্থির):
+    20, 95, 35, 80, 15, 100, 40, 60 ms
+    → গড় 55ms, কিন্তু jitter বিশাল (~30ms)
+
+★ গড় প্রায় একই, কিন্তু ব্যবহারকারীর অভিজ্ঞতা
+  সম্পূর্ণ ভিন্ন।
+
+ping-এ দেখা যায় mdev হিসেবে:
+  rtt min/avg/max/mdev = 20/55/100/28.4 ms
+                                     ↑ jitter</pre></div>
+
+  <h3>কেন real-time application-এ jitter মারাত্মক</h3>
+
+  <div class="cb diagram"><pre>একটি ভিডিও কল, প্রতি 20ms-এ একটি audio packet:
+
+স্থির latency (jitter নেই):
+  packet পৌঁছাল: 50, 70, 90, 110, 130 ms
+  → নিখুঁত ২০ms ব্যবধান
+  → সরাসরি বাজানো যায়
+
+উচ্চ jitter:
+  packet পৌঁছাল: 50, 130, 60, 140, 55 ms
+  → ব্যবধান: 80, -70, 80, -85 ms
+  → ★ উল্টো ক্রম, ফাঁক, ঝাঁকুনি ★
+  → সরাসরি বাজালে শব্দ ভেঙে যাবে
+
+সমাধান — JITTER BUFFER:
+  কিছু packet জমিয়ে রাখো, তারপর ★স্থির গতিতে★ বাজাও
+
+  ┌──────────────────────────────────┐
+  │ packet জমছে │ স্থির গতিতে বাজছে →  │
+  └──────────────────────────────────┘
+       (60ms buffer)
+
+  ★ ট্রেড-অফ ★
+    বড় buffer  → jitter ভালোভাবে সামলায়,
+                  কিন্তু বেশি latency (কথোপকথন অস্বস্তিকর)
+    ছোট buffer → কম latency, কিন্তু packet দেরিতে এলে
+                  শব্দ ভেঙে যায়
+
+  আধুনিক codec ও application adaptive jitter buffer
+  ব্যবহার করে — পরিস্থিতি অনুযায়ী আকার বদলায়।</pre></div>
+
+  <h2>38.3 কোন application কীসে সংবেদনশীল</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Application</th><th>Latency</th><th>Jitter</th><th>Loss</th><th>Bandwidth</th></tr></thead>
+    <tbody>
+      <tr><td>Voice call</td><td>উচ্চ</td><td><strong>খুব উচ্চ</strong></td><td>মাঝারি (কিছু চলে)</td><td>নিম্ন</td></tr>
+      <tr><td>Video call</td><td>উচ্চ</td><td><strong>খুব উচ্চ</strong></td><td>মাঝারি</td><td>মাঝারি</td></tr>
+      <tr><td>Online game (FPS)</td><td><strong>খুব উচ্চ</strong></td><td><strong>খুব উচ্চ</strong></td><td>উচ্চ</td><td>নিম্ন</td></tr>
+      <tr><td>Video streaming</td><td>নিম্ন</td><td>নিম্ন (buffer আছে)</td><td>মাঝারি</td><td><strong>উচ্চ</strong></td></tr>
+      <tr><td>File download</td><td>নিম্ন</td><td>নিম্ন</td><td><strong>উচ্চ</strong> (TCP)</td><td><strong>উচ্চ</strong></td></tr>
+      <tr><td>Web browsing</td><td><strong>উচ্চ</strong></td><td>নিম্ন</td><td>মাঝারি</td><td>মাঝারি</td></tr>
+      <tr><td>API call</td><td><strong>উচ্চ</strong></td><td>মাঝারি</td><td>মাঝারি</td><td>নিম্ন</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ Video streaming কেন jitter সহ্য করে কিন্তু video call করে না</div>
+    <p>YouTube ৩০ সেকেন্ড আগের video buffer করে রাখে। একটি packet ৫০০ms দেরিতে এলেও সমস্যা নেই — সেটি বাজানোর সময় এখনো ২৯ সেকেন্ড দূরে।</p>
+    <p>Video call-এ buffer করা যায় না — ৩০ সেকেন্ড পুরনো কথা শুনে কেউ কথোপকথন চালাতে পারে না। তাই সেখানে buffer সর্বোচ্চ ১০০–২০০ms, এবং তার বেশি jitter সরাসরি শব্দ ভেঙে দেয়।</p>
+    <p><strong>এটাই "live" আর "streaming"-এর মৌলিক পার্থক্য</strong> — এবং এজন্যই একটির জন্য TCP চলে, অন্যটির জন্য UDP লাগে।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 38 — Loss ও jitter মাপুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার সংযোগে প্রকৃত loss ও jitter কত, এবং সেগুলো কোথায় শুরু হচ্ছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># দীর্ঘ ping দিয়ে loss ও jitter
+ping -c 100 1.1.1.1 | tail -3
+# "X% packet loss" এবং mdev (jitter) দেখুন
+
+# mtr — traceroute + ping একসাথে, প্রতিটি hop-এ
+# ★ কোন hop-এ loss শুরু হচ্ছে তা দেখায় ★
+mtr -r -c 50 1.1.1.1
+# বা interactive:  mtr 1.1.1.1
+
+# system-wide retransmission
+netstat -s | grep -iE "retrans|segments"
+nstat -az 2>/dev/null | grep -i retrans
+
+# একটি নির্দিষ্ট connection-এর loss
+ss -ti | grep -E "retrans|lost" | head
+
+# জেনেবুঝে loss তৈরি করে প্রভাব দেখুন (Linux, সাবধানে!)
+# sudo tc qdisc add dev eth0 root netem loss 1%
+# ... পরীক্ষা করুন ...
+# sudo tc qdisc del dev eth0 root</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>mtr</code>-এর output-এ প্রতিটি hop-এর Loss% ও StDev দেখুন। <strong>গুরুত্বপূর্ণ:</strong> মাঝের একটি hop-এ loss দেখালেও যদি পরের hop গুলোতে loss না থাকে, তাহলে সেটি প্রকৃত loss নয় — ওই router শুধু নিজের উদ্দেশ্যে আসা ICMP-কে rate limit করছে (Ch 14)। <strong>প্রকৃত loss হলে সেটি ওই hop থেকে শেষ পর্যন্ত সব hop-এ দেখাবে।</strong></p>
+    <p><strong>আমরা কী শিখলাম:</strong> <code>mtr</code> loss নির্ণয়ের সবচেয়ে ভালো tool, কিন্তু তার output পড়তে জানতে হয়। "কোথায় loss শুরু হয়ে শেষ পর্যন্ত থাকে" — সেটিই প্রকৃত সমস্যার বিন্দু।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Packet loss-এর প্রধান কারণ queue overflow; এছাড়া bit error, firewall, routing সমস্যা।</li>
+      <li>TCP-তে loss-এর প্রভাব অসমানুপাতিক: throughput ≈ MSS / (RTT × √loss)।</li>
+      <li>০.১% loss উচ্চ-RTT পথে throughput ১০ গুণ কমাতে পারে।</li>
+      <li>Wireless-এ loss ≠ congestion, কিন্তু TCP তা বুঝতে পারে না — অন্যায্যভাবে ধীর হয়।</li>
+      <li><strong>Jitter</strong> = latency-র ওঠানামা; গড় latency-তে এটি ধরা পড়ে না (mdev দেখুন)।</li>
+      <li>Jitter buffer jitter মসৃণ করে, কিন্তু latency যোগ করে — একটি সরাসরি ট্রেড-অফ।</li>
+      <li>Streaming jitter সহ্য করে (বড় buffer), কিন্তু live call করে না (buffer করা যায় না)।</li>
+      <li><code>mtr</code>-এ loss শুধু তখনই প্রকৃত যখন সেটি ওই hop থেকে শেষ পর্যন্ত সব hop-এ দেখায়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>০.১% packet loss কেন "নগণ্য" নয়?</summary>
+    <div class="ans"><p>TCP-তে প্রতিটি loss congestion window অর্ধেক করে দেয় এবং পুনরুদ্ধারে বহু RTT লাগে। Mathis equation অনুযায়ী throughput ≈ MSS/(RTT×√loss) — RTT ১০০ms-এ ০.১% loss throughput-কে প্রায় ১২ Mbps-এ নামিয়ে আনে, যেখানে ০.০০১% loss-এ ১১৭ Mbps পাওয়া যেত। অর্থাৎ ১০ গুণ পার্থক্য, শতকরা এক ভাগেরও কম loss থেকে।</p></div>
+  </details>
+  <details class="qa"><summary>দুটি সংযোগের গড় latency একই (৫০ms), কিন্তু একটিতে ভিডিও কল খারাপ। কেন?</summary>
+    <div class="ans"><p><strong>Jitter।</strong> একটির latency স্থিতিশীল (৪৮–৫২ms), অন্যটির ওঠানামা করছে (১৫–১০০ms) — গড় একই হলেও। Real-time audio প্রতি ২০ms-এ packet আশা করে; অনিয়মিত আগমনে jitter buffer উপচে পড়ে বা খালি হয়ে যায়, ফলে শব্দ ভেঙে যায়। <code>ping</code>-এর <code>mdev</code> মান দেখে এটি শনাক্ত করা যায় — গড় নয়।</p></div>
+  </details>
+  <details class="qa"><summary><code>mtr</code>-এ ৫ নম্বর hop-এ ২০% loss দেখাচ্ছে, কিন্তু ৬–১২ নম্বর hop-এ ০%। এর মানে কী?</summary>
+    <div class="ans"><p>এটি প্রকৃত packet loss <strong>নয়</strong>। ৫ নম্বর router শুধু <em>নিজের উদ্দেশ্যে আসা</em> ICMP-র উত্তর দেওয়া rate limit করছে (একটি সাধারণ নীতি)। যদি সেখানে প্রকৃত loss হতো, তাহলে তার পরের সব hop-এও loss দেখাত — কারণ packet সেখানেই হারিয়ে যেত। <strong>নিয়ম: loss তখনই প্রকৃত যখন সেটি ওই hop থেকে শেষ hop পর্যন্ত অব্যাহত থাকে।</strong></p></div>
+  </details>
+  <details class="qa"><summary>Jitter buffer বড় করলে সব সমস্যার সমাধান হয় না কেন?</summary>
+    <div class="ans"><p>কারণ jitter buffer সরাসরি latency যোগ করে। ৩০০ms-এর buffer jitter চমৎকারভাবে সামলাবে, কিন্তু কথোপকথনে ৩০০ms অতিরিক্ত বিলম্ব যোগ হবে — মানুষ তখন একে অপরের কথার উপর কথা বলতে শুরু করে (এটি ২০০ms-এর পর লক্ষণীয় হয়)। তাই real-time application-এ buffer যতটা সম্ভব ছোট রাখতে হয়, এবং আধুনিক system adaptive buffer ব্যবহার করে — পরিস্থিতি অনুযায়ী আকার বদলায়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch37"><div class="d">পূর্ববর্তী</div><div class="t">Ch 37 — Bandwidth vs Throughput</div></a>
+    <a class="nx" href="#ch39"><div class="d">পরবর্তী</div><div class="t">Ch 39 — Network Debugging</div></a>
+  </div>
+</section>

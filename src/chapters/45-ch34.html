@@ -1,0 +1,238 @@
+<section class="chapter" id="ch34">
+  <div class="ch-eyebrow">Chapter 34</div>
+  <h1>NAT — Network Address Translation</h1>
+  <p class="ch-lede">NAT ছিল IPv4-এর address সংকটের একটি অস্থায়ী সমাধান। তিন দশক পরেও এটি সর্বত্র, এবং এটি Internet-এর মৌলিক নকশাকে গভীরভাবে বদলে দিয়েছে — বেশিরভাগই খারাপভাবে।</p>
+
+  <h2>34.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>IPv4-এ মোট address: 2³² ≈ ৪৩০ কোটি
+পৃথিবীর জনসংখ্যা:    ৮০০ কোটি
+প্রতিজনে device:      ৩–১০টি
+
+সংখ্যাটি কোনোভাবেই মেলে না।
+
+আপনার বাসায়:
+  Laptop, ফোন ×৩, TV, tablet, smart bulb ×৫,
+  printer, watch... ১৫টি device
+  কিন্তু ISP আপনাকে দিয়েছে ★একটি★ public IP
+
+সমাধান: NAT
+  ভেতরে সবাই private address ব্যবহার করুক,
+  বাইরে যাওয়ার সময় সেই একটি public IP-তে
+  অনুবাদ হোক।</pre></div>
+
+  <h2>34.2 কীভাবে কাজ করে</h2>
+
+  <div class="cb diagram"><pre>┌──── আপনার বাসা (192.168.1.0/24) ────┐
+│                                     │
+│  Laptop   192.168.1.10              │
+│  ফোন      192.168.1.11              │
+│  TV       192.168.1.12              │
+│                                     │
+└──────────────┬──────────────────────┘
+               │
+        ┌──────▼──────┐
+        │ NAT ROUTER  │
+        │             │
+        │ ভেতরে: 192.168.1.1
+        │ বাইরে: 103.55.20.7  ← একমাত্র public IP
+        └──────┬──────┘
+               │
+          INTERNET
+
+
+বাইরে যাওয়ার পথে (outbound):
+
+  Laptop পাঠাল:
+    src 192.168.1.10:51234  →  dst 93.184.215.14:443
+
+  NAT বদলে দিল:
+    src ★103.55.20.7:42001★ →  dst 93.184.215.14:443
+         ↑ নিজের public IP    ↑ port-ও বদলাতে পারে
+
+  এবং একটি table-এ লিখে রাখল:
+  ┌──────────────────┬───────────────────┬────────────┐
+  │ ভেতরের           │ বাইরের             │ গন্তব্য     │
+  ├──────────────────┼───────────────────┼────────────┤
+  │192.168.1.10:51234│103.55.20.7:42001  │93.184.x:443│
+  │192.168.1.11:38900│103.55.20.7:42002  │93.184.x:443│
+  │192.168.1.12:44100│103.55.20.7:42003  │142.250.x:80│
+  └──────────────────┴───────────────────┴────────────┘
+
+
+ফেরার পথে (inbound):
+
+  Server পাঠাল:
+    src 93.184.215.14:443  →  dst 103.55.20.7:★42001★
+
+  NAT table-এ 42001 খুঁজল, পেল 192.168.1.10:51234
+
+  বদলে দিল:
+    src 93.184.215.14:443  →  dst 192.168.1.10:51234
+
+  এবং laptop-এ পাঠিয়ে দিল।</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — অফিসের রিসেপশন</div>
+    <p>একটি অফিসে একটিমাত্র বাইরের ফোন নম্বর। ভেতরে ৫০টি extension।</p>
+    <ul>
+      <li>ভেতর থেকে কেউ ফোন করলে বাইরে অফিসের নম্বরটাই দেখায়। রিসেপশনিস্ট লিখে রাখেন "এই কলটি extension 23-এর"।</li>
+      <li>উত্তর এলে তিনি সঠিক extension-এ পাঠিয়ে দেন।</li>
+      <li>কিন্তু <strong>বাইরে থেকে কেউ সরাসরি extension 23-এ ফোন করতে পারে না</strong> — সে extension নম্বরটি জানেই না, এবং রিসেপশনিস্টও জানেন না কাকে দেবেন।</li>
+    </ul>
+    <p>শেষ পয়েন্টটিই NAT-এর সবচেয়ে গুরুত্বপূর্ণ পরিণতি — এবং এটি Internet-এর মৌলিক নকশা ভেঙে দিয়েছে।</p>
+  </div>
+
+  <h2>34.3 NAT-এর প্রকারভেদ</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>ধরন</th><th>কী করে</th><th>কোথায়</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Static NAT</strong></td><td>একটি private ↔ একটি public, স্থায়ীভাবে</td><td>বিরল; একটি নির্দিষ্ট server-কে বাইরে দেখাতে</td></tr>
+      <tr><td><strong>Dynamic NAT</strong></td><td>একটি pool থেকে অস্থায়ীভাবে বরাদ্দ</td><td>বিরল</td></tr>
+      <tr><td><strong>PAT / NAPT</strong><br>(Port Address Translation)</td><td><strong>বহু private → একটি public, port দিয়ে আলাদা</strong></td><td>★ কার্যত সব জায়গায় — এটিই "NAT" বলতে যা বোঝায়</td></tr>
+      <tr><td><strong>CGNAT</strong><br>(Carrier-Grade NAT)</td><td>ISP নিজেই আরেক স্তরের NAT করে — গ্রাহকরাও private IP পায়</td><td>Mobile network, অনেক ISP</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ CGNAT — দুই স্তরের NAT</div>
+    <p>অনেক ISP (বিশেষত mobile operator) গ্রাহকদেরও public IP দেয় না — <code>100.64.0.0/10</code> range থেকে একটি "carrier-grade private" address দেয়। ফলে:</p>
+    <div class="cb diagram"><pre>আপনার device      : 192.168.1.10   (বাসার NAT)
+আপনার router      : 100.64.5.20    (CGNAT-এর ভেতরে!)
+ISP-র public IP   : 103.55.20.7    (হাজারো গ্রাহকের সাথে ভাগ)
+
+⇒ Port forwarding সম্পূর্ণ অসম্ভব — কারণ আপনি
+  ISP-র NAT নিয়ন্ত্রণ করেন না
+⇒ অনেক peer-to-peer application কাজ করে না
+⇒ আপনার "public IP" আসলে হাজারো মানুষের সাথে ভাগ করা</pre></div>
+    <p>এটি পরীক্ষা করা সহজ: <code>curl ifconfig.me</code> দিয়ে পাওয়া IP যদি আপনার router-এর WAN interface-এর IP-র সাথে না মেলে, আপনি CGNAT-এর পেছনে আছেন।</p>
+  </div>
+
+  <h2>34.4 NAT কী ভেঙে দিয়েছে</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ End-to-End Principle-এর মৃত্যু</div>
+    <p>মূল Internet-এর নকশায় <strong>যেকোনো host যেকোনো host-এর সাথে সরাসরি যোগাযোগ করতে পারত</strong>। NAT এটি ভেঙে দিয়েছে:</p>
+    <ol>
+      <li><strong>Inbound connection অসম্ভব।</strong> কেউ বাইরে থেকে আপনার laptop-এ connect করতে পারবে না — কারণ NAT table-এ কোনো entry নেই, তাই router জানে না packet কাকে দেবে।</li>
+      <li><strong>Peer-to-peer কঠিন।</strong> দুটি device দুটি NAT-এর পেছনে থাকলে কেউ কারো সাথে সরাসরি connect করতে পারে না। এজন্যই STUN, TURN, ICE-এর মতো জটিল প্রযুক্তি তৈরি করতে হয়েছে (WebRTC-র ভিত্তি)।</li>
+      <li><strong>Router-কে state রাখতে হয়।</strong> IP-র মূল নকশা ছিল stateless (Ch 12)। NAT সেটি ভাঙে — এবং state মানে memory, timeout, এবং router reboot হলে সব connection মৃত।</li>
+      <li><strong>Layer violation।</strong> একটি Layer 3 যন্ত্র Layer 4 header (port) বদলাচ্ছে।</li>
+      <li><strong>Idle connection মরে যায়।</strong> NAT-এর mapping-এর timeout আছে (TCP-তে সাধারণত ৫–৩০ মিনিট, UDP-তে ৩০ সেকেন্ড–৫ মিনিট)। কোনো traffic না থাকলে entry মুছে যায় এবং connection চুপচাপ ভেঙে যায়।</li>
+    </ol>
+  </div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — NAT timeout-এর বাস্তব প্রভাব</div>
+    <p>"আমার WebSocket connection ৫ মিনিট পরে চুপচাপ মরে যায়" — এটি প্রায় সবসময় NAT timeout। কোনো error আসে না, কারণ NAT নীরবে entry মুছে দেয়; পরের packet-টি কোথায় পাঠাতে হবে সে জানে না, তাই ফেলে দেয়।</p>
+    <p><strong>সমাধান: keepalive।</strong> নিয়মিত ছোট packet পাঠিয়ে NAT-এর entry জীবিত রাখুন:</p>
+    <ul>
+      <li><strong>WebSocket:</strong> প্রতি ৩০–৬০ সেকেন্ডে ping frame</li>
+      <li><strong>TCP:</strong> <code>SO_KEEPALIVE</code> (কিন্তু default ২ ঘণ্টা — অনেক দেরি; <code>TCP_KEEPIDLE</code> কমিয়ে ৬০ করুন)</li>
+      <li><strong>SSH:</strong> <code>ServerAliveInterval 60</code></li>
+      <li><strong>Database connection pool:</strong> idle connection নিয়মিত validate করুন, বা <code>maxIdleTime</code> NAT timeout-এর কম রাখুন</li>
+      <li><strong>gRPC:</strong> <code>keepalive_time_ms</code> configure করুন</li>
+    </ul>
+    <p>এটি cloud environment-এও প্রযোজ্য — AWS NAT Gateway-র idle timeout ৩৫০ সেকেন্ড, এবং এই কারণে বহু "রহস্যময়" connection drop ঘটে।</p>
+  </div>
+
+  <h2>34.5 বাইরে থেকে ভেতরে আসার উপায়</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>পদ্ধতি</th><th>কীভাবে</th><th>সীমাবদ্ধতা</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Port forwarding</strong></td><td>Router-এ হাতে নিয়ম: "port 8080 → 192.168.1.10:8080"</td><td>Router-এ access লাগে; CGNAT-এ অসম্ভব</td></tr>
+      <tr><td><strong>UPnP / NAT-PMP</strong></td><td>Application নিজেই router-কে বলে port খুলতে</td><td>নিরাপত্তা ঝুঁকি; অনেক router-এ বন্ধ</td></tr>
+      <tr><td><strong>STUN</strong></td><td>একটি বাইরের server বলে দেয় আপনার public IP:port কী</td><td>শুধু কিছু NAT-এ কাজ করে</td></tr>
+      <tr><td><strong>TURN</strong></td><td>একটি relay server সব traffic মাঝখান দিয়ে চালায়</td><td>কাজ করে সবসময়, কিন্তু bandwidth ব্যয়বহুল</td></tr>
+      <tr><td><strong>Hole punching</strong></td><td>দুই পক্ষ একসাথে বাইরে পাঠায়, দুই NAT-এ entry তৈরি হয়</td><td>NAT-এর ধরনের উপর নির্ভরশীল</td></tr>
+      <tr><td><strong>Reverse tunnel</strong></td><td>ভেতরের machine নিজে বাইরে connect করে, সেই connection পুনর্ব্যবহার</td><td>সবচেয়ে নির্ভরযোগ্য; ngrok, Cloudflare Tunnel, <code>ssh -R</code> এভাবেই কাজ করে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ ngrok কীভাবে কাজ করে</div>
+    <p>আপনার local dev server-কে Internet-এ দেখাতে ngrok যা করে:</p>
+    <div class="cb diagram"><pre>1. আপনার machine ★বাইরের দিকে★ ngrok server-এ connect করে
+   → NAT-এ একটি entry তৈরি হলো (outbound তো অনুমোদিত)
+
+2. ngrok আপনাকে একটি public URL দেয়
+
+3. কেউ সেই URL-এ এলে ngrok server সেই request-টি
+   ★ইতিমধ্যে খোলা★ connection দিয়ে আপনার machine-এ পাঠায়
+
+★ NAT-কে হারানো হয়নি — বরং তার নিয়ম মেনেই কাজ করা
+  হয়েছে: outbound connection সবসময় অনুমোদিত, তাই
+  সেটিকেই দ্বিমুখী করে ব্যবহার করা হচ্ছে।</pre></div>
+  </div>
+
+  <h2>34.6 IPv6 এবং NAT</h2>
+
+  <div class="box note">
+    <div class="bt">ℹ️ IPv6-এ NAT দরকার নেই</div>
+    <p>IPv6-এ ৩.৪ × ১০³⁸ address — প্রতিটি device পেতে পারে একটি প্রকৃত global address। NAT-এর মূল কারণটিই অনুপস্থিত।</p>
+    <p>কিন্তু একটি সাধারণ ভুল ধারণা: "NAT নিরাপত্তা দেয়"। <strong>এটি সত্য নয়।</strong> NAT-এর inbound blocking একটি <em>পার্শ্বপ্রতিক্রিয়া</em>, নিরাপত্তা-বৈশিষ্ট্য নয়। IPv6-এ প্রতিটি device-এর global address থাকলেও <strong>stateful firewall</strong> ঠিক একই সুরক্ষা দেয় — এবং সেটি স্পষ্ট নীতি হিসেবে, দুর্ঘটনাক্রমে নয়। প্রতিটি IPv6 router default-এ unsolicited inbound connection আটকায়।</p>
+    <p>পার্থক্যটি গুরুত্বপূর্ণ: NAT নিরাপত্তা <em>দুর্ঘটনাক্রমে</em> দেয়, firewall <em>উদ্দেশ্যপ্রণোদিতভাবে</em>। উদ্দেশ্যপ্রণোদিত ব্যবস্থা যাচাই করা যায়, নিরীক্ষা করা যায়, এবং প্রয়োজনে সঠিকভাবে শিথিল করা যায়।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 34 — নিজের NAT পরীক্ষা করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার local IP এবং বাইরের দুনিয়া যে IP দেখে, তার পার্থক্য; এবং আপনি CGNAT-এর পেছনে কিনা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার local IP
+ip -brief addr | grep -v lo        # Linux
+ipconfig getifaddr en0             # macOS
+
+# বাইরের দুনিয়া যা দেখে
+curl -s ifconfig.me; echo
+curl -s https://api.ipify.org; echo
+
+# আপনার router-এর WAN IP (router-এর admin page থেকে)
+# যদি সেটি ifconfig.me-র থেকে ভিন্ন হয় → আপনি CGNAT-এ
+
+# CGNAT range পরীক্ষা: 100.64.0.0/10-এর মধ্যে?
+# 100.64.x.x থেকে 100.127.x.x পর্যন্ত
+
+# NAT-এর port translation দেখুন
+sudo tcpdump -i any -n 'tcp[tcpflags] & tcp-syn != 0' -c 3 &
+curl -s https://example.com > /dev/null
+# আপনার machine যে source port ব্যবহার করছে তা দেখুন,
+# তারপর ifconfig.me-র মতো একটি service ব্যবহার করে
+# বাইরে থেকে কোন port দেখা যাচ্ছে তা তুলনা করুন</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> আপনার local IP <code>192.168.x.x</code> বা <code>10.x.x.x</code>, কিন্তু <code>ifconfig.me</code> একটি সম্পূর্ণ ভিন্ন public IP দেখাচ্ছে। এই দুটির মাঝখানেই NAT কাজ করছে। আপনার বাড়ির সব device একই public IP দেখাবে — সেটিও পরীক্ষা করে দেখতে পারেন ফোন থেকে একই URL খুলে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> আপনার "IP address" বলে একক কিছু নেই — আপনার machine-এর একটি ঠিকানা আছে, আর Internet আপনাকে সম্পূর্ণ ভিন্ন একটি ঠিকানায় চেনে। এবং সেই দ্বিতীয় ঠিকানাটি আপনার পুরো বাড়ির (বা CGNAT হলে হাজারো মানুষের) সাথে ভাগ করা।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>NAT একটি public IP-র পেছনে বহু private device চালাতে দেয় — IPv4 সংকটের সমাধান।</li>
+      <li>PAT/NAPT (port দিয়ে আলাদা করা) — এটিই বাস্তবে সর্বত্র ব্যবহৃত রূপ।</li>
+      <li>NAT router-কে <strong>state রাখতে হয়</strong>, তাই সে stateless IP-র নকশা ভাঙে।</li>
+      <li>Inbound connection অসম্ভব → peer-to-peer কঠিন → STUN/TURN/ICE-এর প্রয়োজন।</li>
+      <li><strong>NAT timeout</strong> idle connection মেরে ফেলে → keepalive অপরিহার্য।</li>
+      <li>CGNAT-এ ISP-ও NAT করে — port forwarding সম্পূর্ণ অসম্ভব হয়ে যায়।</li>
+      <li>Reverse tunnel (ngrok, Cloudflare Tunnel) NAT-এর নিয়ম মেনেই ভেতরে পৌঁছানোর সবচেয়ে নির্ভরযোগ্য উপায়।</li>
+      <li><strong>NAT নিরাপত্তা-ব্যবস্থা নয়</strong> — তার inbound blocking একটি পার্শ্বপ্রতিক্রিয়া মাত্র; প্রকৃত সুরক্ষা firewall-এর কাজ।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>NAT কীভাবে জানে ফেরত আসা packet কোন internal device-কে দিতে হবে?</summary>
+    <div class="ans"><p>একটি translation table-এর মাধ্যমে। Outbound packet পাঠানোর সময় NAT একটি entry তৈরি করে: (internal IP, internal port) ↔ (public IP, নির্বাচিত external port), সাথে গন্তব্যের তথ্য। Response এলে সে destination port দেখে table-এ খুঁজে বের করে কোন internal endpoint-এর জন্য, এবং সেই অনুযায়ী header বদলে দেয়। এই table-ই সেই "state" যা সাধারণ router-এর থাকে না।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার WebSocket connection নিয়মিত ৫ মিনিট পরে মরে যাচ্ছে। কারণ ও সমাধান?</summary>
+    <div class="ans"><p><strong>NAT timeout।</strong> কোনো traffic না থাকলে NAT (বা cloud NAT Gateway, বা firewall) idle mapping মুছে দেয় — নীরবে, কোনো notification ছাড়াই। পরের packet-এর জন্য আর কোনো entry না থাকায় সেটি ফেলে দেওয়া হয়। সমাধান: NAT timeout-এর চেয়ে কম ব্যবধানে keepalive/ping পাঠান (সাধারণত ৩০–৬০ সেকেন্ড)। WebSocket-এ ping frame, TCP-তে <code>SO_KEEPALIVE</code> সহ কম <code>TCP_KEEPIDLE</code>।</p></div>
+  </details>
+  <details class="qa"><summary>"NAT আমার নিরাপত্তা দেয়" — এই বক্তব্য কতটা সঠিক?</summary>
+    <div class="ans"><p>আংশিক সত্য কিন্তু বিভ্রান্তিকর। NAT unsolicited inbound connection আটকায় — কিন্তু এটি একটি <em>পার্শ্বপ্রতিক্রিয়া</em> (table-এ entry নেই বলে packet ফেলে দিতে হয়), কোনো নিরাপত্তা-নীতি নয়। এটি outbound traffic, malware, বা compromised device-এর বিরুদ্ধে কিছুই করে না। প্রকৃত সুরক্ষা আসে <strong>stateful firewall</strong> থেকে — যা স্পষ্ট নীতি অনুযায়ী কাজ করে, যাচাইযোগ্য, এবং IPv6-এও সমানভাবে কার্যকর।</p></div>
+  </details>
+  <details class="qa"><summary>ngrok NAT-এর সীমাবদ্ধতা কীভাবে এড়ায়?</summary>
+    <div class="ans"><p>সে NAT-কে "হারায়" না, বরং তার নিয়ম মেনেই কাজ করে। আপনার machine নিজে <em>বাইরের দিকে</em> ngrok server-এ একটি connection খোলে — যা NAT সবসময় অনুমোদন করে এবং যার জন্য একটি mapping তৈরি হয়। এরপর ngrok সেই ইতিমধ্যে-খোলা connection-টিকে দ্বিমুখীভাবে ব্যবহার করে বাইরের request গুলো আপনার machine-এ পৌঁছে দেয়। Cloudflare Tunnel এবং <code>ssh -R</code>-ও একই নীতিতে কাজ করে।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch33"><div class="d">পূর্ববর্তী</div><div class="t">Ch 33 — TLS Handshake</div></a>
+    <a class="nx" href="#ch35"><div class="d">পরবর্তী</div><div class="t">Ch 35 — Firewalls</div></a>
+  </div>
+</section>

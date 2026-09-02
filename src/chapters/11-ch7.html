@@ -1,0 +1,207 @@
+<section class="chapter" id="ch7">
+  <div class="ch-eyebrow">Chapter 7</div>
+  <h1>Switches</h1>
+  <p class="ch-lede">Switch-এর কেউ configuration করে না, তবু সে ঠিক জানে কোন machine কোন port-এ আছে। কীভাবে? উত্তরটি সুন্দর রকমের সরল — সে কখনো জিজ্ঞেস করে না, শুধু শোনে।</p>
+
+  <h2>7.1 Why does this exist?</h2>
+  <p>Switch-এর পূর্বসূরি ছিল <strong>hub</strong>। Hub-এর যুক্তি ছিল বোকার মতো সরল: এক port-এ যা আসে, বাকি সব port-এ পাঠিয়ে দাও।</p>
+
+  <div class="cb diagram"><pre>HUB (পুরনো, বোকা)                SWITCH (আধুনিক, শেখে)
+
+PC1 ──▶ Hub                       PC1 ──▶ Switch
+         ├──▶ PC2  (চেয়েছিল)               └──▶ PC2 ✓
+         ├──▶ PC3  (চায়নি, তবু পেল)
+         └──▶ PC4  (চায়নি, তবু পেল)        PC3, PC4 কিছুই পায় না
+
+সমস্যা:                            সুবিধা:
+• সবাই সবার data দেখে              • গোপনীয়তা
+• Bandwidth ভাগাভাগি               • প্রতিটি port-এ পূর্ণ bandwidth
+• Collision হয়                     • Collision নেই (full duplex)
+• অপ্রয়োজনীয় CPU খরচ               • CPU বাঁচে</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why</div>
+    <p>Switch একটি সমস্যা সমাধান করে: <em>একটি shared medium-এ কীভাবে data শুধু তার প্রাপকের কাছে পাঠানো যায়, কোনো মানুষের configuration ছাড়াই?</em> সমাধানটি হলো — <strong>traffic দেখে নিজে নিজে শেখা</strong>। এটি networking-এর অন্যতম মার্জিত design, এবং এটি সম্পূর্ণ স্বয়ংক্রিয়।</p>
+  </div>
+
+  <h2>7.2 MAC Address Table</h2>
+  <p>প্রতিটি switch একটি table রাখে — <strong>MAC address table</strong> (একে CAM table বা forwarding table-ও বলা হয়)। এটি খুবই সরল:</p>
+
+  <div class="cb diagram"><pre>┌───────────────────┬──────┬────────────┐
+│ MAC Address       │ Port │ Age (sec)  │
+├───────────────────┼──────┼────────────┤
+│ AA:AA:AA:AA:AA:AA │  1   │     12     │
+│ BB:BB:BB:BB:BB:BB │  2   │      5     │
+│ CC:CC:CC:CC:CC:CC │  3   │    248     │
+└───────────────────┴──────┴────────────┘
+
+Age খুব গুরুত্বপূর্ণ — সাধারণত 300 সেকেন্ড পরে entry মুছে যায়।
+কেন? কারণ কেউ laptop-টি অন্য port-এ লাগাতে পারে।
+Table চিরস্থায়ী হলে সেই laptop আর কখনো traffic পেত না।</pre></div>
+
+  <h2>7.3 তিনটি কাজ — Learning, Forwarding, Flooding</h2>
+
+  <h3>Learning — Source MAC দেখে</h3>
+  <p>Switch যখনই কোনো port-এ একটি frame পায়, সে frame-এর <strong>source MAC</strong> এবং সেই port নম্বর table-এ লিখে রাখে।</p>
+  <div class="box model">
+    <div class="bt">🧠 এখানেই আসল চালাকি</div>
+    <p>Switch <em>destination</em> দেখে forward করে, কিন্তু <em>source</em> দেখে শেখে। যুক্তিটি নিখুঁত: "port 3-এ যদি AA:AA থেকে একটি frame এল, তার মানে AA:AA অবশ্যই port 3-এর দিকে আছে।" কোনো protocol নেই, কোনো ঘোষণা নেই, কোনো configuration নেই — শুধু <strong>নীরব পর্যবেক্ষণ</strong>।</p>
+  </div>
+
+  <h3>Forwarding — জানা থাকলে</h3>
+  <p>Destination MAC table-এ থাকলে সেই একটি port-এ পাঠাও। ব্যস।</p>
+
+  <h3>Flooding — না জানা থাকলে</h3>
+  <p>Destination MAC table-এ না থাকলে (বা broadcast হলে) — <strong>যে port দিয়ে এসেছে সেটি বাদে বাকি সব port-এ পাঠাও।</strong> এটি hub-এর আচরণ, কিন্তু switch এটি করে শুধু <em>প্রথমবার</em>। উত্তর এলেই সে শিখে ফেলে।</p>
+
+  <h2>7.4 ধাপে ধাপে — একটি switch যেভাবে শেখে</h2>
+  <p>একটি একদম নতুন switch, table সম্পূর্ণ খালি। PC1 (AA:AA, port 1) → PC2 (BB:BB, port 2)-কে পাঠাতে চায়।</p>
+
+  <div class="stepper" data-steps="5" id="st-switch">
+    <div class="sp-head"><strong>Switch-এর শেখার প্রক্রিয়া</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+      <div class="sp-step" data-i="0">
+        <h4>শুরু — খালি table</h4>
+        <div class="cb diagram"><pre>       ┌──────────────────┐
+       │     SWITCH       │   MAC Table:
+       │  1    2    3     │   (খালি)
+       └──┬────┬────┬─────┘
+          │    │    │
+        PC1  PC2  PC3
+       AA:AA BB:BB CC:CC</pre></div>
+        <p>Switch এখনো কিছুই জানে না। কেউ তাকে কিছু বলেনি।</p>
+      </div>
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ১ — PC1 একটি frame পাঠায়</h4>
+        <div class="cb diagram"><pre>Frame: [dst: BB:BB | src: AA:AA | data]
+       PC1 ──▶ port 1</pre></div>
+        <p>Frame switch-এর port 1-এ এসে পৌঁছাল।</p>
+      </div>
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ২ — Learning: source থেকে শেখা</h4>
+        <div class="cb diagram"><pre>MAC Table:
+┌───────────┬──────┐
+│ AA:AA:... │  1   │  ← নতুন! source MAC দেখে শিখল
+└───────────┴──────┘</pre></div>
+        <p>Switch দেখল frame-এর source AA:AA এবং সেটি এসেছে port 1 দিয়ে। সুতরাং AA:AA অবশ্যই port 1-এ। লিখে রাখল।</p>
+      </div>
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৩ — Flooding: destination অজানা</h4>
+        <div class="cb diagram"><pre>BB:BB table-এ নেই → সব port-এ পাঠাও (port 1 ছাড়া)
+
+       ┌──────────────────┐
+       │     SWITCH       │
+       │  1    2    3     │
+       └──┬────┬────┬─────┘
+          │    ▼    ▼
+        PC1  PC2  PC3
+             ✓    ✓ (পেল, কিন্তু dst MAC মেলে না → ফেলে দিল)</pre></div>
+        <p>PC3 frame-টি পেল কিন্তু destination MAC তার নয়, তাই তার NIC নীরবে ফেলে দিল — CPU পর্যন্তও গেল না।</p>
+      </div>
+      <div class="sp-step" data-i="4">
+        <h4>ধাপ ৪ — PC2 উত্তর দেয়, এবং switch পূর্ণ জ্ঞান পায়</h4>
+        <div class="cb diagram"><pre>Frame: [dst: AA:AA | src: BB:BB | reply]
+       PC2 ──▶ port 2
+
+MAC Table:
+┌───────────┬──────┐
+│ AA:AA:... │  1   │
+│ BB:BB:... │  2   │  ← এবার BB:BB শিখল
+└───────────┴──────┘
+
+এখন AA:AA জানা আছে → শুধু port 1-এ পাঠাল। Flooding নেই।
+
+এরপর থেকে PC1 ↔ PC2 এর সব traffic শুধু port 1 ও 2 দেখবে।
+PC3 আর কিছুই দেখবে না।</pre></div>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ Flooding মাত্র একবার</div>
+    <p>লক্ষ্য করুন — flooding শুধু <em>প্রথম</em> frame-এর জন্য হলো। উত্তর আসামাত্র switch শিখে গেল। একটি চালু network-এ ৯৯% traffic-ই সরাসরি forward হয়। Flooding ব্যতিক্রম, নিয়ম নয়।</p>
+  </div>
+
+  <h2>7.5 Broadcast Domain এবং Collision Domain</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>ধারণা</th><th>সংজ্ঞা</th><th>Hub</th><th>Switch</th><th>Router</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Collision domain</strong></td><td>যেখানে দুটি frame একসাথে পাঠালে সংঘর্ষ হয়</td><td>সব port মিলে ১টি</td><td>প্রতি port-এ আলাদা</td><td>প্রতি port-এ আলাদা</td></tr>
+      <tr><td><strong>Broadcast domain</strong></td><td>যেখানে একটি broadcast frame সবার কাছে যায়</td><td>সব port মিলে ১টি</td><td>সব port মিলে ১টি</td><td><strong>প্রতি interface-এ আলাদা</strong></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box model">
+    <div class="bt">🧠 মূল কথা এক বাক্যে</div>
+    <p><strong>Switch collision domain ভাঙে, কিন্তু broadcast domain ভাঙে না। Router broadcast domain ভাঙে।</strong> এজন্যই ২০টি switch দিয়ে ৫০০টি machine একসাথে জুড়লে সবাই সবার broadcast পায় — সমাধান নয়। সমাধান হলো router/VLAN দিয়ে আলাদা subnet করা।</p>
+  </div>
+
+  <h2>7.6 Switch এবং নিরাপত্তা — একটি সংক্ষিপ্ত সতর্কতা</h2>
+  <p>Switch traffic আলাদা করে রাখে, কিন্তু এটি একটি <em>দক্ষতার</em> ব্যবস্থা, <em>নিরাপত্তার</em> নয়। MAC table-এর আকার সীমিত (কয়েক হাজার entry)। কেউ যদি হাজার হাজার ভুয়া MAC-এর frame পাঠায়, table উপচে পড়ে এবং switch বাধ্য হয়ে সব কিছু flood করতে শুরু করে — কার্যত hub-এ পরিণত হয়। একে বলে <strong>MAC flooding</strong>।</p>
+
+  <div class="box tip">
+    <div class="bt">✓ এখান থেকে যা শেখার</div>
+    <p>Local network-এ traffic "কেউ দেখতে পাচ্ছে না" ধরে নেওয়া ভুল। এটিই আরেকটি কারণ কেন <strong>internal service-এও TLS ব্যবহার করা উচিত</strong> (Ch 31)। "এটা তো আমাদের private network" — এই যুক্তিতে encryption বাদ দেওয়া আধুনিক নিরাপত্তা-চিন্তায় গ্রহণযোগ্য নয় (zero-trust নীতি)।</p>
+  </div>
+
+  <h2>7.7 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Switch-এর IP address থাকে এবং সে IP দেখে কাজ করে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>একটি সাধারণ (unmanaged) switch সম্পূর্ণ IP-অজ্ঞ — সে শুধু MAC দেখে। Managed switch-এ একটি IP থাকে বটে, কিন্তু সেটি শুধু <em>তাকে configure করার জন্য</em> (SSH/web UI), forwarding-এর জন্য নয়। Frame forward করার সময় সে IP header ছুঁয়েও দেখে না। (ব্যতিক্রম: "Layer 3 switch" নামে যেসব যন্ত্র, সেগুলো আসলে দ্রুতগতির router।)</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Switch-কে বলে দিতে হয় কোন machine কোন port-এ আছে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>কখনোই না। Switch শুধু frame-এর source MAC দেখে নিজে নিজে শেখে। আপনি একটি নতুন switch বাক্স থেকে বের করে সব তার লাগিয়ে দিলেই কাজ শুরু করে — কারণ প্রথম কয়েকটি frame-এর মধ্যেই সে পুরো network-এর ছবি পেয়ে যায়।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 7 — Local network-এ কে কে আছে</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — আপনার machine ঠিক কোন কোন local device-এর MAC জানে, এবং সেই জ্ঞান কীভাবে তৈরি হলো।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># বর্তমান neighbor (ARP) table দেখুন
+ip neigh                        # Linux
+arp -a                          # macOS
+
+# এখন local network-এর কয়েকটি address-এ ping দিন
+for i in 1 2 3 4 5; do ping -c1 -W1 192.168.1.$i > /dev/null 2>&1 & done; wait
+
+# আবার দেখুন — নতুন entry এসেছে
+ip neigh</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> ping দেওয়ার পর যেসব address সাড়া দিয়েছে, তাদের MAC আপনার table-এ যুক্ত হয়েছে (<code>REACHABLE</code> অবস্থায়)। যারা সাড়া দেয়নি তারা <code>FAILED</code> বা <code>INCOMPLETE</code> দেখাবে। কিছুক্ষণ পরে entry গুলো <code>STALE</code> হয়ে যাবে — ঠিক switch-এর aging-এর মতোই আপনার machine-ও পুরনো তথ্য চিরকাল রাখে না।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Switch যেভাবে MAC table বানায়, আপনার machine-ও ঠিক সেভাবে ARP table বানায় — <em>traffic দেখে, চাহিদা অনুযায়ী, এবং সময়ের সাথে ভুলে গিয়ে</em>। এই "প্রয়োজনমতো শেখো, পুরনোটা ভুলে যাও" নকশাটি networking-এ বারবার ফিরে আসে (DNS cache, routing table, TCP state)।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Switch তিনটি কাজ করে: <strong>Learn</strong> (source MAC থেকে), <strong>Forward</strong> (জানা destination-এ), <strong>Flood</strong> (অজানা বা broadcast হলে)।</li>
+      <li>MAC address table স্বয়ংক্রিয়ভাবে তৈরি হয় — কোনো configuration লাগে না।</li>
+      <li>Entry গুলো aging timer-এ (~৩০০ সেকেন্ড) মুছে যায়, যাতে device অন্য port-এ সরালেও কাজ করে।</li>
+      <li>Switch <strong>collision domain ভাঙে</strong> কিন্তু <strong>broadcast domain ভাঙে না</strong>; router broadcast domain ভাঙে।</li>
+      <li>Switch IP জানে না — সে সম্পূর্ণভাবে Layer 2-র যন্ত্র।</li>
+      <li>Switch দক্ষতার জন্য, নিরাপত্তার জন্য নয় — MAC flooding দিয়ে তাকে hub-এ নামিয়ে আনা যায়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Switch destination MAC দেখে forward করে, কিন্তু শেখে কীভাবে?</summary>
+    <div class="ans"><p><strong>Source MAC</strong> দেখে। যখন port <em>N</em>-এ MAC <em>X</em> থেকে একটি frame আসে, switch সিদ্ধান্ত নেয় "<em>X</em> অবশ্যই port <em>N</em>-এর দিকে আছে" এবং সেটি table-এ লিখে রাখে। অর্থাৎ সে destination দিয়ে <em>সিদ্ধান্ত</em> নেয়, source দিয়ে <em>শেখে</em>।</p></div>
+  </details>
+  <details class="qa"><summary>MAC table-এ aging timer না থাকলে কী সমস্যা হতো?</summary>
+    <div class="ans"><p>একটি laptop port 3 থেকে খুলে port 7-এ লাগালে switch চিরকাল port 3-এ frame পাঠাতে থাকত — laptop কখনো traffic পেত না। Aging-এর ফলে পুরনো entry মুছে যায়, তারপর প্রথম frame flood হয়, এবং laptop উত্তর দিলেই switch নতুন port শিখে নেয়। Aging হলো ভুল তথ্য থেকে স্বয়ংক্রিয় পুনরুদ্ধারের ব্যবস্থা।</p></div>
+  </details>
+  <details class="qa"><summary>PC1 → PC2-তে পাঠানোর সময় PC3 কি কিছু পায়?</summary>
+    <div class="ans"><p>শুধুমাত্র প্রথম frame-টি, যদি switch তখনো PC2-এর MAC না জেনে থাকে (flooding)। তখনো PC3-এর NIC destination MAC মেলে না দেখে frame-টি hardware-এ ফেলে দেয় — OS পর্যন্ত পৌঁছায় না। PC2 উত্তর দেওয়ার পর switch শিখে যায়, এবং PC3 আর কিছুই দেখে না।</p></div>
+  </details>
+  <details class="qa"><summary>Broadcast frame কি switch-এর learning-কে প্রভাবিত করে?</summary>
+    <div class="ans"><p>হ্যাঁ — কিন্তু শুধু source-এর দিক থেকে। একটি broadcast frame-এর destination (<code>FF:FF:...</code>) কখনো table-এ যায় না (সেটি কোনো নির্দিষ্ট port নয়), কিন্তু তার <em>source</em> MAC ঠিকই শেখা হয়। এজন্যই ARP request (যা broadcast) switch-কে requester-এর অবস্থান শিখিয়ে দেয় — এবং সেজন্যই ARP reply-টি আর flood করতে হয় না।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch6"><div class="d">পূর্ববর্তী</div><div class="t">Ch 6 — MAC Addresses and Ethernet</div></a>
+    <a class="nx" href="#ch8"><div class="d">পরবর্তী</div><div class="t">Ch 8 — ARP</div></a>
+  </div>
+</section>

@@ -1,0 +1,211 @@
+<section class="chapter" id="ch2">
+  <div class="ch-eyebrow">Chapter 2</div>
+  <h1>Network Components</h1>
+  <p class="ch-lede">Router আর switch আলাদা যন্ত্র কেন? আপনার বাসার "router" বাক্সটি আসলে কয়টি যন্ত্রের কাজ একসাথে করছে? প্রতিটি component-এর একটি নির্দিষ্ট দায়িত্ব আছে — সেই দায়িত্বগুলো আলাদা করে বুঝলে বাকি সব সহজ হয়ে যায়।</p>
+
+  <h2>2.1 Why does this exist?</h2>
+  <p>দুটি computer সরাসরি একটি তার দিয়ে জোড়া যায়। কিন্তু তিনটি? প্রতিটি জোড়ার জন্য আলাদা তার লাগলে <em>n</em> সংখ্যক machine-এর জন্য লাগবে <em>n(n−1)/2</em> টি তার। ১০০টি machine মানে ৪,৯৫০টি তার। ১ কোটি machine-এর জন্য এই সংখ্যা কল্পনাতীত।</p>
+
+  <p>সমাধান হলো <strong>intermediate device</strong> — এমন যন্ত্র যাদের একমাত্র কাজ data-কে সঠিক দিকে পাঠিয়ে দেওয়া। প্রতিটি device তার নিজের সমস্যা সমাধানের জন্য জন্মেছে, এবং প্রতিটি network stack-এর নির্দিষ্ট একটি layer-এ কাজ করে (layer নিয়ে বিস্তারিত পরের chapter-এ)।</p>
+
+  <h2>2.2 Host, Client, Server</h2>
+  <p>একটি <strong>host</strong> (হোস্ট) হলো network-এ যুক্ত এমন যেকোনো device যার নিজস্ব IP address আছে এবং যে data-এর উৎস বা গন্তব্য হতে পারে। আপনার laptop একটি host, একটি data center-এর server একটি host, আপনার ফোনও একটি host।</p>
+
+  <p><strong>Client</strong> এবং <strong>server</strong> hardware-এর ধরন নয় — এগুলো <em>ভূমিকা</em> (role):</p>
+  <ul>
+    <li><strong>Client</strong> — যে request পাঠিয়ে কথোপকথন শুরু করে</li>
+    <li><strong>Server</strong> — যে অপেক্ষায় থাকে (listen করে) এবং request-এর উত্তর দেয়</li>
+  </ul>
+
+  <div class="box note">
+    <div class="bt">ℹ️ Role, না Hardware</div>
+    <p>আপনার laptop যখন <code>npm install</code> চালায়, তখন সে client। সেই একই laptop-এ যখন <code>npm run dev</code> চালিয়ে port 3000-এ কিছু listen করছেন, তখন সে server। একই machine একই সময়ে দুটোই হতে পারে। Chapter 16-এ দেখব — পার্থক্যটা আসলে খুবই concrete: server <code>listen()</code> call করে, client <code>connect()</code> call করে।</p>
+  </div>
+
+  <h2>2.3 NIC — Network Interface Card</h2>
+  <p><strong>NIC</strong> (Network Interface Card, নেটওয়ার্ক ইন্টারফেস কার্ড) হলো সেই hardware যা আপনার computer-কে network medium-এর সাথে যুক্ত করে। এর দায়িত্ব দুই দিকেই:</p>
+
+  <div class="cb diagram"><pre>পাঠানোর সময়:
+  Kernel থেকে পাওয়া bytes  →  বিদ্যুৎ/আলো/radio signal  →  medium
+
+গ্রহণের সময়:
+  Medium থেকে signal  →  bytes  →  kernel-কে interrupt দিয়ে জানানো</pre></div>
+
+  <p>প্রতিটি NIC-এর একটি hardware-level address থাকে — <strong>MAC address</strong> (Chapter 6)। আধুনিক machine-এ সাধারণত একাধিক NIC থাকে: একটি Ethernet, একটি Wi-Fi, প্লাস কিছু virtual interface (loopback, Docker bridge, VPN)। এজন্যই <code>ip addr</code> চালালে একাধিক entry দেখতে পান।</p>
+
+  <div class="box dev">
+    <div class="bt">⚙️ OS Connection</div>
+    <p>Operating Systems fundamentals থেকে মনে করুন — device driver। NIC-ও একটি device, এবং kernel-এ তার driver আছে। Packet এলে NIC একটি <em>interrupt</em> তোলে, kernel সেই interrupt handle করে packet-টিকে network stack-এ পাঠায়। খুব উচ্চ throughput-এর ক্ষেত্রে interrupt-এর সংখ্যাই bottleneck হয়ে দাঁড়ায় — তাই আধুনিক driver-রা NAPI-এর মতো polling-based কৌশল ব্যবহার করে। এটি networking এবং OS-এর সরাসরি সংযোগস্থল।</p>
+  </div>
+
+  <h2>2.4 Switch — একটি local network-এর ভেতরে</h2>
+  <p>একটি <strong>switch</strong> (সুইচ) একই local network-এর একাধিক device-কে যুক্ত করে এবং frame গুলোকে <strong>MAC address</strong> দেখে সঠিক port-এ পাঠায়।</p>
+
+  <div class="cb diagram"><pre>            ┌─────────────┐
+            │   SWITCH    │
+            │ Port1 2 3 4 │
+            └──┬───┬──┬─┬─┘
+               │   │  │ │
+             PC1 PC2 PC3 Printer
+
+PC1 → PC2 পাঠালে switch শুধু Port 2-তে পাঠায়।
+PC3 এবং Printer কিছুই দেখে না।</pre></div>
+
+  <p>এটিই switch-এর মূল মূল্য। এর পূর্বসূরি <em>hub</em> সব port-এ সব কিছু পাঠাত — ফলে bandwidth ভাগাভাগি হতো এবং সবাই সবার data দেখতে পেত। Switch এই দুটোরই সমাধান। বিস্তারিত Chapter 7-এ।</p>
+
+  <h2>2.5 Router — দুই network-এর মাঝে</h2>
+  <p>একটি <strong>router</strong> (রাউটার) দুই বা ততোধিক <em>আলাদা</em> network-কে যুক্ত করে এবং packet গুলোকে <strong>IP address</strong> দেখে সঠিক পরবর্তী network-এ পাঠায়।</p>
+
+  <div class="cb diagram"><pre>  Network A                       Network B
+192.168.1.0/24                 10.0.0.0/24
+      │                              │
+      └──────┐              ┌────────┘
+             ▼              ▼
+          ┌──────────────────┐
+          │      ROUTER      │
+          │ 192.168.1.1      │  ← A-এর দিকের interface
+          │ 10.0.0.1         │  ← B-এর দিকের interface
+          └──────────────────┘</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — Switch vs Router</div>
+    <p>এটাই সম্ভবত networking-এর সবচেয়ে গুরুত্বপূর্ণ পার্থক্য, তাই একটি উপমা:</p>
+    <ul>
+      <li><strong>Switch</strong> = একটি ভবনের ভেতরের ডাকপিয়ন। "ফ্ল্যাট 4B" শুনলেই সে জানে কোথায় দিতে হবে। ভবনের বাইরের কিছু সে চেনে না।</li>
+      <li><strong>Router</strong> = শহরের ডাকঘর। "ঢাকা 1215" দেখে সে জানে কোন শহরের দিকে পাঠাতে হবে। ভেতরের ফ্ল্যাট নম্বর নিয়ে সে মাথা ঘামায় না — সেটা গন্তব্য শহরের ডাকঘরের কাজ।</li>
+    </ul>
+    <p>Switch <em>local</em> ঠিকানা (MAC) দেখে, router <em>global</em> ঠিকানা (IP) দেখে। এই এক বাক্য মনে রাখলে Chapter 13-এর packet journey অনেক সহজ লাগবে।</p>
+  </div>
+
+  <h2>2.6 Default Gateway</h2>
+  <p><strong>Default gateway</strong> (ডিফল্ট গেটওয়ে) হলো আপনার local network-এর সেই router-এর IP address, যার কাছে আপনার machine সব "বাইরের" traffic পাঠায়।</p>
+
+  <p>আপনার machine-এর যুক্তি খুবই সরল, এবং প্রতিটি packet-এর জন্য এটি চালানো হয়:</p>
+  <div class="cb diagram"><pre>destination IP আমার নিজের subnet-এর ভেতরে?
+    │
+    ├── হ্যাঁ  →  সরাসরি পাঠাও (ARP করে MAC বের করে)
+    │
+    └── না    →  default gateway-কে পাঠাও, সে বুঝবে</pre></div>
+
+  <p>এটি Chapter 11-এর মূল বিষয়। এখানে শুধু এটুকু মনে রাখুন — gateway কোনো আলাদা ধরনের যন্ত্র নয়, এটি একটি <em>ভূমিকা</em>। যে router আপনার network-কে বাইরের সাথে যুক্ত করছে, তার local IP-ই আপনার gateway।</p>
+
+  <h2>2.7 Modem, Access Point, Firewall</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Component</th><th>দায়িত্ব</th><th>কোন layer</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Modem</strong></td><td>Digital signal ↔ ISP-এর medium-এর analog signal (DSL, cable, fiber ONT)। নাম এসেছে <em>modulator-demodulator</em> থেকে।</td><td>Physical / Link</td></tr>
+      <tr><td><strong>Access Point (AP)</strong></td><td>Wi-Fi radio signal ↔ wired network। অর্থাৎ বেতার device-দের জন্য একটি switch-এর মতো।</td><td>Link</td></tr>
+      <tr><td><strong>Switch</strong></td><td>MAC দেখে একই network-এর ভেতরে frame forward</td><td>Link (Layer 2)</td></tr>
+      <tr><td><strong>Router</strong></td><td>IP দেখে ভিন্ন network-এ packet forward</td><td>Network (Layer 3)</td></tr>
+      <tr><td><strong>Firewall</strong></td><td>নিয়ম দেখে traffic অনুমোদন বা প্রত্যাখ্যান</td><td>Layer 3–7</td></tr>
+      <tr><td><strong>Load Balancer</strong></td><td>একই service-এর একাধিক server-এর মধ্যে request বণ্টন</td><td>Layer 4 বা 7</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ আপনার বাসার "router" আসলে চারটি যন্ত্র</div>
+    <p>ঘরে যে বাক্সটিকে আমরা "router" বলি, সেটি সাধারণত একসাথে করছে: (১) <strong>modem</strong> — ISP-এর সাথে সংযোগ, (২) <strong>router</strong> — বাসার network আর Internet-এর মাঝে, (৩) <strong>switch</strong> — পেছনের ৪টি Ethernet port, (৪) <strong>access point</strong> — Wi-Fi, এবং প্রায়শই (৫) <strong>NAT</strong> + <strong>firewall</strong> + <strong>DHCP server</strong>। এই বইয়ে যখন "router" বলা হবে, তখন শুধু ২ নম্বর কাজটি বোঝানো হবে। এই একীভূত বাক্সটিই বহু বিভ্রান্তির উৎস।</p>
+  </div>
+
+  <h2>2.8 পুরো পথের ছবি</h2>
+  <p>আপনার laptop থেকে একটি ওয়েবসাইটের server পর্যন্ত পথে যেসব component পড়ে:</p>
+
+  <div class="cb diagram"><pre>┌──────────┐
+│  Laptop  │  ← Application + OS + NIC
+└────┬─────┘
+     │ Wi-Fi (radio)
+     ▼
+┌──────────────────────────────────────┐
+│ বাসার বাক্স                            │
+│  Access Point → Switch → NAT →       │
+│  Firewall → Router → Modem           │
+└────┬─────────────────────────────────┘
+     │ Coax / Fiber / DSL
+     ▼
+┌──────────┐
+│   ISP    │  ← আপনার ISP-এর router-এর জাল
+└────┬─────┘
+     │
+     ▼
+┌──────────────────────────────┐
+│         INTERNET             │
+│  Backbone, peering, transit  │  ← বহু ISP, বহু router  [Ch 42]
+└────┬─────────────────────────┘
+     │
+     ▼
+┌──────────┐
+│Destination│
+│    ISP    │
+└────┬─────┘
+     │
+     ▼
+┌──────────────────────┐
+│ Data Center           │
+│  Router → Firewall →  │
+│  Load Balancer →      │  [Ch 47]
+│  Switch → Server      │
+└──────────────────────┘</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 লক্ষণীয়</div>
+    <p>উভয় প্রান্তেই প্রায় একই ক্রম: <em>host → switch → firewall → router → বাইরের জগৎ</em>। পার্থক্য শুধু মাত্রায় — বাসায় এই সব একটি প্লাস্টিকের বাক্সে, data center-এ প্রতিটি আলাদা এবং redundant যন্ত্র। কাঠামোটা একই।</p>
+  </div>
+
+  <h2>2.9 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Switch আর router মূলত একই জিনিস, শুধু router-এ Wi-Fi আছে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>এরা সম্পূর্ণ ভিন্ন layer-এ ভিন্ন address দেখে কাজ করে। Switch <strong>MAC address</strong> দেখে এবং <em>একটি</em> network-এর ভেতরে frame পাঠায়। Router <strong>IP address</strong> দেখে এবং <em>ভিন্ন</em> network-এর মধ্যে packet পাঠায়। Router প্রতিটি hop-এ frame-এর MAC নতুন করে লেখে, TTL কমায় — switch এর কিছুই করে না।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Client দুর্বল machine, server শক্তিশালী machine।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>Client এবং server হলো একটি নির্দিষ্ট কথোপকথনে নেওয়া <em>ভূমিকা</em>, hardware-এর শ্রেণি নয়। একটি Raspberry Pi server হতে পারে, আর একটি ৬৪-core workstation client হতে পারে। Technically পার্থক্যটা হলো: server <code>listen()</code> করে অপেক্ষায় থাকে, client <code>connect()</code> করে কথোপকথন শুরু করে।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 2 — আপনার নিজের network-এর component খুঁজুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — এই chapter-এর component গুলোর মধ্যে কোনগুলো আপনার নিজের setup-এ আছে এবং তাদের address কী।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার default gateway (মানে আপনার router) কোনটি?
+ip route | grep default          # Linux
+netstat -rn | grep default       # macOS
+
+# আপনার NIC গুলোর তালিকা এবং তাদের MAC address
+ip link                          # Linux
+ifconfig | grep ether            # macOS</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ip route</code>-এর output-এ পাবেন <code>default via 192.168.0.1 dev wlan0</code>-এর মতো একটি লাইন। এখানে <code>192.168.0.1</code> হলো আপনার বাসার সেই বাক্সটির router-অংশের IP, আর <code>wlan0</code> হলো যে NIC দিয়ে আপনি তার কাছে পৌঁছাচ্ছেন। <code>ip link</code>-এ প্রতিটি interface-এর পাশে <code>link/ether</code>-এর পরে যে ছয়টি hex জোড়া, সেটিই MAC address।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Gateway কোনো বিমূর্ত ধারণা নয় — এটি আপনার ঘরে রাখা একটি নির্দিষ্ট যন্ত্রের একটি নির্দিষ্ট IP address। আর আপনার machine-এর একাধিক interface আছে, প্রতিটির নিজস্ব MAC — অর্থাৎ MAC address machine-এর নয়, <em>interface</em>-এর।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Host = IP address আছে এমন যেকোনো device। Client/server হলো ভূমিকা, hardware-এর ধরন নয়।</li>
+      <li>NIC হলো hardware যা bytes ↔ signal রূপান্তর করে; প্রতিটি NIC-এর নিজস্ব MAC address।</li>
+      <li><strong>Switch = MAC দেখে, একটি network-এর ভেতরে</strong> (Layer 2)।</li>
+      <li><strong>Router = IP দেখে, network-এর মাঝে</strong> (Layer 3)।</li>
+      <li>Default gateway হলো সেই router-এর IP যাকে আপনি সব বাইরের traffic দেন।</li>
+      <li>বাসার "router" বাক্সটি একই সাথে modem + router + switch + AP + NAT + firewall + DHCP।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Switch এবং router কোন address দেখে সিদ্ধান্ত নেয়, এবং কেন সেই পার্থক্য?</summary>
+    <div class="ans"><p>Switch দেখে <strong>MAC address</strong>, কারণ তার কাজ একটি local network-এর ভেতরে frame পৌঁছে দেওয়া — সেখানে সবাই একই "ভবনে"। Router দেখে <strong>IP address</strong>, কারণ তার কাজ কোন <em>network</em>-এর দিকে packet পাঠাতে হবে তা ঠিক করা। MAC address-এ কোনো network-এর তথ্য নেই (এটি সমতল/flat), IP address-এ আছে (network portion + host portion) — তাই বিশ্বব্যাপী routing শুধু IP দিয়েই সম্ভব।</p></div>
+  </details>
+  <details class="qa"><summary>একটি machine একই সাথে client এবং server হতে পারে কি?</summary>
+    <div class="ans"><p>হ্যাঁ, এবং এটি খুবই সাধারণ। আপনার dev machine port 3000-এ listen করছে (server) আর একই সাথে database-এ connect করছে (client)। এমনকি একটি reverse proxy তার upstream-এর কাছে client এবং browser-এর কাছে server — একই সময়ে, একই process-এ।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার বাসার একটি বাক্স আসলে কয়টি ভিন্ন কাজ করছে?</summary>
+    <div class="ans"><p>অন্তত ছয়টি: modem (ISP-এর signal রূপান্তর), router (network-এর মাঝে forwarding), switch (Ethernet port গুলোর মধ্যে), access point (Wi-Fi), NAT (private ↔ public IP অনুবাদ), এবং সাধারণত DHCP server (device-দের IP বিতরণ) ও একটি basic firewall।</p></div>
+  </details>
+  <details class="qa"><summary>MAC address কি একটি computer-এর সাথে যুক্ত, নাকি অন্য কিছুর সাথে?</summary>
+    <div class="ans"><p>MAC address যুক্ত <strong>network interface</strong>-এর সাথে, computer-এর সাথে নয়। একটি laptop-এ Ethernet ও Wi-Fi আলাদা NIC মানে আলাদা MAC। Virtual interface (Docker bridge, VPN, VM) গুলোরও নিজস্ব MAC থাকে। তাই একটি machine-এ পাঁচ-দশটি MAC address থাকা স্বাভাবিক।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch1"><div class="d">পূর্ববর্তী</div><div class="t">Ch 1 — What Is a Computer Network?</div></a>
+    <a class="nx" href="#ch3"><div class="d">পরবর্তী</div><div class="t">Ch 3 — Network Layers</div></a>
+  </div>
+</section>

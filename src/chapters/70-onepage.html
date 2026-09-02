@@ -1,0 +1,139 @@
+<section class="chapter" id="onepage">
+  <div class="ch-eyebrow">Finale</div>
+  <h1>Networking in One Page</h1>
+  <p class="ch-lede">পুরো বইটি একটি পাতায়। এই দুটি ছবি দেখে যদি আপনি পুরো stack মনে মনে পুনর্নির্মাণ করতে পারেন, তাহলে বইটি তার কাজ করেছে।</p>
+
+  <h2>The Layer Stack</h2>
+
+  <div class="cb diagram"><pre>╔═══════════════════════════════════════════════════════════╗
+║  APPLICATION                                              ║
+║  HTTP · DNS · SMTP · SSH · gRPC                           ║
+║  ── "দুটি program কী ভাষায় কথা বলবে?"                       ║
+║  Unit: message   ·   Address: URL, hostname               ║
+╠═══════════════════════════════════════════════════════════╣
+║  SECURITY                                                 ║
+║  TLS 1.3                                                  ║
+║  ── "কেউ যেন পড়তে, বদলাতে বা ছদ্মবেশ ধরতে না পারে"          ║
+║  confidentiality + integrity + authentication             ║
+╠═══════════════════════════════════════════════════════════╣
+║  TRANSPORT                                                ║
+║  TCP · UDP · QUIC                                         ║
+║  ── "কোন process, এবং কতটা নির্ভরযোগ্যভাবে?"                 ║
+║  Unit: segment / datagram   ·   Address: port             ║
+║  TCP: seq, ACK, retransmit, flow ও congestion control     ║
+╠═══════════════════════════════════════════════════════════╣
+║  NETWORK                                                  ║
+║  IP · ICMP · routing · NAT                                ║
+║  ── "পৃথিবীর কোন host, এবং কোন পথে?"                        ║
+║  Unit: packet   ·   Address: IP (★ end-to-end ★)          ║
+║  hop-by-hop forwarding, longest prefix match, TTL         ║
+╠═══════════════════════════════════════════════════════════╣
+║  LINK                                                     ║
+║  Ethernet · Wi-Fi · ARP · switching                       ║
+║  ── "পরের যন্ত্রটিকে কীভাবে দেব?"                            ║
+║  Unit: frame   ·   Address: MAC (★ এক hop ★)              ║
+╠═══════════════════════════════════════════════════════════╣
+║  PHYSICAL                                                 ║
+║  Copper · Fiber · Radio                                   ║
+║  ── "0 আর 1 কে signal-এ কীভাবে বদলাব?"                     ║
+║  Unit: bit                                                ║
+╚═══════════════════════════════════════════════════════════╝</pre></div>
+
+  <h2>The Complete Request</h2>
+
+  <div class="cb diagram"><pre>                    USER
+                      │  https://api.example.com/users
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│ BROWSER / APPLICATION                                   │
+│   URL parse · HSTS · cache check                        │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ DNS                                          [Ch 25-27] │
+│   browser → OS → /etc/hosts → resolver                  │
+│   → root → TLD → authoritative → IP                     │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ OS KERNEL                                  [Ch 9-11,16] │
+│   routing lookup (local? → না → gateway)                 │
+│   ARP (gateway-এর MAC)                                   │
+│   socket() · ephemeral port · 4-tuple                   │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ TCP / QUIC                                  [Ch 17-22]  │
+│   handshake · seq · ACK · window · congestion control   │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ TLS                                         [Ch 31-33]  │
+│   ClientHello(SNI) → certificate → verify → session key │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ HTTP                                        [Ch 28-30]  │
+│   GET /users · Host · headers · body                    │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ ENCAPSULATION                                 [Ch 3-5]  │
+│   data → segment → packet → frame → bits                │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ NIC → SWITCH → NAT → ROUTER               [Ch 6-8,12-14]│
+│   প্রতি hop: নতুন MAC · TTL−1 · IP অপরিবর্তিত               │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ ISP → BGP → PEERING/TRANSIT → CABLE       [Ch 42-43]    │
+│   ★ এখানেই latency-র সিংহভাগ ★                            │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ CDN EDGE (cache HIT হলে এখানেই শেষ)          [Ch 46]    │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ DATA CENTER                                  [Ch 47, 7] │
+│   firewall → load balancer → switch → server            │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ SERVER KERNEL → PROCESS                     [Ch 15-16]  │
+│   frame → packet → segment → 4-tuple → socket buffer    │
+│   nginx read() → TLS decrypt → HTTP parse               │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ APPLICATION → CACHE → DATABASE                          │
+│   ★ প্রতিটি নিজেই আরেকটি সম্পূর্ণ network call ★           │
+└──────────────────────┬──────────────────────────────────┘
+                       ▼
+              RESPONSE — পুরো পথ উল্টো
+                       ▼
+                     USER</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 তিনটি বাক্য যা সব ধরে রাখে</div>
+    <p style="font-size:1.06rem;line-height:1.9">
+      <strong>১.</strong> প্রতিটি layer উপরের সব কিছুকে অস্বচ্ছ payload হিসেবে দেখে এবং শুধু নিজের header যোগ করে — এটিই encapsulation, এবং এটিই স্বাধীন বিবর্তন সম্ভব করে।<br><br>
+      <strong>২.</strong> MAC address এক hop-এর, IP address end-to-end, port একটি host-এর ভেতরে process বাছে, আর 4-tuple একটি নির্দিষ্ট connection চিহ্নিত করে — প্রতিটি পরিচয়ের একটি নির্দিষ্ট পরিধি আছে।<br><br>
+      <strong>৩.</strong> কেউ সবকিছু জানে না — router শুধু next hop জানে, DNS server শুধু "পরে কার কাছে যাবে" জানে, ISP শুধু তার upstream জানে। এই delegation-ই বৈশ্বিক scale সম্ভব করেছে।
+    </p>
+  </div>
+
+  <div class="box why">
+    <div class="bt">💡 শেষ কথা</div>
+    <p>আপনি এখন <code>GET https://api.example.com/users</code> দেখে পুরো যাত্রাটি মনে মনে দেখতে পান। আরও গুরুত্বপূর্ণ — একটি অপরিচিত সমস্যার মুখোমুখি হলে আপনি জানেন <em>কোথায় খুঁজতে হবে</em>: কোন layer, কোন tool, কোন প্রশ্ন।</p>
+    <p>এই বইয়ের কোনো তথ্য মুখস্থ রাখার দরকার নেই। যা দরকার তা হলো <strong>কাঠামোটি</strong> — কোন সমস্যার সমাধান কোন layer করে, এবং তারা কীভাবে একে অপরের উপর দাঁড়িয়ে আছে। বাকি সব বিস্তারিত পাঁচ মিনিটে খুঁজে নেওয়া যায়।</p>
+    <p style="margin-top:1.2em"><strong>পরবর্তী পদক্ষেপ:</strong> Lab গুলো আবার চালান, কিন্তু এবার নিজের project-এর উপর। আপনার নিজের API-তে <code>curl -w</code> চালান, নিজের server-এ <code>ss -ti</code> দেখুন, একটি বাস্তব সমস্যায় <code>tcpdump</code> ব্যবহার করুন। <strong>Mental model তখনই স্থায়ী হয় যখন সেটি নিজের কাজে প্রয়োগ করা হয়।</strong></p>
+  </div>
+
+  <div class="chnav">
+    <a href="#cheatsheet"><div class="d">পূর্ববর্তী</div><div class="t">Cheat Sheet</div></a>
+    <a class="nx" href="#hero"><div class="d">শুরুতে ফিরুন</div><div class="t">Networking Fundamentals</div></a>
+  </div>
+</section>

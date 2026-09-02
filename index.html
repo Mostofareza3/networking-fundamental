@@ -348,7 +348,6 @@ details.qa .ans strong{color:var(--text)}
     <div class="hc"><div class="n" style="font-size:1.15rem;font-family:var(--sans);letter-spacing:-.01em">43 Labs</div><div class="l">Linux hands-on</div></div>
   </div>
 </section>
-
 <section class="chapter" id="preface">
   <div class="ch-eyebrow">Preface</div>
   <h1>এই বইটি কীভাবে পড়বেন</h1>
@@ -461,7 +460,6 @@ MODEL 2 — Protocol Layering (একটি byte-এর মোড়ক)
   <h1>Networking Big Picture</h1>
   <p>Network কী, কোন সমস্যা সমাধান করে, কোন কোন component দিয়ে তৈরি, এবং কেন পুরো ব্যবস্থাটিকে layer-এ ভাগ করা হয়েছে।</p>
 </div>
-
 <section class="chapter" id="ch1">
   <div class="ch-eyebrow">Chapter 1</div>
   <h1>What Is a Computer Network?</h1>
@@ -672,7 +670,6 @@ ping -c 3 1.1.1.1</pre></div>
     <a class="nx" href="#ch2"><div class="d">পরবর্তী</div><div class="t">Ch 2 — Network Components</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch2">
   <div class="ch-eyebrow">Chapter 2</div>
   <h1>Network Components</h1>
@@ -1150,7 +1147,6 @@ curl -s https://example.com > /dev/null</pre></div>
   <h1>Data &amp; Packets</h1>
   <p>একই data-কে কখনো segment, কখনো packet, কখনো frame বলা হয় কেন? এবং packet-এর একটি সর্বোচ্চ আকার আছে কেন — সেই সীমা আপনার application-এ কী প্রভাব ফেলে?</p>
 </div>
-
 <section class="chapter" id="ch4">
   <div class="ch-eyebrow">Chapter 4</div>
   <h1>Bits, Bytes, Frames, Packets, and Segments</h1>
@@ -1327,7 +1323,6 @@ ping -c 1 -s 1400 1.1.1.1</pre></div>
     <a class="nx" href="#ch5"><div class="d">পরবর্তী</div><div class="t">Ch 5 — MTU and Packet Size</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch5">
   <div class="ch-eyebrow">Chapter 5</div>
   <h1>MTU and Packet Size</h1>
@@ -1520,7 +1515,6 @@ ping -D -s 1472 -c 1 1.1.1.1</pre></div>
   <h1>MAC &amp; Ethernet — Local Delivery</h1>
   <p>একটি local network-এর ভেতরে data কীভাবে সঠিক machine-এ পৌঁছায়। MAC address, Ethernet frame, switch-এর শেখার প্রক্রিয়া, এবং ARP — যে protocol IP আর MAC-এর মাঝখানের সেতু।</p>
 </div>
-
 <section class="chapter" id="ch6">
   <div class="ch-eyebrow">Chapter 6</div>
   <h1>MAC Addresses and Ethernet</h1>
@@ -1735,7 +1729,6 @@ arp -a                          # macOS / Linux দুটোতেই</pre></div
     <a class="nx" href="#ch7"><div class="d">পরবর্তী</div><div class="t">Ch 7 — Switches</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch7">
   <div class="ch-eyebrow">Chapter 7</div>
   <h1>Switches</h1>
@@ -2167,7 +2160,6 @@ ping -c 1 1.1.1.1</pre></div>
   <h1>IP — Global Addressing</h1>
   <p>IP address আসলে কী identify করে, subnet mask কেন প্রয়োজন, এবং আপনার machine কীভাবে সিদ্ধান্ত নেয় একটি packet সরাসরি পাঠাবে নাকি gateway-কে দেবে।</p>
 </div>
-
 <section class="chapter" id="ch9">
   <div class="ch-eyebrow">Chapter 9</div>
   <h1>IP Addresses</h1>
@@ -2651,7 +2643,6 @@ for i in $(seq 1 254); do (ping -c1 -W1 192.168.0.$i >/dev/null 2>&1 \
     <a class="nx" href="#ch11"><div class="d">পরবর্তী</div><div class="t">Ch 11 — Default Gateway</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch11">
   <div class="ch-eyebrow">Chapter 11</div>
   <h1>Default Gateway</h1>
@@ -2835,7 +2826,6 @@ traceroute -m 3 1.1.1.1          # প্রথম লাইনটিই আপ�
   <h1>Routing — Packet কীভাবে পথ খুঁজে পায়</h1>
   <p>Router কীভাবে সিদ্ধান্ত নেয়, একটি packet একাধিক router পেরোনোর সময় ঠিক কী কী বদলায় আর কী অপরিবর্তিত থাকে, এবং ICMP কীভাবে আমাদের সেই যাত্রা দেখতে দেয়।</p>
 </div>
-
 <section class="chapter" id="ch12">
   <div class="ch-eyebrow">Chapter 12</div>
   <h1>What Is Routing?</h1>
@@ -3330,7 +3320,6 @@ ping -c 1 -t 2 1.1.1.1     # TTL=2 → দ্বিতীয় router</pre></di
     <a class="nx" href="#ch14"><div class="d">পরবর্তী</div><div class="t">Ch 14 — ICMP</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch14">
   <div class="ch-eyebrow">Chapter 14</div>
   <h1>ICMP — Network-এর নিজস্ব বার্তাবাহক</h1>
@@ -3541,7 +3530,6 @@ traceroute -n 1.1.1.1</pre></div>
   <h1>Transport Layer — Process থেকে Process</h1>
   <p>IP packet-কে সঠিক machine-এ পৌঁছে দেয়। কিন্তু সেই machine-এ ১০০টি program চলছে — কোনটি পাবে? আর অবিশ্বস্ত একটি network-এর উপর নির্ভরযোগ্য যোগাযোগ কীভাবে তৈরি হয়? এই অংশ transport layer-এর, এবং একজন software engineer-এর জন্য এটিই বইয়ের সবচেয়ে সরাসরি প্রাসঙ্গিক অংশ।</p>
 </div>
-
 <section class="chapter" id="ch15">
   <div class="ch-eyebrow">Chapter 15</div>
   <h1>Why Do We Need a Transport Layer?</h1>
@@ -4397,7 +4385,6 @@ Timeout হলে RTO দ্বিগুণ হয় (exponential backoff):
     <a class="nx" href="#ch18"><div class="d">পরবর্তী</div><div class="t">Ch 18 — TCP Handshake</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch18">
   <div class="ch-eyebrow">Chapter 18</div>
   <h1>TCP Three-Way Handshake</h1>
@@ -4898,7 +4885,6 @@ nstat -az | grep -i retrans      # Linux, আরও বিস্তারিত<
     <a class="nx" href="#ch20"><div class="d">পরবর্তী</div><div class="t">Ch 20 — Flow Control</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch20">
   <div class="ch-eyebrow">Chapter 20</div>
   <h1>Flow Control — Receiver-কে ডুবতে না দেওয়া</h1>
@@ -5323,7 +5309,6 @@ done</pre></div>
     <a class="nx" href="#ch22"><div class="d">পরবর্তী</div><div class="t">Ch 22 — Connection Termination</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch22">
   <div class="ch-eyebrow">Chapter 22</div>
   <h1>TCP Connection Termination এবং TIME_WAIT</h1>
@@ -5754,7 +5739,6 @@ dig +short example.com</pre></div>
     <a class="nx" href="#ch24"><div class="d">পরবর্তী</div><div class="t">Ch 24 — TCP vs UDP</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch24">
   <div class="ch-eyebrow">Chapter 24</div>
   <h1>TCP vs UDP — সঠিক তুলনা</h1>
@@ -5882,7 +5866,6 @@ Where      kernel     kernel     user space ★</pre></div>
   <h1>DNS — নাম থেকে ঠিকানায়</h1>
   <p>মানুষ নাম মনে রাখে, machine সংখ্যা বোঝে। এই দুইয়ের মাঝখানে দাঁড়িয়ে আছে পৃথিবীর বৃহত্তম distributed database — এবং প্রতিটি web request-এর প্রথম ধাপ এখানেই।</p>
 </div>
-
 <section class="chapter" id="ch25">
   <div class="ch-eyebrow">Chapter 25</div>
   <h1>Why DNS Exists</h1>
@@ -6039,7 +6022,6 @@ example github  wikipedia      ...    com   edu
     <a class="nx" href="#ch26"><div class="d">পরবর্তী</div><div class="t">Ch 26 — DNS Resolution</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch26">
   <div class="ch-eyebrow">Chapter 26</div>
   <h1>DNS Resolution — একটি নাম যেভাবে IP হয়</h1>
@@ -6579,7 +6561,6 @@ dig thisdoesnotexist12345.example.com | grep -E "status|SOA"</pre></div>
   <h1>HTTP — Application-দের ভাষা</h1>
   <p>TCP byte পৌঁছে দেয়, কিন্তু সেই byte-গুলোর মানে কী? HTTP হলো সেই চুক্তি যা দুটি program-কে একই ভাষায় কথা বলতে দেয় — এবং এটি এত সরল যে আপনি হাতে টাইপ করেও একটি HTTP request পাঠাতে পারেন।</p>
 </div>
-
 <section class="chapter" id="ch28">
   <div class="ch-eyebrow">Chapter 28</div>
   <h1>HTTP Fundamentals</h1>
@@ -7102,7 +7083,6 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "If-None-Match: $etag" https://examp
     <a class="nx" href="#ch30"><div class="d">পরবর্তী</div><div class="t">Ch 30 — HTTP Connections</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch30">
   <div class="ch-eyebrow">Chapter 30</div>
   <h1>HTTP Connections — 1.0 থেকে 3 পর্যন্ত</h1>
@@ -7375,7 +7355,6 @@ curl -sI https://www.cloudflare.com | grep -i alt-svc</pre></div>
   <h1>TLS &amp; HTTPS — নিরাপত্তার স্তর</h1>
   <p>এখন পর্যন্ত আমরা ধরে নিয়েছি network বিশ্বস্ত। এটি সত্য নয়। এই অংশে দেখব — কী কী ঝুঁকি আছে, cryptography-র কোন ধারণাগুলো সেগুলোর সমাধান দেয়, এবং TLS handshake-এ ঠিক কী ঘটে।</p>
 </div>
-
 <section class="chapter" id="ch31">
   <div class="ch-eyebrow">Chapter 31</div>
   <h1>Why HTTPS?</h1>
@@ -8302,7 +8281,6 @@ echo "TLS 1.3:"; curl -w "%{time_appconnect}\n" -o /dev/null -s --tlsv1.3 https:
   <h1>NAT &amp; Firewall</h1>
   <p>পৃথিবীর অধিকাংশ device-এর কোনো public IP নেই, তবু তারা Internet ব্যবহার করে। কীভাবে? আর কারা সিদ্ধান্ত নেয় কোন packet ঢুকতে পারবে আর কোনটি পারবে না?</p>
 </div>
-
 <section class="chapter" id="ch34">
   <div class="ch-eyebrow">Chapter 34</div>
   <h1>NAT — Network Address Translation</h1>
@@ -8541,7 +8519,6 @@ curl -s https://example.com > /dev/null
     <a class="nx" href="#ch35"><div class="d">পরবর্তী</div><div class="t">Ch 35 — Firewalls</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch35">
   <div class="ch-eyebrow">Chapter 35</div>
   <h1>Firewalls</h1>
@@ -8796,7 +8773,6 @@ sudo cat /proc/net/nf_conntrack 2>/dev/null | head</pre></div>
   <h1>Network Performance</h1>
   <p>Latency, bandwidth, throughput, jitter, packet loss — এই পাঁচটি শব্দ প্রায়ই একে অপরের বদলে ব্যবহৃত হয়। এরা সম্পূর্ণ ভিন্ন জিনিস, এবং কোনটি আপনার সমস্যা তা না জানলে ভুল জায়গায় optimization হয়।</p>
 </div>
-
 <section class="chapter" id="ch36">
   <div class="ch-eyebrow">Chapter 36</div>
   <h1>Latency</h1>
@@ -9003,7 +8979,6 @@ ping -c 20 1.1.1.1 | tail -2</pre></div>
     <a class="nx" href="#ch37"><div class="d">পরবর্তী</div><div class="t">Ch 37 — Bandwidth vs Throughput</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch37">
   <div class="ch-eyebrow">Chapter 37</div>
   <h1>Bandwidth vs Throughput</h1>
@@ -9171,7 +9146,6 @@ sysctl net.ipv4.tcp_rmem net.ipv4.tcp_wmem 2>/dev/null</pre></div>
     <a class="nx" href="#ch38"><div class="d">পরবর্তী</div><div class="t">Ch 38 — Packet Loss &amp; Jitter</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch38">
   <div class="ch-eyebrow">Chapter 38</div>
   <h1>Packet Loss এবং Jitter</h1>
@@ -9371,7 +9345,6 @@ ss -ti | grep -E "retrans|lost" | head
   <h1>Network Debugging</h1>
   <p>এই অংশটি সবচেয়ে ব্যবহারিক। প্রতিটি command-এর জন্য: এটি কী করে, কোন networking concept প্রকাশ করে, output কীভাবে পড়বেন, এবং কখন একজন developer-এর এটি লাগে।</p>
 </div>
-
 <section class="chapter" id="ch39">
   <div class="ch-eyebrow">Chapter 39</div>
   <h1>Debugging Toolkit এবং Socket Inspection</h1>
@@ -9906,7 +9879,6 @@ dig $D | grep "Query time"</pre></div>
     <a class="nx" href="#ch41"><div class="d">পরবর্তী</div><div class="t">Ch 41 — Packet Capture</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch41">
   <div class="ch-eyebrow">Chapter 41</div>
   <h1>Packet Capture — tcpdump</h1>
@@ -10166,7 +10138,6 @@ tcpdump -r /tmp/cap.pcap -n | head -20</pre></div>
   <h1>The Internet</h1>
   <p>Internet কোনো একক network নয় — এটি হাজার হাজার স্বাধীন network-এর একটি স্বেচ্ছাসম্মত জোট। কেউ এর মালিক নয়, কেউ এটি চালায় না, তবু এটি কাজ করে।</p>
 </div>
-
 <section class="chapter" id="ch42">
   <div class="ch-eyebrow">Chapter 42</div>
   <h1>What Is the Internet?</h1>
@@ -10392,7 +10363,6 @@ curl -s https://ipinfo.io/json</pre></div>
     <a class="nx" href="#ch43"><div class="d">পরবর্তী</div><div class="t">Ch 43 — Crossing the Internet</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch43">
   <div class="ch-eyebrow">Chapter 43</div>
   <h1>একটি packet যেভাবে Internet পাড়ি দেয়</h1>
@@ -10619,7 +10589,6 @@ ip neigh | grep $(ip route | awk '/default/ {print $3}')</pre></div>
   <h1>Modern Networking</h1>
   <p>HTTP/2, QUIC, CDN, load balancing — এই চারটি প্রযুক্তি আধুনিক web-এর গতি নির্ধারণ করে। প্রতিটির পেছনে একটি নির্দিষ্ট সমস্যা আছে, যা আগের chapter গুলোতে আমরা দেখেছি।</p>
 </div>
-
 <section class="chapter" id="ch44">
   <div class="ch-eyebrow">Chapter 44</div>
   <h1>HTTP/2 — গভীরে</h1>
@@ -10778,7 +10747,6 @@ HPACK-এর তিনটি কৌশল:
     <a class="nx" href="#ch45"><div class="d">পরবর্তী</div><div class="t">Ch 45 — HTTP/3 and QUIC</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch45">
   <div class="ch-eyebrow">Chapter 45</div>
   <h1>HTTP/3 এবং QUIC</h1>
@@ -11282,7 +11250,6 @@ curl -w "CDN:    %{time_total}s\n" -o /dev/null -s https://www.cloudflare.com</p
     <a class="nx" href="#ch47"><div class="d">পরবর্তী</div><div class="t">Ch 47 — Load Balancing</div></a>
   </div>
 </section>
-
 <section class="chapter" id="ch47">
   <div class="ch-eyebrow">Chapter 47</div>
   <h1>Load Balancing</h1>
@@ -11560,7 +11527,6 @@ pkill -f "http.server 800"; nginx -s stop 2>/dev/null</pre></div>
   <h1>End-to-End Mental Model</h1>
   <p>এটি বইয়ের সবচেয়ে গুরুত্বপূর্ণ অধ্যায়। এতক্ষণ আমরা প্রতিটি টুকরো আলাদাভাবে দেখেছি — এবার সবগুলো এক জায়গায় জোড়া লাগবে, একটি একক, অবিচ্ছিন্ন গল্পে।</p>
 </div>
-
 <section class="chapter" id="ch48">
   <div class="ch-eyebrow">Chapter 48 · Capstone</div>
   <h1>What Happens When You Type a URL?</h1>
@@ -12115,7 +12081,6 @@ TLS %{time_appconnect}s → TTFB %{time_starttransfer}s → \
   <h1>Developer Mental Models</h1>
   <p>এতক্ষণ আমরা নিচ থেকে উপরে গড়েছি। এবার উল্টো দিক — সেই প্রশ্নগুলো যা প্রতিটি developer-এর মনে জাগে, এবং যাদের উত্তর এখন আপনি নিজেই বের করতে পারবেন।</p>
 </div>
-
 <section class="chapter" id="ch49">
   <div class="ch-eyebrow">Chapter 49</div>
   <h1>১৫টি প্রশ্ন, ১৫টি mental model</h1>
@@ -12503,7 +12468,6 @@ Response → পুরো পথ উল্টো → sequence অনুযায
   <h1>Cheat Sheet</h1>
   <p>দ্রুত রেফারেন্স — port, command, এবং প্রতিটি core concept-এর এক লাইনের mental model।</p>
 </div>
-
 <section class="chapter" id="cheatsheet">
   <div class="ch-eyebrow">Reference</div>
   <h1>Quick Reference</h1>
@@ -12692,7 +12656,6 @@ Latency-র উপাদান:
     <a class="nx" href="#onepage"><div class="d">পরবর্তী</div><div class="t">Networking in One Page</div></a>
   </div>
 </section>
-
 <section class="chapter" id="onepage">
   <div class="ch-eyebrow">Finale</div>
   <h1>Networking in One Page</h1>

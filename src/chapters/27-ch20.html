@@ -1,0 +1,189 @@
+<section class="chapter" id="ch20">
+  <div class="ch-eyebrow">Chapter 20</div>
+  <h1>Flow Control — Receiver-কে ডুবতে না দেওয়া</h1>
+  <p class="ch-lede">একটি শক্তিশালী server একটি দুর্বল IoT device-এ data পাঠাচ্ছে। Network-এ কোনো সমস্যা নেই, কিন্তু receiver process করতে পারছে না। TCP এই পরিস্থিতি কীভাবে সামলায় — এবং এর সাথে আপনার code-এর backpressure-এর সম্পর্ক কী?</p>
+
+  <h2>20.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>Sender: 1 Gbps server, দ্রুত ডেটা তৈরি করছে
+Receiver: ছোট device, ধীরে process করছে
+
+Sender পাঠাল ────────────────────────────▶ Receiver buffer
+                                              [████████] পূর্ণ!
+Sender আরও পাঠাল ──────────────────────────▶ ✗ জায়গা নেই
+                                              → ফেলে দিতে হবে
+                                              → TCP retransmit করবে
+                                              → আবার ফেলে দেবে
+                                              → অসীম চক্র</pre></div>
+
+  <p>Network দোষী নয়, congestion নেই, packet loss নেই — শুধু <strong>receiver পারছে না</strong>। এটি একটি সম্পূর্ণ আলাদা সমস্যা, এবং এর সমাধানও আলাদা।</p>
+
+  <div class="box why">
+    <div class="bt">💡 Why Flow Control</div>
+    <p>সমাধান সহজ এবং মার্জিত: <strong>receiver নিজেই বলে দেবে সে আর কতটুকু নিতে পারবে।</strong> প্রতিটি ACK-এর সাথে সে একটি সংখ্যা পাঠায় — receive window। Sender সেই সীমা মেনে চলে।</p>
+    <p>এটি একটি <em>explicit, receiver-driven</em> ব্যবস্থা — congestion control-এর ঠিক উল্টো, যেখানে sender অনুমান করে (Ch 21)।</p>
+  </div>
+
+  <h2>20.2 Receive Window</h2>
+
+  <div class="cb diagram"><pre>Receiver-এর buffer:
+
+  ┌────────────────────────────────────────────────┐
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓ │              ফাঁকা                 │
+  │ পেয়েছি,       │                                 │
+  │ app পড়েনি     │                                 │
+  └──────────────┴─────────────────────────────────┘
+                 ◀────── rwnd = 32 KB ─────────────▶
+
+  প্রতিটি ACK-এ receiver এই সংখ্যাটি পাঠায়:
+      ACK = 5001, window = 32768
+
+  Sender-এর নিয়ম:
+      উড়ন্ত (unacknowledged) data ≤ rwnd
+
+
+Application যত পড়ে, তত জায়গা খালি হয়:
+
+  app read() করল 20 KB
+  ┌──────┬─────────────────────────────────────────┐
+  │ ▓▓▓  │                 ফাঁকা                     │
+  └──────┴─────────────────────────────────────────┘
+         ◀────────── rwnd = 52 KB ─────────────────▶
+
+  পরের ACK-এ:  window = 53248  ← বড় হলো</pre></div>
+
+  <h2>20.3 Zero Window এবং Window Probe</h2>
+
+  <div class="cb diagram"><pre>Receiver-এর buffer সম্পূর্ণ ভরে গেল:
+
+  Receiver ──▶ ACK, window = 0   "থামো! আর নিতে পারছি না"
+
+  Sender পাঠানো বন্ধ করল। কিন্তু এখন একটি সমস্যা:
+
+  পরে receiver-এর application কিছু পড়ল, জায়গা হলো।
+  Receiver একটি window update পাঠাল: window = 20000
+                                          │
+                                          ✗ হারিয়ে গেল!
+
+  এখন deadlock:
+    Sender: "window 0, তাই অপেক্ষা করছি"
+    Receiver: "আমি তো জায়গা আছে বলেছিলাম, ও পাঠাচ্ছে না কেন?"
+    উভয়েই চিরকাল অপেক্ষা করবে।
+
+
+সমাধান — Persist Timer এবং Window Probe:
+
+  Sender একটি timer চালায়। মেয়াদ শেষে সে একটি
+  ছোট probe packet পাঠায় (সাধারণত ১ byte):
+
+  Sender ──▶ [1 byte probe]
+  Receiver ──▶ ACK, window = 20000   ← আসল অবস্থা জানা গেল
+
+  Probe-এর ব্যবধান exponentially বাড়তে থাকে:
+    5s → 10s → 20s → 40s → 60s (সর্বোচ্চ)</pre></div>
+
+  <div class="box tip">
+    <div class="bt">✓ একটি চিরন্তন নকশা-নীতি</div>
+    <p>এই সমাধানটি একটি সাধারণ distributed systems নীতির উদাহরণ: <strong>গুরুত্বপূর্ণ অবস্থার পরিবর্তন শুধু একটি বার্তার উপর নির্ভর করবেন না; পর্যায়ক্রমে যাচাই করার ব্যবস্থা রাখুন।</strong> কারণ যেকোনো একক বার্তা হারাতে পারে, এবং তখন দুই পক্ষের ধারণা চিরকালের জন্য ভিন্ন হয়ে যেতে পারে।</p>
+    <p>আপনি নিজের distributed system-এও একই কৌশল দেখবেন: heartbeat, periodic reconciliation, TTL-ভিত্তিক refresh। TCP-র persist timer এই ধারণার একটি চমৎকার, ছোট উদাহরণ।</p>
+  </div>
+
+  <h2>20.4 Flow Control এবং আপনার code-এর Backpressure</h2>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — একটি অবিচ্ছিন্ন শৃঙ্খল</div>
+    <p>Flow control কোনো বিচ্ছিন্ন network-বৈশিষ্ট্য নয়। এটি একটি শৃঙ্খলের অংশ, যা আপনার application-এর <code>write()</code> থেকে শুরু করে অন্য প্রান্তের application-এর <code>read()</code> পর্যন্ত বিস্তৃত:</p>
+    <div class="cb diagram"><pre>Receiver-এর app ধীরে read() করছে
+        ↓
+Receiver-এর kernel buffer ভরে যাচ্ছে
+        ↓
+rwnd ছোট হচ্ছে → ACK-এ সেটি ঘোষিত হচ্ছে
+        ↓
+Sender-এর kernel পাঠানো কমাচ্ছে
+        ↓
+Sender-এর send buffer ভরে যাচ্ছে
+        ↓
+Sender-এর app-এর write() block করছে / EAGAIN দিচ্ছে
+        ↓
+আপনার code ধীর হয়ে যাচ্ছে — এবং এটাই কাম্য!</pre></div>
+    <p><strong>Receiver-এর ধীরগতি network পেরিয়ে sender-এর application পর্যন্ত পৌঁছে গেল।</strong> এটাই backpressure — এবং এটি TCP-র একটি অন্তর্নিহিত বৈশিষ্ট্য, যা আপনি বিনামূল্যে পাচ্ছেন।</p>
+  </div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — backpressure উপেক্ষা করলে</div>
+    <div class="cb"><span class="cb-lang">js</span><pre>// ✗ ভুল — backpressure উপেক্ষা করা
+for (const row of millionRows) {
+  socket.write(JSON.stringify(row));   // return value দেখছি না!
+}
+// Node.js kernel buffer ভরে গেলে বাকিটা নিজের memory-তে
+// জমাতে থাকে → RSS বাড়তে থাকে → OOM kill
+
+// ✓ সঠিক — backpressure মানা
+for (const row of millionRows) {
+  if (!socket.write(JSON.stringify(row))) {
+    await once(socket, "drain");       // kernel buffer খালি হওয়ার অপেক্ষা
+  }
+}
+
+// ✓ আরও ভালো — stream-কেই কাজটা করতে দিন
+pipeline(rowStream, jsonTransform, socket, callback);</pre></div>
+    <p>"আমার Node.js service-এ memory leak" — এই অভিযোগের একটি বড় অংশ আসলে leak নয়, উপেক্ষিত backpressure। TCP ঠিকই সংকেত দিচ্ছিল, application সেটি শোনেনি এবং data নিজের heap-এ জমিয়েছে।</p>
+  </div>
+
+  <h2>20.5 Flow Control বনাম Congestion Control</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th></th><th>Flow Control</th><th>Congestion Control</th></tr></thead>
+    <tbody>
+      <tr><td><strong>কাকে রক্ষা করে</strong></td><td>Receiver-কে</td><td>Network-কে</td></tr>
+      <tr><td><strong>সমস্যা</strong></td><td>Receiver ধীর</td><td>পথের কোথাও ভিড়</td></tr>
+      <tr><td><strong>সংকেত</strong></td><td><strong>স্পষ্ট</strong> — receiver window ঘোষণা করে</td><td><strong>অনুমান</strong> — packet loss / delay দেখে</td></tr>
+      <tr><td><strong>Window</strong></td><td><code>rwnd</code></td><td><code>cwnd</code></td></tr>
+      <tr><td><strong>কে ঠিক করে</strong></td><td>Receiver</td><td>Sender নিজে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="cb diagram"><pre>Sender একসাথে দুটোই মানে:
+
+    কার্যকর window = min(rwnd, cwnd)
+
+দুটির যেটি ছোট, সেটিই সীমা।
+
+  rwnd ছোট → receiver ধীর
+  cwnd ছোট → network ভিড়
+
+Debugging-এ এটি গুরুত্বপূর্ণ: throughput কম হলে
+প্রথম প্রশ্ন — কোন window সীমাবদ্ধ করছে?
+`ss -ti` তে rcv_space (rwnd) এবং cwnd দুটোই দেখা যায়।</pre></div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Flow control receiver-কে অতিরিক্ত data থেকে রক্ষা করে — network-এর সমস্যা নয়, receiver-এর সামর্থ্যের প্রশ্ন।</li>
+      <li>Receiver প্রতিটি ACK-এ <code>window</code> ঘোষণা করে — একটি <strong>স্পষ্ট</strong> সংকেত।</li>
+      <li>Window 0 হলে sender থামে; persist timer দিয়ে সে পর্যায়ক্রমে probe পাঠিয়ে deadlock এড়ায়।</li>
+      <li>Flow control আপনার application-এর <code>write()</code> পর্যন্ত পৌঁছায় — এটিই <strong>backpressure</strong>।</li>
+      <li>Backpressure উপেক্ষা করলে data application-এর নিজের memory-তে জমে (আপাত "memory leak")।</li>
+      <li><strong>কার্যকর window = min(rwnd, cwnd)</strong> — flow control ও congestion control একসাথে কাজ করে।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Flow control এবং congestion control — মূল পার্থক্য কী?</summary>
+    <div class="ans"><p>Flow control <strong>receiver-কে</strong> রক্ষা করে এবং এর সংকেত <strong>স্পষ্ট</strong> — receiver নিজেই window ঘোষণা করে বলে দেয় সে কতটুকু নিতে পারবে। Congestion control <strong>network-কে</strong> রক্ষা করে এবং এর সংকেত <strong>অনুমাননির্ভর</strong> — কেউ বলে না, sender packet loss বা বর্ধিত delay দেখে নিজেই সিদ্ধান্ত নেয়।</p></div>
+  </details>
+  <details class="qa"><summary>Window probe না থাকলে কী সমস্যা হতো?</summary>
+    <div class="ans"><p>Receiver window=0 ঘোষণা করার পর যখন জায়গা খালি হয় এবং সে window update পাঠায় — সেই update packet-টি হারিয়ে যেতে পারে। তখন sender চিরকাল ভাববে window এখনো 0, আর receiver ভাববে সে জানিয়ে দিয়েছে। Deadlock। Persist timer সেই একক বার্তার উপর নির্ভরতা ভেঙে দেয় — sender নিজেই পর্যায়ক্রমে জিজ্ঞেস করে।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার Node.js service-এর memory ধীরে ধীরে বাড়ছে, একটি বড় data pipeline চালানোর সময়। প্রথম সন্দেহ?</summary>
+    <div class="ans"><p>উপেক্ষিত backpressure। <code>socket.write()</code>-এর return value না দেখলে (বা <code>stream.pipe()</code>/<code>pipeline()</code> ব্যবহার না করলে) kernel buffer ভরে যাওয়ার পর Node.js বাকি data নিজের heap-এ জমাতে থাকে। এটি leak নয় — data যথাসময়ে যাবে — কিন্তু receiver যদি যথেষ্ট ধীর হয়, heap বাড়তেই থাকবে যতক্ষণ না OOM। সমাধান: <code>drain</code> event মানুন বা <code>pipeline()</code> ব্যবহার করুন।</p></div>
+  </details>
+  <details class="qa"><summary>Sender-এর কার্যকর window কীভাবে নির্ধারিত হয়?</summary>
+    <div class="ans"><p><code>min(rwnd, cwnd)</code> — receive window এবং congestion window-এর যেটি ছোট। Receiver ধীর হলে rwnd সীমাবদ্ধকারী; network ভিড় থাকলে cwnd। <code>ss -ti</code> দিয়ে দুটোই দেখে বোঝা যায় কোনটি প্রকৃত bottleneck।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch19"><div class="d">পূর্ববর্তী</div><div class="t">Ch 19 — TCP Data Transfer</div></a>
+    <a class="nx" href="#ch21"><div class="d">পরবর্তী</div><div class="t">Ch 21 — Congestion Control</div></a>
+  </div>
+</section>

@@ -1,0 +1,233 @@
+<section class="chapter" id="ch12">
+  <div class="ch-eyebrow">Chapter 12</div>
+  <h1>What Is Routing?</h1>
+  <p class="ch-lede">Routing-এর সবচেয়ে বিস্ময়কর দিক হলো — কোনো router-ই পুরো পথটা জানে না। প্রতিটি router শুধু <em>একটি</em> সিদ্ধান্ত নেয়: "পরের জন কে?" তবু packet ঠিক গন্তব্যে পৌঁছে যায়।</p>
+
+  <h2>12.1 Why does this exist?</h2>
+  <p>Chapter 11-এ আমরা দেখলাম আপনার machine একটি সিদ্ধান্ত নেয় — local নাকি gateway। Router-এর কাজ একই, শুধু বড় পরিসরে: <em>"এই packet-টি আমার কোন interface দিয়ে, কার কাছে পাঠাব?"</em></p>
+
+  <div class="box why">
+    <div class="bt">💡 Why hop-by-hop</div>
+    <p>একটি বিকল্প design হতে পারত — sender পুরো পথটি নির্ধারণ করে packet-এ লিখে দেবে (source routing)। কিন্তু:</p>
+    <ul>
+      <li>Sender-কে পুরো Internet-এর topology জানতে হতো,</li>
+      <li>কোনো link ভেঙে গেলে চলমান সব packet অকেজো হয়ে যেত,</li>
+      <li>নিরাপত্তার ঝুঁকি — যে কেউ traffic-কে ইচ্ছেমতো পথে চালাতে পারত (এই কারণেই IPv4-এর source routing option কার্যত সব জায়গায় বন্ধ)।</li>
+    </ul>
+    <p><strong>Hop-by-hop routing</strong> এই সবগুলোর সমাধান করে। প্রতিটি router শুধু নিজের প্রতিবেশীদের চেনে এবং একটি স্থানীয় সিদ্ধান্ত নেয়। কোনো link ভাঙলে শুধু কাছের router-দের নতুন করে ভাবতে হয়, বাকিদের নয়। এটি একটি <strong>distributed algorithm</strong> — কোনো কেন্দ্রীয় নিয়ন্ত্রক ছাড়াই সবাই মিলে একটি বৈশ্বিক সমস্যা সমাধান করে।</p>
+  </div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>Routing-কে ভাবুন অচেনা শহরে পথ জিজ্ঞেস করার মতো। আপনি কাউকে জিজ্ঞেস করলেন "রেলস্টেশন কোন দিকে?" সে পুরো manzil-এর মানচিত্র দেয় না — শুধু বলে "সোজা গিয়ে ডানে ঘুরুন"। পরের মোড়ে আবার জিজ্ঞেস করবেন। প্রত্যেকে শুধু <em>পরের ধাপ</em> জানে, তবু আপনি পৌঁছে যান।</p>
+    <p>একটি packet-ও ঠিক তাই করে। এবং packet নিজে কিছু মনে রাখে না — প্রতিটি router-ই স্বাধীনভাবে সিদ্ধান্ত নেয়। এজন্যই IP-কে বলা হয় <em>stateless</em>।</p>
+  </div>
+
+  <h2>12.2 Routing Table</h2>
+  <p>প্রতিটি router (এবং প্রতিটি host) একটি <strong>routing table</strong> রাখে। প্রতিটি entry-তে থাকে:</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>অংশ</th><th>অর্থ</th><th>উদাহরণ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Destination prefix</strong></td><td>কোন network-এর জন্য এই নিয়ম</td><td><code>10.0.5.0/24</code></td></tr>
+      <tr><td><strong>Next hop</strong></td><td>কার কাছে দিতে হবে</td><td><code>via 172.16.0.2</code></td></tr>
+      <tr><td><strong>Interface</strong></td><td>কোন NIC দিয়ে বেরোবে</td><td><code>dev eth1</code></td></tr>
+      <tr><td><strong>Metric / cost</strong></td><td>একাধিক পথ থাকলে অগ্রাধিকার</td><td><code>metric 100</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>12.3 Longest Prefix Match — সবচেয়ে নির্দিষ্ট route জেতে</h2>
+  <p>একটি destination একাধিক route-এর সাথে মিলতে পারে। কোনটি প্রয়োগ হবে? উত্তর: <strong>যেটি সবচেয়ে নির্দিষ্ট</strong>, অর্থাৎ যার prefix সবচেয়ে দীর্ঘ।</p>
+
+  <div class="cb diagram"><pre>Destination: 10.0.5.20
+
+Routing Table:
+┌─────────────────┬────────────┬──────────────────────────┐
+│ Prefix          │ Next hop   │ মিলছে?                    │
+├─────────────────┼────────────┼──────────────────────────┤
+│ 10.0.5.0/24     │ Router A   │ ✓ 10.0.5.x → হ্যাঁ  (24)  │ ← জিতল
+│ 10.0.0.0/16     │ Router B   │ ✓ 10.0.x.x → হ্যাঁ  (16)  │
+│ 10.0.0.0/8      │ Router C   │ ✓ 10.x.x.x → হ্যাঁ  (8)   │
+│ 0.0.0.0/0       │ Router D   │ ✓ যেকোনো কিছু      (0)    │
+└─────────────────┴────────────┴──────────────────────────┘
+
+চারটিই মিলছে। কিন্তু /24 সবচেয়ে নির্দিষ্ট → Router A জেতে।
+
+Bit-এর ভাষায়:
+  10.0.5.20  = 00001010.00000000.00000101.00010100
+  /24 মানে প্রথম 24 bit মিলতে হবে  → সবচেয়ে কঠিন শর্ত
+  /0  মানে ০টি bit মিলতে হবে       → সবচেয়ে সহজ শর্ত
+
+  যে বেশি bit মিলিয়েছে, সে বেশি "জানে" ⇒ তার সিদ্ধান্ত নির্ভরযোগ্য</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 কেন এই নিয়ম যুক্তিসঙ্গত</div>
+    <p>একটি <code>/24</code> route মানে কেউ বলছে "আমি ঠিক এই ২৫৪টি address সম্পর্কে জানি"। একটি <code>/0</code> route মানে "আমি কিছুই জানি না, সব আমাকে দাও"। স্বভাবতই নির্দিষ্ট জ্ঞান অস্পষ্ট অনুমানের চেয়ে ভালো।</p>
+    <p>এই একটি নিয়মই <strong>route aggregation</strong>-কে সম্ভব করে: একটি ISP <code>203.0.113.0/24</code> ঘোষণা করতে পারে, আর তার নিজের ভেতরে <code>203.0.113.64/26</code>-এর জন্য আলাদা নিয়ম রাখতে পারে। বাইরের পৃথিবীর কাছে একটি লাইন, ভেতরে বিস্তারিত।</p>
+  </div>
+
+  <h2>12.4 Routing table-এ ঢোকে কীভাবে</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>উৎস</th><th>কীভাবে</th><th>কোথায় ব্যবহৃত</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Directly connected</strong></td><td>Interface-এ IP দেওয়ামাত্র kernel নিজে যোগ করে</td><td>সব জায়গায়</td></tr>
+      <tr><td><strong>Static route</strong></td><td>মানুষ হাতে লিখে দেয় (<code>ip route add</code>)</td><td>ছোট network, বিশেষ ক্ষেত্র</td></tr>
+      <tr><td><strong>DHCP</strong></td><td>DHCP server default gateway জানিয়ে দেয়</td><td>client machine</td></tr>
+      <tr><td><strong>IGP</strong> (OSPF, IS-IS)</td><td>একটি প্রতিষ্ঠানের ভেতরের router-রা নিজেদের মধ্যে route বিনিময় করে</td><td>enterprise, data center</td></tr>
+      <tr><td><strong>BGP</strong></td><td>ভিন্ন ভিন্ন প্রতিষ্ঠান (AS) নিজেদের মধ্যে route বিনিময় করে</td><td>Internet-এর মেরুদণ্ড</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ এই বইয়ের সীমানা</div>
+    <p>OSPF ও BGP-র configuration এই বইয়ের বিষয় নয়। যা জানা দরকার তা হলো: <strong>routing table কেউ না কেউ পূরণ করে</strong> — হয় মানুষ (static), নয় protocol (OSPF/BGP)। Forwarding-এর প্রক্রিয়া (longest prefix match) দুই ক্ষেত্রেই অভিন্ন। BGP নিয়ে সংক্ষিপ্ত আলোচনা Chapter 42-এ।</p>
+  </div>
+
+  <h2>12.5 Control Plane এবং Data Plane</h2>
+  <p>একটি router-এর ভেতরে দুটি ভিন্ন জগৎ, এবং এই পার্থক্যটি আধুনিক networking-এ কেন্দ্রীয়:</p>
+
+  <div class="cb diagram"><pre>┌───────────────────────────────────────────────────────┐
+│  CONTROL PLANE  —  "কী করা উচিত?"                     │
+│                                                       │
+│  • BGP/OSPF-এর সাথে কথা বলে                            │
+│  • Route হিসাব করে, সেরা পথ বাছে                       │
+│  • Routing table (RIB) তৈরি করে                        │
+│  • ধীর, জটিল, software-এ চলে (CPU)                     │
+│  • সেকেন্ড/মিনিটের হিসাবে কাজ করে                       │
+└──────────────────────┬────────────────────────────────┘
+                       │ forwarding table (FIB) তৈরি করে দেয়
+                       ▼
+┌───────────────────────────────────────────────────────┐
+│  DATA PLANE  —  "এই packet-টি এখন কোথায় পাঠাব?"        │
+│                                                       │
+│  • প্রতিটি packet-এর জন্য lookup                        │
+│  • অত্যন্ত দ্রুত, প্রায়ই বিশেষ hardware-এ (ASIC/TCAM)   │
+│  • ন্যানোসেকেন্ডের হিসাবে কাজ করে                        │
+│  • কোটি কোটি packet প্রতি সেকেন্ডে                       │
+└───────────────────────────────────────────────────────┘</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer-এর জন্য সমান্তরাল</div>
+    <p>এটি ঠিক সেই pattern যা আপনি application-এও ব্যবহার করেন: একটি ব্যয়বহুল হিসাব একবার করে ফলাফল cache-এ রাখা, তারপর প্রতিটি request-এ শুধু সেই cache পড়া। Control plane = cache তৈরি করা; data plane = cache থেকে পড়া। BGP-র হিসাব করতে সেকেন্ড লাগতে পারে, কিন্তু packet forward করতে ন্যানোসেকেন্ড — কারণ কঠিন কাজটা আগেই হয়ে গেছে।</p>
+  </div>
+
+  <h2>12.6 একটি router-এর ভেতরে — ধাপে ধাপে</h2>
+
+  <div class="stepper" data-steps="6" id="st-router">
+    <div class="sp-head"><strong>Router একটি packet নিয়ে যা করে</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+      <div class="sp-step" data-i="0">
+        <h4>ধাপ ১ — Frame গ্রহণ ও যাচাই</h4>
+        <p>NIC একটি frame পেল। Destination MAC কি router-এর নিজের? না হলে ফেলে দাও। FCS checksum ঠিক আছে? না হলে চুপচাপ ফেলে দাও। EtherType দেখে বুঝল ভেতরে IPv4।</p>
+      </div>
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ২ — Ethernet header ফেলে দাও</h4>
+        <p>Frame-এর মোড়ক এখন অপ্রয়োজনীয় — সেটি ছিল শুধু আগের hop থেকে এখানে আসার জন্য। এখন হাতে আছে খাঁটি IP packet।</p>
+      </div>
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ৩ — TTL কমাও</h4>
+        <div class="cb diagram"><pre>TTL: 64 → 63
+
+যদি TTL 0 হয়ে যায়:
+  • packet ফেলে দাও
+  • sender-কে ICMP "Time Exceeded" পাঠাও
+  • (এই আচরণটিই traceroute-এর ভিত্তি → Ch 14)</pre></div>
+        <p>TTL কমানোর কারণে IP header-এর checksum-ও নতুন করে হিসাব করতে হয়।</p>
+      </div>
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৪ — Forwarding table lookup</h4>
+        <div class="cb diagram"><pre>Destination IP: 10.0.5.20
+
+FIB lookup (longest prefix match):
+  10.0.5.0/24 → next hop 172.16.0.2, interface eth1  ✓
+
+আধুনিক router-এ এটি TCAM-এ হয় — একটি বিশেষ memory
+যা একসাথে সব entry-র সাথে মিলিয়ে দেখে, এক ধাপে।</pre></div>
+      </div>
+      <div class="sp-step" data-i="4">
+        <h4>ধাপ ৫ — নতুন Ethernet header তৈরি</h4>
+        <div class="cb diagram"><pre>পরের hop 172.16.0.2-এর MAC দরকার
+  → ARP cache দেখো (না থাকলে ARP করো)
+
+নতুন frame:
+  dst MAC = 172.16.0.2-এর MAC     ← নতুন
+  src MAC = eth1-এর নিজের MAC      ← নতুন
+  dst IP  = 10.0.5.20              ← অপরিবর্তিত!
+  src IP  = মূল sender             ← অপরিবর্তিত!</pre></div>
+      </div>
+      <div class="sp-step" data-i="5">
+        <h4>ধাপ ৬ — পাঠাও, এবং ভুলে যাও</h4>
+        <p>Frame টি eth1 দিয়ে বেরিয়ে গেল। <strong>Router এই packet সম্পর্কে কিছুই মনে রাখল না</strong> — কোনো connection state নেই, কোনো session নেই। পরের packet এলে সে আবার শূন্য থেকে একই হিসাব করবে।</p>
+        <p>এই <em>statelessness</em>-ই IP-কে অসাধারণভাবে scalable করেছে। (NAT router এর ব্যতিক্রম — তাকে state রাখতেই হয়, এবং সেটাই NAT-এর জটিলতার মূল, Ch 34।)</p>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <h2>12.7 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Router পুরো পথটি জানে এবং packet-এর জন্য একটি route ঠিক করে দেয়।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>কোনো router পুরো পথ জানে না। প্রতিটি router শুধু <strong>পরের hop</strong> জানে। পথটি তৈরি হয় স্বতঃস্ফূর্তভাবে, অনেকগুলো স্বাধীন স্থানীয় সিদ্ধান্তের ফল হিসেবে। এমনকি একই connection-এর দুটি packet ভিন্ন পথে যেতে পারে (load balancing, route পরিবর্তন) — এবং এজন্যই packet উল্টো ক্রমে পৌঁছাতে পারে, যা TCP-কে সামলাতে হয় (Ch 19)।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Packet যে পথে যায়, উত্তরও সেই পথেই ফেরে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>মোটেও নয়। Forward path এবং return path সম্পূর্ণ ভিন্ন হতে পারে — একে বলে <strong>asymmetric routing</strong>, এবং Internet-এ এটি অত্যন্ত সাধারণ। কারণ প্রতিটি দিকের routing সিদ্ধান্ত আলাদাভাবে নেওয়া হয়, এবং ISP-দের business চুক্তি (peering vs transit) দুই দিকে আলাদা হতে পারে। এজন্যই <code>traceroute</code> শুধু <em>একদিকের</em> পথ দেখায়, এবং একদিকে সমস্যা থাকলেও অন্যদিক ঠিক থাকতে পারে।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 12 — Longest prefix match নিজে পরীক্ষা করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একটি নির্দিষ্ট route যোগ করলে kernel-এর সিদ্ধান্ত বদলে যায় কিনা, অর্থাৎ longest prefix match বাস্তবে কাজ করছে কিনা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># এখন 1.1.1.1-এর জন্য kernel কী সিদ্ধান্ত নেয়?
+ip route get 1.1.1.1
+# → default route ব্যবহার করবে
+
+# একটি বেশি নির্দিষ্ট route যোগ করুন (sudo লাগবে)
+sudo ip route add 1.1.1.0/24 via 192.168.0.1 dev wlan0
+
+# আবার জিজ্ঞেস করুন
+ip route get 1.1.1.1
+ip route get 1.1.2.1        # এটি /24-এর বাইরে
+
+# পরিষ্কার করুন
+sudo ip route del 1.1.1.0/24</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> Route যোগ করার পরও gateway একই থাকতে পারে, কিন্তু <code>ip route get</code> এখন ভিন্ন route entry ব্যবহার করছে — এবং <code>1.1.2.1</code> (যা <code>/24</code>-এর বাইরে) এখনো default route ব্যবহার করছে। একটি ভিন্ন gateway IP দিয়ে চেষ্টা করলে পার্থক্যটি আরও স্পষ্ট হবে।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> Longest prefix match কোনো তাত্ত্বিক নিয়ম নয় — এটি প্রতিটি packet-এর জন্য আপনার kernel-এর চালানো প্রকৃত algorithm। আপনি নিজে route যোগ করে সেই সিদ্ধান্ত বদলে দিতে পারেন — এবং VPN, container runtime ও Kubernetes-এর CNI ঠিক এই কাজটিই করে।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Routing hop-by-hop — কোনো router পুরো পথ জানে না, প্রত্যেকে শুধু "পরের জন কে" জানে।</li>
+      <li>Routing table entry = prefix + next hop + interface + metric।</li>
+      <li><strong>Longest prefix match:</strong> সবচেয়ে নির্দিষ্ট (দীর্ঘতম prefix) route জেতে; <code>0.0.0.0/0</code> সবচেয়ে দুর্বল।</li>
+      <li>Route আসে: directly connected, static, DHCP, IGP (OSPF), বা BGP থেকে।</li>
+      <li>Control plane route হিসাব করে (ধীর, software); data plane packet forward করে (দ্রুত, hardware)।</li>
+      <li>Router প্রতিটি packet-এ TTL কমায়, Ethernet header নতুন করে লেখে, কিন্তু IP address ছোঁয় না।</li>
+      <li>IP forwarding <strong>stateless</strong> — router packet সম্পর্কে কিছু মনে রাখে না।</li>
+      <li>Forward ও return path ভিন্ন হতে পারে (asymmetric routing) — এটি স্বাভাবিক।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Destination <code>172.16.5.10</code>। Table-এ আছে <code>172.16.0.0/16 → A</code>, <code>172.16.5.0/24 → B</code>, <code>0.0.0.0/0 → C</code>। কোনটি ব্যবহৃত হবে?</summary>
+    <div class="ans"><p><strong>B</strong> (<code>172.16.5.0/24</code>)। তিনটিই মেলে, কিন্তু <code>/24</code> সবচেয়ে দীর্ঘ prefix — সবচেয়ে নির্দিষ্ট জ্ঞান। Longest prefix match অনুসারে সেটিই জেতে।</p></div>
+  </details>
+  <details class="qa"><summary>Router প্রতিটি packet-এ কী বদলায় এবং কী বদলায় না?</summary>
+    <div class="ans"><p><strong>বদলায়:</strong> সম্পূর্ণ Ethernet header (নতুন src ও dst MAC), TTL (১ কমে), IP header checksum (TTL বদলানোর কারণে)।<br>
+    <strong>বদলায় না:</strong> Source IP, Destination IP, TCP/UDP header, এবং সম্পূর্ণ payload। (ব্যতিক্রম NAT — সে IP ও port বদলায়, Ch 34।)</p></div>
+  </details>
+  <details class="qa"><summary>Control plane এবং data plane আলাদা রাখার সুবিধা কী?</summary>
+    <div class="ans"><p>দুটির কাজের ধরন ও গতির প্রয়োজন সম্পূর্ণ ভিন্ন। Route হিসাব করা জটিল ও অনিয়মিত — general-purpose CPU ও software দরকার। Packet forward করা সরল ও অত্যন্ত পুনরাবৃত্তিমূলক — বিশেষায়িত hardware (ASIC/TCAM) দিয়ে ন্যানোসেকেন্ডে করা যায়। আলাদা রাখলে দুটোই নিজের মতো optimize করা যায়, এবং control plane ব্যস্ত থাকলেও forwarding থামে না।</p></div>
+  </details>
+  <details class="qa"><summary>একটি HTTP response-এর packet গুলো কি সব একই পথে আসে?</summary>
+    <div class="ans"><p>অগত্যা নয়। Router-রা load balancing করতে পারে (ECMP), পথ পরিবর্তন হতে পারে, বা ভিন্ন ISP-র মধ্য দিয়ে যেতে পারে। ফলে packet ভিন্ন ভিন্ন বিলম্বে এবং উল্টো ক্রমে পৌঁছাতে পারে। এই বিশৃঙ্খলা সামলানোই TCP-এর sequence number-এর কাজ (Ch 19)। (বাস্তবে ECMP সাধারণত একই flow-এর packet একই পথে রাখে hash করে — ঠিক এই কারণেই।)</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch11"><div class="d">পূর্ববর্তী</div><div class="t">Ch 11 — Default Gateway</div></a>
+    <a class="nx" href="#ch13"><div class="d">পরবর্তী</div><div class="t">Ch 13 — Packet Journey</div></a>
+  </div>
+</section>

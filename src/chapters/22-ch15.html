@@ -1,0 +1,199 @@
+<section class="chapter" id="ch15">
+  <div class="ch-eyebrow">Chapter 15</div>
+  <h1>Why Do We Need a Transport Layer?</h1>
+  <p class="ch-lede">IP আপনাকে একটি machine-এ পৌঁছে দেয়। কিন্তু machine-এ nginx, PostgreSQL, SSH, Redis — সবাই একই IP-তে বসে আছে। কে পাবে এই packet? এই একটি প্রশ্নের উত্তরই transport layer-এর জন্ম দিয়েছে।</p>
+
+  <h2>15.1 Why does this exist?</h2>
+
+  <div class="cb diagram"><pre>একটি server: 203.0.113.50
+
+    ┌──────────────────────────────────────┐
+    │  nginx        (web)                  │
+    │  PostgreSQL   (database)             │
+    │  Redis        (cache)                │
+    │  sshd         (remote login)         │
+    │  node app     (API)                  │
+    └──────────────────────────────────────┘
+              সবাই একই IP-তে
+
+একটি packet এল: dst IP = 203.0.113.50
+
+    ⇒ কাকে দেব???
+
+IP-এর কাছে এই প্রশ্নের কোনো উত্তর নেই।
+IP header-এ শুধু আছে: কোন machine। কোন process নয়।</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why Port</div>
+    <p>সমাধান: প্রতিটি চলমান network-service-কে একটি সংখ্যা দাও, এবং সেই সংখ্যাটি transport header-এ লিখে দাও। এই সংখ্যাটিই <strong>port</strong>।</p>
+    <p>একে বলা হয় <strong>multiplexing / demultiplexing</strong>: একটি IP address-এর উপর দিয়ে বহু আলাদা কথোপকথন চালানো (mux), এবং প্রাপ্ত প্রান্তে সেগুলোকে আবার আলাদা করা (demux)। উল্লেখ্য, আমরা এই একই pattern আগেও দেখেছি — Ethernet-এর EtherType, IP-এর Protocol field। প্রতিটি layer-ই তার উপরের একাধিক ভোক্তার মধ্যে বণ্টন করে।</p>
+  </div>
+
+  <h2>15.2 Port</h2>
+  <p>একটি <strong>port</strong> (পোর্ট) হলো একটি ১৬-bit সংখ্যা (০–৬৫৫৩৫) যা একটি নির্দিষ্ট machine-এর একটি নির্দিষ্ট network-service-কে চিহ্নিত করে।</p>
+
+  <div class="cb diagram"><pre>              IP Address  +  Port
+                   │           │
+            "কোন machine"  "কোন service"
+
+   203.0.113.50 : 443    →  nginx
+   203.0.113.50 : 5432   →  PostgreSQL
+   203.0.113.50 : 6379   →  Redis
+   203.0.113.50 : 22     →  sshd
+
+মনে রাখার উপমা:
+   IP   = একটি ভবনের ঠিকানা
+   Port = সেই ভবনের ফ্ল্যাট নম্বর</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ Port কোনো physical জিনিস নয়</div>
+    <p>"Port" শব্দটি বিভ্রান্তিকর কারণ switch-এরও physical port আছে। কিন্তু transport-layer port সম্পূর্ণ <strong>বিমূর্ত সংখ্যা</strong> — এটি একটি software ধারণা, kernel-এর একটি table-এর index মাত্র। কোনো তার নেই, কোনো socket নেই দেয়ালে। এটি নিছক একটি label যা kernel-কে বলে দেয় কোন process-কে data দিতে হবে।</p>
+  </div>
+
+  <h2>15.3 Port-এর তিনটি শ্রেণি</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>পরিসর</th><th>নাম</th><th>ব্যবহার</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0 – 1023</strong></td><td>Well-known / System</td><td>প্রমিত service। Unix-এ এগুলোতে bind করতে <strong>root অধিকার</strong> লাগে।</td></tr>
+      <tr><td><strong>1024 – 49151</strong></td><td>Registered</td><td>IANA-তে নিবন্ধিত application (PostgreSQL 5432, MySQL 3306)। সাধারণ user bind করতে পারে।</td></tr>
+      <tr><td><strong>49152 – 65535</strong></td><td>Dynamic / Ephemeral</td><td>Client-এর অস্থায়ী source port। OS নিজে বেছে দেয়।</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ কেন 1024-এর নিচে root লাগে</div>
+    <p>এটি একটি ঐতিহাসিক নিরাপত্তা-ব্যবস্থা: multi-user system-এ যেন যেকোনো সাধারণ user port 22-তে একটি নকল SSH server চালিয়ে অন্যদের password চুরি করতে না পারে। আজকের container যুগে এই সুরক্ষার প্রাসঙ্গিকতা কমেছে, তবু নিয়মটি রয়ে গেছে।</p>
+    <p><strong>এজন্যই বাস্তবে</strong> Node.js/Python app গুলো 3000/8000-এ চলে এবং সামনে একটি reverse proxy (nginx) বসে যে root হিসেবে চালু হয়ে port 80/443 ধরে, তারপর অধিকার ছেড়ে দেয়। Linux-এ বিকল্প আছে: <code>CAP_NET_BIND_SERVICE</code> capability দিয়ে root ছাড়াই নিচু port-এ bind করা যায়।</p>
+  </div>
+
+  <h3>মনে রাখার মতো port</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Port</th><th>Service</th><th>Port</th><th>Service</th></tr></thead>
+    <tbody>
+      <tr><td><code>22</code></td><td>SSH</td><td><code>443</code></td><td>HTTPS</td></tr>
+      <tr><td><code>25</code></td><td>SMTP (mail)</td><td><code>3306</code></td><td>MySQL</td></tr>
+      <tr><td><code>53</code></td><td>DNS (UDP ও TCP)</td><td><code>5432</code></td><td>PostgreSQL</td></tr>
+      <tr><td><code>80</code></td><td>HTTP</td><td><code>6379</code></td><td>Redis</td></tr>
+      <tr><td><code>123</code></td><td>NTP (time)</td><td><code>27017</code></td><td>MongoDB</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>15.4 Source Port এবং Destination Port</h2>
+  <p>প্রতিটি TCP/UDP header-এ <strong>দুটি</strong> port থাকে। কেন?</p>
+
+  <div class="cb diagram"><pre>আপনার browser → example.com
+
+Request packet:
+    src IP  : 192.168.1.5      src port : 51234  ← OS বেছে দিল
+    dst IP  : 93.184.215.14    dst port : 443    ← আপনি জানতেন
+
+Response packet (সব উল্টো):
+    src IP  : 93.184.215.14    src port : 443
+    dst IP  : 192.168.1.5      dst port : 51234  ← এখানেই ফিরবে
+
+Source port ছাড়া server জানত না উত্তরটা কোথায় পাঠাতে হবে —
+এবং আপনার OS জানত না কোন browser tab-এর জন্য এই উত্তর।</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — Ephemeral port কেন দরকার</div>
+    <p>আপনি একই সাথে example.com-এর তিনটি tab খুললেন। তিনটি connection-ই যাচ্ছে <code>93.184.215.14:443</code>-এ। তাহলে উত্তরগুলো আলাদা হবে কীভাবে?</p>
+    <div class="cb diagram"><pre>Tab 1: 192.168.1.5:51234 → 93.184.215.14:443
+Tab 2: 192.168.1.5:51235 → 93.184.215.14:443
+Tab 3: 192.168.1.5:51236 → 93.184.215.14:443
+                    ↑
+              শুধু এটিই আলাদা</pre></div>
+    <p>Source port-ই তিনটি কথোপকথনকে আলাদা করে রাখে। এজন্যই একে "ephemeral" (ক্ষণস্থায়ী) বলা হয় — connection শেষে সংখ্যাটি ফেরত চলে যায় pool-এ।</p>
+  </div>
+
+  <h2>15.5 4-Tuple — একটি connection-এর প্রকৃত পরিচয়</h2>
+
+  <div class="cb diagram"><pre>একটি TCP connection চিহ্নিত হয় চারটি জিনিস দিয়ে:
+
+    ┌────────────────────────────────────────┐
+    │  1. Source IP                          │
+    │  2. Source Port                        │
+    │  3. Destination IP                     │
+    │  4. Destination Port                   │
+    └────────────────────────────────────────┘
+    (কঠোরভাবে বললে protocol সহ 5-tuple)
+
+এই চারটির সমন্বয় অনন্য হলেই সেটি একটি আলাদা connection।
+
+উদাহরণ — একই server-এ ৩টি client:
+
+  (203.0.113.9,  51234, 10.0.0.5, 443)  ← connection A
+  (203.0.113.9,  51235, 10.0.0.5, 443)  ← connection B (একই client!)
+  (198.51.100.7, 40000, 10.0.0.5, 443)  ← connection C (ভিন্ন client)
+
+তিনটিই server-এর port 443-এ। কিন্তু 4-tuple আলাদা,
+তাই তিনটি সম্পূর্ণ স্বাধীন connection।</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — একটি চিরন্তন প্রশ্নের উত্তর</div>
+    <p><em>"একটি server port 443-এ হাজারো client সামলায় কীভাবে? Port তো একটাই!"</em></p>
+    <p>উত্তর: <strong>Server-এর দিকে port একটাই, কিন্তু connection-এর পরিচয় port নয় — 4-tuple।</strong> প্রতিটি client-এর ভিন্ন IP বা ভিন্ন source port থাকায় প্রতিটি 4-tuple অনন্য। Kernel একটি hash table রাখে যেখানে key হলো এই 4-tuple, আর value হলো socket। তাই তাত্ত্বিকভাবে একটি server port একই client থেকে ৬৫,৫৩৫টি এবং ভিন্ন client থেকে কার্যত অসীম connection নিতে পারে — প্রকৃত সীমা memory এবং file descriptor।</p>
+  </div>
+
+  <h2>15.6 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>একটি server-এ একবারে ৬৫,৫৩৫টির বেশি connection সম্ভব নয়, কারণ port তো এতগুলোই।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>৬৫,৫৩৫-এর সীমাটি প্রযোজ্য <strong>একটি নির্দিষ্ট client IP থেকে একটি নির্দিষ্ট server IP:port-এ</strong>। ভিন্ন client IP থেকে আসা connection-গুলো ভিন্ন 4-tuple তৈরি করে, তাই তারা এই সীমার মধ্যে পড়ে না। বাস্তব সীমা হলো memory, file descriptor limit (<code>ulimit -n</code>), এবং kernel-এর connection tracking table। একটি tuned Linux server লক্ষাধিক concurrent connection সামলাতে পারে।</p>
+    <p>তবে <strong>client-এর দিকে</strong> এই সীমাটি বাস্তব: একটি load-testing machine একটি server-এ ~২৮,০০০-এর বেশি connection খুলতে পারে না (default ephemeral range), যদি না আপনি range বাড়ান বা একাধিক source IP ব্যবহার করেন।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>দুটি program কখনোই একই port ব্যবহার করতে পারে না।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>কয়েকটি ক্ষেত্রে পারে: (১) <strong>ভিন্ন protocol</strong> — একটি TCP 53-এ, অন্যটি UDP 53-এ; এরা সম্পূর্ণ আলাদা namespace। (২) <strong>ভিন্ন IP</strong> — একটি <code>192.168.1.5:8080</code>-এ, অন্যটি <code>10.0.0.5:8080</code>-এ। (৩) <strong><code>SO_REUSEPORT</code></strong> — আধুনিক Linux-এ একাধিক process ইচ্ছাকৃতভাবে একই port share করতে পারে এবং kernel তাদের মধ্যে load balance করে (nginx এভাবেই multi-worker চালায়)। (৪) ভিন্ন network namespace (container)।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 15 — Port এবং 4-tuple বাস্তবে দেখুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — একই gantavya-তে একাধিক connection খুললে source port কীভাবে তাদের আলাদা রাখছে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার machine-এ এখন কী কী শুনছে
+ss -tuln                # Linux
+lsof -i -P -n | grep LISTEN    # macOS
+
+# একই server-এ তিনটি connection খুলুন এবং দেখুন
+for i in 1 2 3; do (curl -s https://example.com > /dev/null &) ; done
+ss -tn 'dst example.com' 2>/dev/null || ss -tn | head
+
+# ephemeral port-এর পরিসর দেখুন
+cat /proc/sys/net/ipv4/ip_local_port_range     # Linux
+sysctl net.inet.ip.portrange.first             # macOS</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ss -tn</code>-এর output-এ Local Address:Port আর Peer Address:Port — এই দুটি জোড়াই সেই 4-tuple। একাধিক connection-এ Peer একই (<code>93.184.215.14:443</code>) কিন্তু Local Port ভিন্ন। <code>ip_local_port_range</code> সাধারণত <code>32768 60999</code> দেখাবে — এই পরিসর থেকেই OS বেছে নেয়।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> 4-tuple কোনো তাত্ত্বিক ধারণা নয় — এটি ঠিক যা <code>ss</code> প্রতিটি লাইনে দেখাচ্ছে। এবং source port automatically বণ্টিত হচ্ছে, আপনি কখনো এটি নিয়ে ভাবেননি — কারণ OS আপনার হয়ে কাজটি করে দিচ্ছে।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>IP পৌঁছে দেয় machine পর্যন্ত; port পৌঁছে দেয় process পর্যন্ত।</li>
+      <li>Port একটি ১৬-bit বিমূর্ত সংখ্যা — কোনো physical জিনিস নয়।</li>
+      <li>0–1023 well-known (root লাগে), 1024–49151 registered, 49152+ ephemeral।</li>
+      <li>প্রতিটি packet-এ দুটি port — source (উত্তর কোথায় ফিরবে) এবং destination (কে পাবে)।</li>
+      <li><strong>একটি connection-এর পরিচয় 4-tuple:</strong> (src IP, src port, dst IP, dst port)।</li>
+      <li>একই server port হাজারো connection নিতে পারে, কারণ প্রতিটি 4-tuple আলাদা।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি IP address কেন একটি application-কে চিহ্নিত করার জন্য যথেষ্ট নয়?</summary>
+    <div class="ans"><p>কারণ একটি machine-এ (একটি IP-তে) বহু process একসাথে network ব্যবহার করে। IP header-এ শুধু "কোন machine" আছে, "কোন process" নেই। Transport header-এর port number সেই তথ্যটি যোগ করে। তাই একটি network service-কে সম্পূর্ণ চিহ্নিত করতে লাগে <code>protocol + IP + port</code>।</p></div>
+  </details>
+  <details class="qa"><summary>Client-এর source port কে ঠিক করে এবং কেন?</summary>
+    <div class="ans"><p>OS (kernel) ephemeral range থেকে একটি অব্যবহৃত port বেছে দেয়, সাধারণত <code>connect()</code>-এর সময়। দরকার হয় দুটি কারণে: (১) server জানতে হবে উত্তর কোন port-এ পাঠাতে হবে, (২) একই client থেকে একই server-এ একাধিক connection আলাদা করতে হবে — source port-ই তাদের একমাত্র পার্থক্য।</p></div>
+  </details>
+  <details class="qa"><summary>একই machine-এ TCP 8080 এবং UDP 8080 কি একসাথে ব্যবহার করা যায়?</summary>
+    <div class="ans"><p>হ্যাঁ। TCP এবং UDP-র port namespace সম্পূর্ণ আলাদা, কারণ IP header-এর <code>Protocol</code> field (6 বনাম 17) দিয়েই kernel প্রথমে আলাদা করে ফেলে। DNS এর সবচেয়ে পরিচিত উদাহরণ — সে TCP 53 এবং UDP 53 দুটোতেই শোনে।</p></div>
+  </details>
+  <details class="qa"><summary>একটি load testing tool একটি server-এ ~২৮,০০০ connection-এর পর ব্যর্থ হচ্ছে। কারণ কী?</summary>
+    <div class="ans"><p>Client-এর ephemeral port ফুরিয়ে গেছে। Default range (<code>32768–60999</code>) দেয় প্রায় ২৮,০০০টি port, এবং একই gantavya (IP:port)-এর জন্য প্রতিটি connection-এর আলাদা source port লাগে। এছাড়া বন্ধ connection গুলো TIME_WAIT-এ আটকে থাকে (Ch 22), যা সমস্যা বাড়ায়। সমাধান: port range বাড়ানো, একাধিক source IP ব্যবহার, বা connection reuse (keep-alive)।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch14"><div class="d">পূর্ববর্তী</div><div class="t">Ch 14 — ICMP</div></a>
+    <a class="nx" href="#ch16"><div class="d">পরবর্তী</div><div class="t">Ch 16 — Sockets</div></a>
+  </div>
+</section>

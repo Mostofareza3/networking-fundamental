@@ -1,0 +1,167 @@
+<section class="chapter" id="ch37">
+  <div class="ch-eyebrow">Chapter 37</div>
+  <h1>Bandwidth vs Throughput</h1>
+  <p class="ch-lede">আপনার ISP বলে ১০০ Mbps। আপনার download দেখাচ্ছে ৩ MB/s। আপনার speed test বলছে ৯৪ Mbps। তিনটিই সত্য, এবং তিনটি ভিন্ন জিনিস মাপছে।</p>
+
+  <h2>37.1 তিনটি শব্দ, তিনটি অর্থ</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>শব্দ</th><th>সংজ্ঞা</th><th>উপমা</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bandwidth</strong></td><td>তাত্ত্বিক <em>সর্বোচ্চ</em> ক্ষমতা</td><td>রাস্তায় সর্বোচ্চ কতটি গাড়ি চলতে পারে</td></tr>
+      <tr><td><strong>Throughput</strong></td><td>বাস্তবে <em>যা অর্জিত হচ্ছে</em></td><td>এই মুহূর্তে কতটি গাড়ি চলছে</td></tr>
+      <tr><td><strong>Goodput</strong></td><td>শুধু <em>useful application data</em> (header ও retransmission বাদে)</td><td>ওই গাড়িগুলোতে আসলে কতজন যাত্রী</td></tr>
+      <tr><td><strong>Latency</strong></td><td>এক প্রান্ত থেকে অন্য প্রান্তে যেতে সময়</td><td>রাস্তাটি কত লম্বা</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="cb diagram"><pre>Bandwidth ≥ Throughput ≥ Goodput
+
+  Bandwidth  : 100 Mbps        ← ISP-র প্রতিশ্রুতি
+  Throughput :  94 Mbps        ← তারে যা যাচ্ছে
+  Goodput    :  88 Mbps        ← আপনার application যা পাচ্ছে
+
+পার্থক্য কোথায় গেল?
+  • TCP/IP/Ethernet header (~৪%)
+  • TCP ACK packet
+  • Retransmission
+  • Protocol handshake
+  • অন্যান্য traffic</pre></div>
+
+  <h2>37.2 কেন throughput bandwidth-এর সমান হয় না</h2>
+
+  <div class="cb diagram"><pre>১. PROTOCOL OVERHEAD (~4-6%)
+   1500 bytes frame-এ 58 bytes header (Ch 3)
+   → সর্বোচ্চ efficiency ~96%
+
+২. TCP WINDOW সীমা
+   Throughput ≤ window / RTT   (Ch 19)
+   64 KB window, 100ms RTT → সর্বোচ্চ 5 Mbps
+   ★ line 1 Gbps হলেও ★
+
+৩. CONGESTION CONTROL
+   cwnd ধীরে বাড়ে; loss হলে অর্ধেক (Ch 21)
+   ছোট transfer কখনো পূর্ণ গতিতে পৌঁছায়ই না
+
+৪. PACKET LOSS
+   0.1% loss উচ্চ-RTT পথে throughput অর্ধেক করে দিতে পারে
+
+৫. সবচেয়ে ধীর link (bottleneck)
+   পথের প্রতিটি link-এর মধ্যে সবচেয়ে ছোটটি সীমা ঠিক করে
+
+৬. অন্য প্রান্তের সীমা
+   Server-এর upload সীমা, disk I/O, CPU
+
+৭. Application নিজেই
+   ছোট ছোট write, ধীর processing, single-threaded parsing</pre></div>
+
+  <div class="box warn">
+    <div class="bt">⚠️ একটি একক TCP connection প্রায়ই লিঙ্ক ভরাতে পারে না</div>
+    <p>একটি ১ Gbps সংযোগে একটি একক TCP connection সাধারণত ২০০–৪০০ Mbps-এর বেশি পায় না, বিশেষত দীর্ঘ RTT-তে। কারণ window সীমা এবং congestion control-এর সতর্ক আচরণ।</p>
+    <p>এজন্যই: download manager-রা ৮টি সমান্তরাল connection খোলে; <code>aria2c -x 16</code> নাটকীয়ভাবে দ্রুত; এবং cloud-এর file transfer tool (aws s3 cp, rclone) multipart parallel upload ব্যবহার করে। প্রতিটি connection-এর নিজস্ব window ও cwnd থাকায় সম্মিলিত throughput বাড়ে।</p>
+  </div>
+
+  <h2>37.3 Bandwidth-Delay Product আবার</h2>
+
+  <div class="cb diagram"><pre>BDP = Bandwidth × RTT
+    = "পথে একসাথে কত data উড়ন্ত থাকতে পারে"
+
+কয়েকটি উদাহরণ:
+
+  Case A: 100 Mbps, RTT 1 ms (একই data center)
+    BDP = 100e6 × 0.001 / 8 = 12.5 KB
+    → ছোট window-ই যথেষ্ট
+
+  Case B: 100 Mbps, RTT 200 ms (আন্তঃমহাদেশীয়)
+    BDP = 100e6 × 0.2 / 8 = 2.5 MB
+    → পূর্ণ গতির জন্য 2.5 MB window লাগবে!
+
+  Case C: 1 Gbps, RTT 100 ms
+    BDP = 1e9 × 0.1 / 8 = 12.5 MB
+
+★ "Long Fat Network" (LFN) — উচ্চ bandwidth ও উচ্চ
+  RTT একসাথে হলে বিশাল window দরকার, নাহলে link
+  কখনো ভরবে না।
+
+সমাধান:
+  • TCP window scaling (আধুনিক system-এ default)
+  • কিছু ক্ষেত্রে buffer টিউন করা
+    (net.ipv4.tcp_rmem, tcp_wmem)
+  • সমান্তরাল connection
+  • BBR-এর মতো congestion control</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective — কোনটি আপনার bottleneck</div>
+    <div class="cb diagram"><pre>উপসর্গ: "আমার API ধীর"
+
+Response ছোট (< 100 KB)?
+    → ★ Latency-bound ★
+    → CDN, connection reuse, কম round trip
+    → Bandwidth বাড়িয়ে কোনো লাভ নেই
+
+Response বড় (> 10 MB)?
+    → ★ Bandwidth/throughput-bound ★
+    → Compression (gzip, brotli)
+    → Pagination, streaming
+    → CDN (edge থেকে হলে পথ ছোট)
+
+দুটোই ঠিক কিন্তু তবু ধীর?
+    → ★ Server-bound ★
+    → time_starttransfer − time_pretransfer দেখুন
+    → Database query, N+1, cache miss</pre></div>
+    <p>এই তিনটি সম্পূর্ণ ভিন্ন সমস্যা, ভিন্ন সমাধান। প্রথমে মাপুন, তারপর optimize করুন।</p>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 37 — নিজের throughput মাপুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — প্রকৃত throughput এবং তা bandwidth-এর কতটা কাছে পৌঁছাচ্ছে; এবং সমান্তরাল connection-এর প্রভাব।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># একটি single-connection download-এর গতি
+curl -o /dev/null -w "গতি: %{speed_download} bytes/sec\n" \
+  https://speed.hetzner.de/100MB.bin
+
+# MB/s এবং Mbps-এ রূপান্তর
+curl -o /dev/null -s -w "%{speed_download}" https://speed.hetzner.de/100MB.bin \
+  | awk '{printf "%.2f MB/s = %.1f Mbps\n", $1/1048576, $1*8/1000000}'
+
+# সমান্তরাল connection-এর প্রভাব (aria2c থাকলে)
+aria2c -x 8 -s 8 -o /dev/null https://speed.hetzner.de/100MB.bin
+
+# TCP connection-এর ভেতরের সীমা দেখুন
+ss -ti | grep -A1 ESTAB | head -10
+# cwnd, rcv_space, rtt দেখুন — কোনটি সীমাবদ্ধ করছে?
+
+# আপনার system-এর TCP buffer setting
+sysctl net.ipv4.tcp_rmem net.ipv4.tcp_wmem 2>/dev/null</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> Single connection-এর গতি সম্ভবত আপনার line-এর সম্পূর্ণ ক্ষমতার চেয়ে কম। <code>aria2c -x 8</code> দিয়ে অনেক বেশি পাবেন — কারণ ৮টি স্বাধীন congestion window। <code>ss -ti</code>-তে <code>cwnd</code> ছোট থাকলে congestion control সীমাবদ্ধ করছে; <code>rcv_space</code> ছোট থাকলে receive window।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "আমার internet ১০০ Mbps" এবং "আমি ১০০ Mbps পাই" সম্পূর্ণ ভিন্ন দাবি। একটি একক TCP connection-এর নিজস্ব সীমা আছে, যা প্রায়ই line-এর সীমার অনেক নিচে — এবং সেটি bandwidth-এর নয়, window ও RTT-র সীমা।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li><strong>Bandwidth</strong> = তাত্ত্বিক ক্ষমতা; <strong>throughput</strong> = বাস্তবে অর্জিত; <strong>goodput</strong> = useful application data।</li>
+      <li>Bandwidth ≥ Throughput ≥ Goodput, সবসময়।</li>
+      <li>Throughput ≈ window / RTT — তাই উচ্চ RTT-তে বড় window ছাড়া bandwidth অকেজো।</li>
+      <li>BDP = bandwidth × RTT = পূর্ণ গতির জন্য প্রয়োজনীয় window।</li>
+      <li>একটি একক TCP connection সাধারণত link ভরাতে পারে না — সমান্তরাল connection সাহায্য করে।</li>
+      <li>ছোট response = latency-bound; বড় transfer = bandwidth-bound। সমাধান সম্পূর্ণ ভিন্ন।</li>
+      <li>Mbps (megabit) ÷ 8 = MB/s (megabyte) — আট গুণ পার্থক্য।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>Bandwidth এবং throughput-এর পার্থক্য এক বাক্যে?</summary>
+    <div class="ans"><p>Bandwidth হলো একটি link-এর তাত্ত্বিক সর্বোচ্চ ক্ষমতা (সম্ভাবনা); throughput হলো নির্দিষ্ট সময়ে বাস্তবে যত data স্থানান্তরিত হচ্ছে (বাস্তবতা)। Throughput কখনো bandwidth ছাড়াতে পারে না, এবং protocol overhead, window সীমা, congestion control ও loss-এর কারণে প্রায়ই অনেক কম হয়।</p></div>
+  </details>
+  <details class="qa"><summary>১ Gbps line-এ একটি single TCP connection কেন ২০০ Mbps-এ আটকে থাকতে পারে?</summary>
+    <div class="ans"><p>সবচেয়ে সম্ভাব্য কারণ window ও RTT-র সীমা: throughput ≈ window/RTT। RTT বেশি হলে (যেমন ১০০ms) পূর্ণ গতির জন্য বিশাল window দরকার (BDP = 12.5 MB), যা হয়তো configure করা নেই। এছাড়া congestion control-এর সতর্ক আচরণ, সামান্য packet loss, বা পথের কোনো bottleneck link দায়ী হতে পারে। <code>ss -ti</code> দিয়ে cwnd ও rcv_space দেখে নির্ণয় করা যায়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি JSON API (প্রতি response ৫ KB) ধীর। Bandwidth বাড়ানো কি সাহায্য করবে?</summary>
+    <div class="ans"><p>না। ৫ KB পাঠাতে ১০০ Mbps-এ লাগে ০.৪ ms — সম্পূর্ণ নগণ্য। এটি স্পষ্টভাবে <strong>latency-bound</strong>। সমাধান খুঁজতে হবে: RTT কমানো (CDN, কাছের region), round trip কমানো (connection reuse, HTTP/2), অথবা server-এর processing time (database query, cache)। curl-এর timing breakdown দিয়ে কোনটি তা নির্ণয় করুন।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch36"><div class="d">পূর্ববর্তী</div><div class="t">Ch 36 — Latency</div></a>
+    <a class="nx" href="#ch38"><div class="d">পরবর্তী</div><div class="t">Ch 38 — Packet Loss &amp; Jitter</div></a>
+  </div>
+</section>

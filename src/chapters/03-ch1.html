@@ -1,0 +1,210 @@
+<section class="chapter" id="ch1">
+  <div class="ch-eyebrow">Chapter 1</div>
+  <h1>What Is a Computer Network?</h1>
+  <p class="ch-lede">প্রশ্নটা "network কী" নয়। আসল প্রশ্ন হলো — দুটি আলাদা computer-এ চলা দুটি program একে অপরের সাথে কথা বলতে চাইলে ঠিক কী কী সমস্যা সমাধান করতে হয়?</p>
+
+  <h2>1.1 Why does this exist?</h2>
+  <p>একটি program যখন একই machine-এ অন্য program-এর সাথে data আদান-প্রদান করে, কাজটা তুলনামূলক সহজ। Operating System fundamentals থেকে আপনি হয়তো মনে করতে পারবেন — pipe, shared memory, Unix domain socket, signal। এগুলো কাজ করে কারণ দুটো process-ই একই kernel-এর অধীনে, একই physical memory-তে, একই বিশ্বস্ত পরিবেশে আছে।</p>
+
+  <p>এখন একটি লাইন বদলান: <strong>program দুটো দুটো আলাদা machine-এ, ৮০০০ কিলোমিটার দূরে।</strong> সঙ্গে সঙ্গে যেসব জিনিস এতদিন বিনামূল্যে পাওয়া যাচ্ছিল, সেগুলো হারিয়ে যায়:</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>একই machine-এ</th><th>দুই machine-এ</th></tr></thead>
+    <tbody>
+      <tr><td>Shared memory আছে</td><td>কোনো shared memory নেই — data-কে physically পাঠাতে হবে</td></tr>
+      <tr><td>Kernel জানে কে কোন process</td><td>কোন process, কোন machine — সব identify করতে হবে</td></tr>
+      <tr><td>Data হারায় না</td><td>Data হারাতে পারে, নষ্ট হতে পারে, দেরিতে পৌঁছাতে পারে</td></tr>
+      <tr><td>ক্রম বজায় থাকে</td><td>যে ক্রমে পাঠানো, সে ক্রমে না-ও পৌঁছাতে পারে</td></tr>
+      <tr><td>দুটো process একই ভাষা বোঝে</td><td>দুটো ভিন্ন OS, ভিন্ন CPU architecture, ভিন্ন byte order</td></tr>
+      <tr><td>কেউ মাঝখান থেকে শুনতে পারে না</td><td>পথের যে কেউ শুনতে বা বদলাতে পারে</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why</div>
+    <p>Computer network হলো এই ছয়টি সমস্যার organized সমাধান। এই বইয়ের প্রতিটি protocol — ARP, IP, TCP, DNS, TLS — উপরের কোনো না কোনো row-এর উত্তর। যখনই কোনো নতুন protocol-এর নাম শুনবেন, নিজেকে জিজ্ঞেস করুন: <em>"এটা এই টেবিলের কোন সমস্যাটা সমাধান করছে?"</em></p>
+  </div>
+
+  <h2>1.2 Core Concept — Network কী</h2>
+  <p>একটি <strong>computer network</strong> (কম্পিউটার নেটওয়ার্ক) হলো এমন কতগুলো computing device-এর সমষ্টি যারা একটি shared medium এবং একগুচ্ছ agreed-upon নিয়ম ব্যবহার করে একে অপরের সাথে data বিনিময় করতে পারে।</p>
+
+  <p>সংজ্ঞাটির তিনটি অংশ গুরুত্বপূর্ণ, এবং তিনটিই অপরিহার্য:</p>
+  <ul>
+    <li><strong>Device</strong> — যারা কথা বলবে</li>
+    <li><strong>Medium</strong> — যার মধ্য দিয়ে signal যাবে (তার, radio wave, fiber)</li>
+    <li><strong>Rules</strong> — কীভাবে কথা বলবে (এগুলোই protocol)</li>
+  </ul>
+
+  <p>তিনটির যেকোনো একটি না থাকলে network নেই। দুটি computer-কে তার দিয়ে জুড়ে দিলেই তারা কথা বলতে পারে না — যেভাবে দুজন মানুষকে একই ঘরে বসিয়ে দিলেই তারা কথা বলতে পারে না যদি একজন বাংলা আর অন্যজন শুধু জাপানি জানে। <strong>Medium থাকা আর communication হওয়া এক জিনিস নয়।</strong></p>
+
+  <h2>1.3 Communication-এর ছয়টি উপাদান</h2>
+  <p>যেকোনো communication — মানুষের হোক বা machine-এর — এই ছয়টি উপাদান ছাড়া সম্ভব নয়। পুরো বইয়ে বারবার এই ছয়টিতে ফিরে আসব।</p>
+
+  <div class="cb diagram"><pre>┌──────────┐                                    ┌──────────┐
+│  SENDER  │ ── MESSAGE ──▶  MEDIUM  ──────────▶│ RECEIVER │
+│          │                                    │          │
+│ Address: │      ◀── PROTOCOL নিয়ন্ত্রিত ──▶     │ Address: │
+│    A     │                                    │    B     │
+└──────────┘                                    └──────────┘</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>উপাদান</th><th>মানে</th><th>Networking-এ এর রূপ</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sender</strong></td><td>যে পাঠায়</td><td>একটি process, একটি host</td></tr>
+      <tr><td><strong>Receiver</strong></td><td>যে গ্রহণ করে</td><td>অন্য একটি process, অন্য host</td></tr>
+      <tr><td><strong>Message</strong></td><td>যা পাঠানো হচ্ছে</td><td>bytes — HTTP request, JSON, video frame</td></tr>
+      <tr><td><strong>Medium</strong></td><td>যার মধ্য দিয়ে যায়</td><td>copper cable, fiber optic, radio (Wi-Fi)</td></tr>
+      <tr><td><strong>Address</strong></td><td>কাকে পাঠানো হবে</td><td>MAC address, IP address, port</td></tr>
+      <tr><td><strong>Protocol</strong></td><td>নিয়ম</td><td>Ethernet, IP, TCP, HTTP, TLS</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Protocol মানে কী</h3>
+  <p>একটি <strong>protocol</strong> (প্রোটোকল) হলো communication-এর পূর্বনির্ধারিত নিয়মাবলি — কে আগে কথা বলবে, message-এর গঠন কেমন হবে, কোন byte কী অর্থ বহন করবে, উত্তর না এলে কী করতে হবে।</p>
+
+  <p>একটা পরিচিত উদাহরণ — টেলিফোন কথোপকথনের protocol:</p>
+  <div class="cb diagram"><pre>Caller:  (dial করে, ring হয়)
+Callee:  "হ্যালো"                    ← receiver আগে কথা বলে
+Caller:  "হ্যালো, আমি রেজা বলছি"       ← caller নিজেকে identify করে
+Callee:  "হ্যাঁ বলুন"                  ← acknowledgment
+...      (data transfer)
+Caller:  "আচ্ছা, রাখছি"               ← close-এর ইঙ্গিত
+Callee:  "ঠিক আছে, রাখুন"             ← close-এর acknowledgment
+(দুজনেই রাখল)</pre></div>
+
+  <p>লক্ষ্য করুন — এখানে নির্দিষ্ট একটি sequence আছে, identification আছে, acknowledgment আছে, এবং একটি ভদ্র termination আছে। TCP-এর connection setup এবং teardown প্রায় হুবহু এই কাঠামো অনুসরণ করে (Chapter 18 এবং 22)। মানুষের protocol আর machine-এর protocol একই সমস্যার সমাধান করে।</p>
+
+  <div class="box note">
+    <div class="bt">ℹ️ Protocol ≠ Software</div>
+    <p>Protocol একটি <em>specification</em> — একটি লিখিত চুক্তি। HTTP একটি protocol; nginx এবং Apache দুটোই সেই protocol-এর <em>implementation</em>। এজন্যই Python-এ লেখা একটি client Go-তে লেখা একটি server-এর সাথে কথা বলতে পারে — তারা একই চুক্তি মানছে, একই code চালাচ্ছে না।</p>
+  </div>
+
+  <h2>1.4 Mental Model — সবচেয়ে সরল ছবিটি</h2>
+  <p>Networking-এর সমস্ত জটিলতা শেষ পর্যন্ত এই একটি ছবির সেবা করে:</p>
+
+  <div class="cb diagram"><pre>┌─────────────────┐                      ┌─────────────────┐
+│  Application A  │                      │  Application B  │
+│  (আপনার code)   │                      │  (server code)  │
+└────────┬────────┘                      └────────▲────────┘
+         │                                        │
+         ▼                                        │
+┌─────────────────┐                      ┌────────┴────────┐
+│   Computer A    │                      │   Computer B    │
+│  (OS + kernel   │                      │  (OS + kernel   │
+│   + NIC)        │                      │   + NIC)        │
+└────────┬────────┘                      └────────▲────────┘
+         │                                        │
+         └──────────────▶ NETWORK ────────────────┘
+                    (switches, routers,
+                     cables, ISPs — সব)</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model</div>
+    <p>Networking শেখা মানে হলো মাঝখানের ওই <strong>NETWORK</strong> বাক্সটির ভেতরে ঢোকা — এবং একই সাথে উপরের-নিচের বাক্স দুটোর ভেতরে (Computer A থেকে Application A পর্যন্ত পথটা)। বেশিরভাগ networking course শুধু মাঝখানের বাক্সটা পড়ায়। কিন্তু একজন developer হিসেবে আপনার code বসে আছে সবার উপরে — তাই আপনার জানা দরকার উপর থেকে নিচে নামার পুরো পথটা।</p>
+  </div>
+
+  <h2>1.5 Network কোন problem গুলো solve করছে</h2>
+  <p>আসুন প্রতিটি সমস্যার সাথে সমাধানের নাম মিলিয়ে দিই। এটি কার্যত এই পুরো বইয়ের একটি রোডম্যাপ।</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Problem</th><th>Solution</th><th>Chapter</th></tr></thead>
+    <tbody>
+      <tr><td>একই তারে অনেক machine — কার জন্য এই data?</td><td>MAC address, Ethernet</td><td>6, 7</td></tr>
+      <tr><td>পৃথিবীর অন্য প্রান্তের machine খুঁজে পাওয়া</td><td>IP address</td><td>9</td></tr>
+      <tr><td>কোন পথে পাঠাব?</td><td>Routing, router</td><td>12, 13</td></tr>
+      <tr><td>একটি machine-এ ১০০টি program — কোনটি পাবে?</td><td>Port</td><td>15</td></tr>
+      <tr><td>Application কীভাবে network ব্যবহার করবে?</td><td>Socket API</td><td>16</td></tr>
+      <tr><td>Data হারালে?</td><td>TCP retransmission</td><td>17, 19</td></tr>
+      <tr><td>উল্টো ক্রমে পৌঁছালে?</td><td>TCP sequence number</td><td>19</td></tr>
+      <tr><td>Receiver ধীর হলে?</td><td>Flow control</td><td>20</td></tr>
+      <tr><td>Network-ই ধীর হলে?</td><td>Congestion control</td><td>21</td></tr>
+      <tr><td>মানুষ কি IP মনে রাখবে?</td><td>DNS</td><td>25–27</td></tr>
+      <tr><td>Application-রা কী ভাষায় কথা বলবে?</td><td>HTTP</td><td>28–30</td></tr>
+      <tr><td>পথের কেউ শুনে ফেললে?</td><td>TLS</td><td>31–33</td></tr>
+      <tr><td>IPv4 address তো ফুরিয়ে গেছে!</td><td>NAT</td><td>34</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>এই টেবিলটি মনে রাখার দরকার নেই। শুধু লক্ষ্য করুন — <strong>প্রতিটি সারিতে সমস্যা আগে, সমাধান পরে</strong>। এই বই একই ক্রমে এগোবে।</p>
+
+  <h2>1.6 Developer Perspective</h2>
+  <p>আপনি যখন লেখেন:</p>
+  <div class="cb"><span class="cb-lang">js</span><pre>const res = await fetch("https://api.example.com/users");</pre></div>
+
+  <p>এই এক লাইনের নিচে যা যা ঘটে, তার একটি সংক্ষিপ্ত তালিকা (প্রতিটি এই বইয়ে আলাদা chapter পাবে):</p>
+  <div class="cb diagram"><pre>1.  URL parse হয় → scheme(https), host(api.example.com), path(/users)
+2.  DNS lookup → api.example.com এর IP address                   [Ch 25–27]
+3.  OS একটি socket তৈরি করে                                       [Ch 16]
+4.  TCP three-way handshake (বা QUIC)                            [Ch 18]
+5.  TLS handshake — certificate যাচাই, key বিনিময়                 [Ch 33]
+6.  HTTP request bytes তৈরি হয়                                    [Ch 28]
+7.  Kernel সেই bytes কে TCP segment-এ ভাগ করে                     [Ch 17]
+8.  প্রতিটি segment IP packet-এ মোড়া হয়                            [Ch 9]
+9.  প্রতিটি packet Ethernet/Wi-Fi frame-এ মোড়া হয়                  [Ch 6]
+10. Gateway-এর MAC address জানতে ARP                              [Ch 8]
+11. NIC bits হিসেবে পাঠায়
+12. Router-রা hop by hop forward করে                              [Ch 12, 13]
+13. Server-এর kernel সব খুলে নিয়ে socket buffer-এ রাখে
+14. Server process read() করে, response লেখে
+15. পুরো পথ উল্টো দিকে</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <p>এই ১৫টি ধাপের যেকোনো একটি ব্যর্থ হলে আপনার <code>fetch()</code> ব্যর্থ হয় — কিন্তু error message প্রায়ই বলে না কোথায়। <code>ENOTFOUND</code> মানে ধাপ ২। <code>ECONNREFUSED</code> মানে ধাপ ৪ (packet পৌঁছেছে, কিন্তু কেউ ওই port-এ শুনছে না)। <code>ETIMEDOUT</code> মানে packet গেছে কিন্তু কোনো উত্তর আসেনি — ধাপ ৪ বা ১২। <code>CERT_HAS_EXPIRED</code> মানে ধাপ ৫। <strong>Error message পড়ে কোন ধাপে সমস্যা তা বোঝা — এটাই এই বইয়ের সবচেয়ে ব্যবহারিক সুফল।</strong></p>
+  </div>
+
+  <h2>1.7 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Internet এবং Web একই জিনিস।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p><strong>Internet</strong> হলো অবকাঠামো — পরস্পর যুক্ত অসংখ্য network, যেখানে IP দিয়ে packet চলাচল করে। <strong>Web</strong> হলো সেই অবকাঠামোর উপর চলা একটি application — HTTP protocol এবং hyperlink-যুক্ত document। Email, SSH, BitTorrent, online game, video call — এগুলো Internet ব্যবহার করে কিন্তু Web নয়। Web হলো Internet-এর উপর চলা অনেক application-এর একটি।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Network মানে তার এবং যন্ত্রপাতি — এটা hardware-এর ব্যাপার, software engineer-এর নয়।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>Physical medium hardware, কিন্তু network-এর প্রায় সমস্ত <em>বুদ্ধি</em> software-এ — এবং তার একটি বড় অংশ আপনার নিজের machine-এর kernel-এ। TCP-এর retransmission logic, routing table-এর lookup, DNS resolution — সবই code। Networking hardware-এর বিষয় নয়, distributed software-এর বিষয়।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 1 — আপনার machine কি আসলেই network-এ আছে?</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — এই chapter-এর "sender / receiver / address / medium" ধারণাগুলোর বাস্তব প্রতিরূপ আপনার নিজের machine-এ খুঁজে বের করা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># আপনার machine-এর network interface গুলো দেখুন
+ip addr        # Linux
+ifconfig       # macOS
+
+# আপনার machine বাইরের দুনিয়ায় পৌঁছাতে পারে কিনা
+ping -c 3 1.1.1.1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>ip addr</code>-এর output-এ অন্তত দুটি interface পাবেন — একটি <code>lo</code> (loopback, নিজের সাথে নিজের কথা) এবং একটি আসল interface (<code>eth0</code>, <code>enp3s0</code>, <code>wlan0</code>, বা macOS-এ <code>en0</code>)। প্রতিটির সাথে একটি IP address আছে — এটাই আপনার machine-এর "address"। <code>ping</code>-এর প্রতিটি লাইনে <code>time=</code> দেখুন — এটাই সেই "medium" পেরিয়ে যাওয়া-আসার সময়।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Network-এ যুক্ত থাকা" কোনো বিমূর্ত ধারণা নয় — এর মানে হলো আপনার machine-এর একটি interface আছে, সেই interface-এর একটি address আছে, এবং সেই address ব্যবহার করে অন্য address-এ message পাঠিয়ে উত্তর পাওয়া যাচ্ছে। বাকি বইটা এই তিনটি জিনিসের বিস্তারিত।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>Network দরকার কারণ দুটি আলাদা machine-এ shared memory নেই, বিশ্বাস নেই, এবং delivery-র নিশ্চয়তা নেই।</li>
+      <li>যেকোনো communication-এর ছয়টি উপাদান: sender, receiver, message, medium, address, protocol।</li>
+      <li>Protocol একটি লিখিত চুক্তি (specification), কোনো নির্দিষ্ট software নয় — তাই ভিন্ন ভাষায় লেখা program-রাও কথা বলতে পারে।</li>
+      <li>Networking-এর প্রতিটি protocol নির্দিষ্ট একটি সমস্যার উত্তর। নতুন protocol শিখলে প্রথম প্রশ্ন: "এটা কোন সমস্যাটা সমাধান করছে?"</li>
+      <li>Internet হলো অবকাঠামো; Web হলো তার উপর চলা একটি application মাত্র।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একই machine-এ দুটি process-এর মধ্যে data আদান-প্রদানের তুলনায় দুই machine-এর মধ্যে কী কী নতুন সমস্যা তৈরি হয়?</summary>
+    <div class="ans"><p>Shared memory থাকে না (data physically পাঠাতে হয়), delivery-র নিশ্চয়তা থাকে না (data হারাতে পারে), ক্রম বজায় থাকার নিশ্চয়তা থাকে না, দুই প্রান্তে ভিন্ন OS/architecture থাকতে পারে, এবং পথটি অবিশ্বস্ত — মাঝখানের যে কেউ data দেখতে বা বদলাতে পারে।</p></div>
+  </details>
+  <details class="qa"><summary>Protocol এবং implementation-এর পার্থক্য কী? একটি উদাহরণ দিন।</summary>
+    <div class="ans"><p>Protocol হলো নিয়মের লিখিত specification; implementation হলো সেই নিয়ম মেনে লেখা প্রকৃত software। HTTP একটি protocol; nginx, Apache, Caddy, এবং Node.js-এর <code>http</code> module — সবগুলো তার আলাদা আলাদা implementation। একই protocol মানার কারণেই এরা পরস্পরের সাথে কাজ করতে পারে।</p></div>
+  </details>
+  <details class="qa"><summary>দুটি computer-কে একটি তার দিয়ে যুক্ত করলেই কি তারা যোগাযোগ করতে পারবে? কেন নয়?</summary>
+    <div class="ans"><p>না। তার শুধু <em>medium</em> সরবরাহ করে। যোগাযোগের জন্য আরও দরকার — signal-কে bit-এ রূপান্তরের নিয়ম, কে কখন পাঠাবে তার নিয়ম, message-এর গঠন, এবং কে কার উদ্দেশ্যে পাঠাচ্ছে তা বোঝার জন্য address। অর্থাৎ protocol ছাড়া medium অর্থহীন।</p></div>
+  </details>
+  <details class="qa"><summary>"Internet এবং Web একই জিনিস" — এই বক্তব্যের ভুল কোথায়?</summary>
+    <div class="ans"><p>Internet হলো IP-ভিত্তিক পরস্পর-যুক্ত network-এর বিশ্বব্যাপী অবকাঠামো। Web (HTTP + hyperlinked document) হলো সেই অবকাঠামোর উপর চলা অনেক application-এর মধ্যে একটি। Email (SMTP), SSH, DNS, video call — এগুলোও Internet ব্যবহার করে কিন্তু Web-এর অংশ নয়।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#preface"><div class="d">পূর্ববর্তী</div><div class="t">Preface</div></a>
+    <a class="nx" href="#ch2"><div class="d">পরবর্তী</div><div class="t">Ch 2 — Network Components</div></a>
+  </div>
+</section>

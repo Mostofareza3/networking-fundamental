@@ -1,0 +1,549 @@
+<section class="chapter" id="ch48">
+  <div class="ch-eyebrow">Chapter 48 · Capstone</div>
+  <h1>What Happens When You Type a URL?</h1>
+  <p class="ch-lede">এটি সবচেয়ে বিখ্যাত interview প্রশ্ন — কিন্তু সেটি এর গুরুত্বের কারণ নয়। এটি গুরুত্বপূর্ণ কারণ এই একটি প্রশ্নের সম্পূর্ণ উত্তরে networking-এর প্রতিটি স্তর একসাথে দেখা যায়, এবং সেই সংযোগগুলোই আসল জ্ঞান।</p>
+
+  <div class="cb diagram"><pre>আপনি লিখলেন:
+
+        https://example.com
+
+
+এবং Enter চাপলেন। এখন ১৭টি ধাপ।</pre></div>
+
+  <div class="stepper" data-steps="17" id="st-url">
+    <div class="sp-head"><strong>URL থেকে rendered page পর্যন্ত</strong><span class="sp-i"></span></div>
+    <div class="sp-body">
+
+      <div class="sp-step" data-i="0">
+        <h4>ধাপ ১ — Browser URL ব্যাখ্যা করে</h4>
+        <div class="cb diagram"><pre>"example.com" লিখলে browser প্রথমে সিদ্ধান্ত নেয়:
+  এটি কি একটি URL, নাকি search query?
+
+তারপর parse করে:
+  scheme  : https  (দেওয়া না থাকলে https ধরে নেয়)
+  host    : example.com
+  port    : 443     (https-এর default)
+  path    : /
+  query   : (নেই)
+  fragment: (নেই)   ← server-এ কখনো যায় না [Ch 28]
+
+★ HSTS পরীক্ষা: browser-এর preload list বা আগের
+  Strict-Transport-Security header থেকে যদি জানা
+  থাকে এই domain শুধু HTTPS ব্যবহার করে, তাহলে
+  http:// লিখলেও সে ★নিজেই★ https-এ যাবে —
+  কোনো network request ছাড়াই।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="1">
+        <h4>ধাপ ২ — DNS Resolution</h4>
+        <div class="cb diagram"><pre>ক্রমান্বয়ে খোঁজা [Ch 26, 27]:
+
+  1. Browser-এর নিজস্ব cache      → পেলে শেষ
+  2. OS cache (systemd-resolved)  → পেলে শেষ
+  3. /etc/hosts                   → পেলে শেষ
+  4. Recursive resolver-কে জিজ্ঞেস
+
+Cache miss হলে সম্পূর্ণ পথ:
+
+  Stub → Recursive resolver (8.8.8.8)
+                ↓ "example.com এর A record?"
+         Root server → ".com এর জন্য এদের কাছে যাও"
+                ↓
+         .com TLD  → "example.com এর NS এরা"
+                ↓
+         ns1.example.com → "93.184.215.14"
+                ↓
+  Resolver cache করে, আপনাকে দেয়
+
+সময়: cache hit ~0ms, পূর্ণ resolution ~50-200ms
+
+★ IPv6-ও চাওয়া হয় (AAAA) — দুটোই থাকলে
+  browser "Happy Eyeballs" দিয়ে দুটোই সমান্তরালে
+  চেষ্টা করে, যেটি আগে সফল হয় সেটি রাখে।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="2">
+        <h4>ধাপ ৩ — IP পাওয়া গেল, routing সিদ্ধান্ত</h4>
+        <div class="cb diagram"><pre>93.184.215.14
+
+Kernel-এর প্রশ্ন [Ch 10, 11]:
+  এটি কি আমার subnet 192.168.0.0/24-এ?
+
+  192.168.0.107 AND /24 = 192.168.0.0
+  93.184.215.14 AND /24 = 93.184.215.0
+  মেলে না → ★ local নয় ★
+
+  → Routing table: default via 192.168.0.1
+  → Gateway-কে দিতে হবে
+
+Gateway-এর MAC দরকার [Ch 8]:
+  ARP cache দেখো → না থাকলে broadcast:
+    "192.168.0.1 কার?"
+    "আমার — a4:2b:b0:11:22:33"
+
+★ লক্ষ্য করুন: 93.184.215.14-এর MAC কখনো
+  জানা হচ্ছে না, জানার দরকারও নেই।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="3">
+        <h4>ধাপ ৪ — Socket তৈরি</h4>
+        <div class="cb diagram"><pre>Browser-এর নেটওয়ার্ক stack করে [Ch 16]:
+
+  fd = socket(AF_INET, SOCK_STREAM, 0)
+
+Kernel:
+  • একটি socket structure তৈরি করে
+  • একটি ephemeral source port বেছে দেয় (51234) [Ch 15]
+  • fd ফেরত দেয়
+
+এখন connection-এর পরিচয় নির্ধারিত হবে:
+  (192.168.0.107, 51234, 93.184.215.14, 443)
+   └───────────────── 4-tuple ─────────────────┘
+
+★ কিন্তু আগে দেখা হয় — এই origin-এর জন্য কি
+  ইতিমধ্যে একটি খোলা connection আছে?
+  থাকলে ধাপ ৫ ও ৬ সম্পূর্ণ বাদ (keep-alive, Ch 30)।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="4">
+        <h4>ধাপ ৫ — TCP Three-Way Handshake</h4>
+        <div class="cb diagram"><pre>connect(fd, 93.184.215.14:443) [Ch 18]
+
+  Client                          Server
+    │──── SYN, seq=1000 ───────────▶│
+    │◀─── SYN-ACK, seq=5000, ────── │
+    │     ack=1001                  │
+    │──── ACK, ack=5001 ───────────▶│
+
+  ⏱ ১ RTT খরচ হলো
+
+এখানে যা আলোচিত হলো:
+  • MSS (1460)          [Ch 5]
+  • Window scaling      [Ch 19]
+  • SACK permitted      [Ch 19]
+
+দুই প্রান্তে state: ESTABLISHED
+connect() ফেরত এল।
+
+(HTTP/3 হলে এই ধাপটি QUIC-এর ভেতরেই
+ ধাপ ৬-এর সাথে মিশে যেত, Ch 45)</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="5">
+        <h4>ধাপ ৬ — TLS Handshake</h4>
+        <div class="cb diagram"><pre>[Ch 33]
+
+  Client ──▶ ClientHello
+             • TLS 1.3
+             • cipher suite-এর তালিকা
+             • ★ key share (ephemeral DH) ★
+             • ★ SNI: example.com ★ (plaintext!)
+             • ALPN: h2, http/1.1
+
+  Server ──▶ ServerHello (key share)
+             ═══ এখান থেকে encrypted ═══
+             {Certificate}
+             {CertificateVerify}  ← private key-র প্রমাণ
+             {Finished}
+
+  Client যাচাই করে:
+    ✓ Certificate chain → intermediate → root
+    ✓ Root আমার trust store-এ আছে?
+    ✓ মেয়াদ ঠিক?
+    ✓ ★ SAN-এ example.com আছে? ★
+    ✓ Revoke হয়নি? (OCSP)
+
+  Client ──▶ {Finished} + প্রথম HTTP request
+
+  ⏱ আরও ১ RTT
+  ⇒ এখন উভয়ের কাছে একটি session key আছে</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="6">
+        <h4>ধাপ ৭ — HTTP Request তৈরি</h4>
+        <div class="cb diagram"><pre>[Ch 28]
+
+  GET / HTTP/1.1
+  Host: example.com
+  User-Agent: Mozilla/5.0 ...
+  Accept: text/html,application/xhtml+xml,...
+  Accept-Encoding: gzip, deflate, br
+  Accept-Language: bn,en-US;q=0.9
+  Cookie: session=abc123
+  Connection: keep-alive
+
+(HTTP/2 হলে এটি binary HEADERS frame,
+ HPACK-এ compressed, stream ID 1 — Ch 44)
+
+এই bytes গুলো TLS-এ encrypt হয়ে
+socket-এ write() করা হয়।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="7">
+        <h4>ধাপ ৮ — Encapsulation</h4>
+        <div class="cb diagram"><pre>[Ch 3, 4]
+
+  HTTP request (plaintext)
+        ↓ TLS encrypt + record header
+  TLS record
+        ↓ TCP header (src 51234, dst 443, seq, ack)
+  TCP segment
+        ↓ IP header (src 192.168.0.107,
+        ↓            dst 93.184.215.14, TTL 64)
+  IP packet
+        ↓ Ethernet/Wi-Fi header
+        ↓ (dst = gateway-এর MAC!)
+  Frame
+        ↓ NIC
+  Bits → radio wave
+
+┌────────┬───────┬────────┬─────┬──────────────┬─────┐
+│Eth Hdr │IP Hdr │TCP Hdr │ TLS │ encrypted    │ FCS │
+│14 B    │20 B   │20 B    │ 5 B │ HTTP request │ 4 B │
+└────────┴───────┴────────┴─────┴──────────────┴─────┘</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="8">
+        <h4>ধাপ ৯ — Router Hop</h4>
+        <div class="cb diagram"><pre>[Ch 12, 13, 34, 42]
+
+  বাসার router:
+    • Ethernet header ফেলে দিল
+    • ★ NAT: src 192.168.0.107:51234
+             → 103.55.20.7:42001 ★
+    • Firewall নিয়ম প্রয়োগ
+    • TTL: 64 → 63
+    • নতুন frame, ISP-র দিকে
+
+  ISP-র router গুলো:
+    • Routing table lookup (longest prefix match)
+    • প্রতিটিতে TTL−1, নতুন Ethernet header
+    • BGP-নির্ধারিত পথে
+
+  সমুদ্রতলের cable:
+    • ★ propagation delay-র সিংহভাগ এখানে ★
+
+  গন্তব্য ISP → data center edge → firewall
+  → load balancer → top-of-rack switch → server
+
+  পুরো পথে:
+    Ethernet header — ১০-২০ বার নতুন করে লেখা
+    Destination IP  — ★ অপরিবর্তিত ★
+    TCP payload     — ★ অপরিবর্তিত এবং অপঠনীয় ★</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="9">
+        <h4>ধাপ ১০ — Server-এর NIC packet গ্রহণ করে</h4>
+        <div class="cb diagram"><pre>NIC:
+  • Signal → bits → frame
+  • dst MAC কি আমার? ✓
+  • FCS checksum ঠিক? ✓
+  • DMA দিয়ে memory-তে রাখল
+  • Kernel-কে interrupt দিল
+    (উচ্চ throughput-এ NAPI polling — Ch 2)</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="10">
+        <h4>ধাপ ১১ — Server-এর Kernel: de-encapsulation</h4>
+        <div class="cb diagram"><pre>[Ch 3]
+
+  Frame  → Ethernet header ফেলো, EtherType=IPv4
+     ↓
+  Packet → dst IP আমার? ✓ checksum ✓
+           Protocol = 6 → TCP
+     ↓
+  Segment→ dst port 443
+           4-tuple দিয়ে socket খুঁজে বের করো [Ch 15]
+           Sequence number দেখে ক্রমে বসাও [Ch 19]
+           ACK পাঠাও
+     ↓
+  Socket receive buffer-এ bytes জমা হলো
+
+  ★ এই মুহূর্তে TCP ACK চলে গেছে — কিন্তু
+    application এখনো কিছুই দেখেনি! (Ch 17)</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="11">
+        <h4>ধাপ ১২ — Server Process জাগে</h4>
+        <div class="cb diagram"><pre>nginx-এর event loop (epoll) জানল:
+  "এই fd-তে data আছে"
+
+  read(conn_fd, buf, size)
+      ↓
+  TLS decrypt (session key দিয়ে)
+      ↓
+  HTTP parse:
+    method = GET
+    path = /
+    Host = example.com  ← ★ কোন virtual host ★
+
+  nginx সিদ্ধান্ত নেয়:
+    • static ফাইল? → সরাসরি পাঠাও
+    • proxy_pass? → upstream application-এ পাঠাও</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="12">
+        <h4>ধাপ ১৩ — Application logic</h4>
+        <div class="cb diagram"><pre>যদি dynamic হয়:
+
+  nginx → (Unix socket / TCP) → app server
+                                    ↓
+                              Route matching
+                                    ↓
+                              Auth যাচাই (cookie/JWT)
+                                    ↓
+                              Cache দেখো (Redis)
+                                    ↓ miss
+                              Database query
+                                    ↓  ★ এটিও একটি
+                                    ↓    network call! ★
+                              Response তৈরি (HTML/JSON)
+
+★ লক্ষণীয়: ধাপ ১–১২-এর প্রায় পুরোটাই এখানে
+  আবার ঘটছে, ছোট পরিসরে — app→cache এবং
+  app→database প্রতিটি নিজেই একটি TCP connection,
+  নিজস্ব latency সহ।</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="13">
+        <h4>ধাপ ১৪ — HTTP Response</h4>
+        <div class="cb diagram"><pre>  HTTP/1.1 200 OK
+  Content-Type: text/html; charset=utf-8
+  Content-Encoding: gzip
+  Content-Length: 1256
+  Cache-Control: max-age=3600
+  ETag: "a3f9c2"
+  Strict-Transport-Security: max-age=31536000
+
+  &lt;compressed HTML bytes>
+
+তারপর ঠিক উল্টো পথে:
+  → TLS encrypt
+  → TCP segment (MSS অনুযায়ী ভাগ, Ch 5)
+  → IP packet
+  → frame
+  → তার</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="14">
+        <h4>ধাপ ১৫ — Response ফিরে আসে</h4>
+        <div class="cb diagram"><pre>• Router hop গুলো উল্টো দিকে
+  ★ কিন্তু একই পথে নাও হতে পারে ★ (Ch 12)
+
+• বাসার NAT: dst 103.55.20.7:42001
+              → 192.168.0.107:51234 (table lookup)
+
+• আপনার kernel:
+    - segment গুলো ক্রমে সাজায় [Ch 19]
+    - হারানো থাকলে অপেক্ষা করে (HOL blocking)
+    - receive buffer-এ জমা করে
+    - ACK পাঠায়, window ঘোষণা করে [Ch 20]
+
+• Browser-এর read() bytes পায়
+• TLS decrypt
+• HTTP parse
+• gzip decompress</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="15">
+        <h4>ধাপ ১৬ — Browser HTML process করে</h4>
+        <div class="cb diagram"><pre>HTML parse শুরু (streaming — সম্পূর্ণ আসার
+                 অপেক্ষা করে না)
+    ↓
+  &lt;link rel="stylesheet"> পেল
+      → ★ নতুন request ★ → ধাপ ২ থেকে আবার শুরু!
+        (কিন্তু একই origin হলে ধাপ ২-৬ বাদ,
+         connection পুনর্ব্যবহার)
+    ↓
+  &lt;script src> পেল
+      → আরেকটি request
+    ↓
+  &lt;img> পেল
+      → আরও request
+
+★ একটি সাধারণ page-এ ৫০-১০০টি resource
+★ HTTP/2 হলে সবগুলো ★একই connection-এ
+  সমান্তরালে★ (Ch 44)
+★ HTTP/1.1 হলে ৬টি connection-এ সারিবদ্ধ
+★ ভিন্ন origin (CDN, font, analytics) হলে
+  প্রতিটির জন্য আবার DNS + TCP + TLS</pre></div>
+      </div>
+
+      <div class="sp-step" data-i="16">
+        <h4>ধাপ ১৭ — Render</h4>
+        <div class="cb diagram"><pre>  HTML  → DOM tree
+  CSS   → CSSOM tree
+          ↓
+        Render tree
+          ↓
+        Layout (কোথায় কী বসবে)
+          ↓
+        Paint (pixel আঁকা)
+          ↓
+        Composite (স্তরগুলো একসাথে)
+          ↓
+  ★ ব্যবহারকারী page দেখলেন ★
+
+  JavaScript চলল, হয়তো আরও fetch() করল
+      → আবার ধাপ ২ থেকে...
+
+
+এবং এই পুরো প্রক্রিয়াটি সম্পন্ন হলো
+সাধারণত ★০.৩ থেকে ২ সেকেন্ডে★।</pre></div>
+      </div>
+    </div>
+    <div class="dots"></div>
+  </div>
+
+  <h2>48.2 সম্পূর্ণ চিত্র — একটি পাতায়</h2>
+
+  <div class="cb diagram"><pre>┌─────────────────────────────────────────────────────────────┐
+│  আপনি: https://example.com  [Enter]                          │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  BROWSER                                                    │
+│    URL parse → HSTS check → cache check                     │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  DNS  [Ch 25-27]                                            │
+│    browser cache → OS cache → /etc/hosts → resolver         │
+│    → root → TLD → authoritative → 93.184.215.14             │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  OS KERNEL  [Ch 9-11, 15-16]                                │
+│    routing: local? না → gateway                              │
+│    ARP: gateway-এর MAC                                       │
+│    socket() → ephemeral port → 4-tuple                      │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  TCP HANDSHAKE  [Ch 18]        ⏱ 1 RTT                      │
+│    SYN → SYN-ACK → ACK                                      │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  TLS HANDSHAKE  [Ch 31-33]     ⏱ 1 RTT                      │
+│    ClientHello(SNI) → cert → verify → session key           │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  HTTP REQUEST  [Ch 28-30]                                   │
+│    GET / HTTP/1.1 + Host + headers                          │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ENCAPSULATION  [Ch 3-5]                                    │
+│    TLS → TCP → IP → Ethernet → bits                         │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  NETWORK  [Ch 12-14, 34, 42-43]                             │
+│    NAT → ISP → BGP → cable → ISP → data center               │
+│    প্রতি hop: নতুন MAC, TTL−1, IP অপরিবর্তিত                  │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  SERVER SIDE  [Ch 47, 7, 15-16]                             │
+│    LB → switch → NIC → kernel → socket → nginx → app → DB    │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  RESPONSE — পুরো পথ উল্টো দিকে                                │
+└────────────────────────────┬────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│  BROWSER RENDER                                             │
+│    parse → DOM+CSSOM → layout → paint → composite           │
+│    ★ প্রতিটি sub-resource-এর জন্য আবার উপরে থেকে ★           │
+└─────────────────────────────────────────────────────────────┘</pre></div>
+
+  <h2>48.3 এই প্রশ্নের ভালো উত্তর কেমন হয়</h2>
+
+  <div class="box tip">
+    <div class="bt">✓ Interview-এ এই প্রশ্নের উত্তর দেওয়ার কৌশল</div>
+    <p>সব বিস্তারিত একসাথে বলা ভালো উত্তর নয় — বরং কাঠামোবদ্ধভাবে বলা এবং গভীরতা নিয়ন্ত্রণ করা:</p>
+    <ol>
+      <li><strong>প্রথমে কাঠামো দিন</strong> (৩০ সেকেন্ড): "মোটামুটি ছয়টি পর্যায় — URL parsing, DNS, connection setup (TCP+TLS), HTTP request/response, server-side processing, এবং rendering।"</li>
+      <li><strong>তারপর জিজ্ঞেস করুন</strong>: "কোন অংশটি বিস্তারিত শুনতে চান?" — এটি দেখায় আপনি প্রশ্নের পরিধি বোঝেন।</li>
+      <li><strong>সংযোগ দেখান</strong>: "DNS UDP ব্যবহার করে কারণ বিনিময়টি ছোট, handshake-এর খরচ অযৌক্তিক হতো" — এই ধরনের <em>কেন</em> ব্যাখ্যাই মুখস্থ তালিকা থেকে আলাদা করে।</li>
+      <li><strong>ট্রেড-অফ উল্লেখ করুন</strong>: "এই ৪টি RTT-র কারণেই connection reuse ও CDN এত গুরুত্বপূর্ণ।"</li>
+      <li><strong>সততা রাখুন</strong>: "TLS-এর গণিতটা আমার মুখস্থ নেই, কিন্তু ধারণাটা হলো..." — এটি দুর্বলতা নয়।</li>
+    </ol>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 48 — পুরো যাত্রাটি নিজে অনুসরণ করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — উপরের ১৭টি ধাপের প্রতিটি বাস্তবে ঘটছে কিনা, নিজের চোখে।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre>#!/bin/bash
+D=example.com
+echo "════ ধাপ ২ — DNS ════"
+dig +short $D
+IP=$(dig +short $D | head -1)
+
+echo -e "\n════ ধাপ ৩ — Routing সিদ্ধান্ত ════"
+ip route get $IP 2>/dev/null || route get $IP
+
+echo -e "\n════ ধাপ ৩ — Gateway-এর ARP ════"
+GW=$(ip route | awk '/default/{print $3; exit}')
+ip neigh | grep "$GW"
+
+echo -e "\n════ ধাপ ৫,৬ — Handshake-এর সময় ════"
+curl -w "TCP: %{time_connect}s | TLS: %{time_appconnect}s\n" \
+     -o /dev/null -s https://$D
+
+echo -e "\n════ ধাপ ৬ — Certificate ════"
+echo | openssl s_client -connect $D:443 -servername $D 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates 2>/dev/null
+
+echo -e "\n════ ধাপ ৭,১৪ — HTTP ════"
+curl -sI https://$D | head -8
+
+echo -e "\n════ ধাপ ৯ — Router hop ════"
+traceroute -n -m 12 $D 2>/dev/null | head -12
+
+echo -e "\n════ ধাপ ৪,১১ — Socket ════"
+(curl -s https://$D > /dev/null &) ; sleep 0.3
+ss -tn dst $IP 2>/dev/null | head -3
+
+echo -e "\n════ সম্পূর্ণ সময়ের ভাগ ════"
+curl -w "DNS %{time_namelookup}s → TCP %{time_connect}s → \
+TLS %{time_appconnect}s → TTFB %{time_starttransfer}s → \
+মোট %{time_total}s\n" -o /dev/null -s https://$D</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রতিটি ধাপের একটি বাস্তব, পরিমাপযোগ্য চিহ্ন আছে — DNS-এর উত্তর, routing table-এর সিদ্ধান্ত, ARP cache-এর entry, handshake-এর সময়, certificate-এর বিবরণ, প্রতিটি router-এর IP, kernel-এর socket table-এ 4-tuple। কিছুই বিমূর্ত নয়।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "URL লিখলে কী হয়" প্রশ্নের উত্তর মুখস্থ করার দরকার নেই — আপনি প্রতিটি ধাপ নিজের machine-এ দেখতে পারেন। এবং এখন আপনি জানেন প্রতিটি ধাপে <em>কী</em> হচ্ছে, <em>কেন</em> হচ্ছে, এবং <em>কোন component</em> সেটি করছে।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>১৭টি ধাপ, কিন্তু ছয়টি পর্যায়: parse → DNS → connect → request → server → render।</li>
+      <li>Connection setup-এ ন্যূনতম ৩ RTT (DNS + TCP + TLS), তারপর request-এর ১টি।</li>
+      <li>প্রতিটি sub-resource এই চক্রের কিছু অংশ পুনরাবৃত্তি করে — ভিন্ন origin হলে পুরোটাই।</li>
+      <li>Connection reuse, HTTP/2 multiplexing, ও CDN — তিনটিই এই RTT গুলো কমানোর কৌশল।</li>
+      <li>Server-side-এ একই গল্প ছোট পরিসরে পুনরাবৃত্ত হয় (app → cache → database)।</li>
+      <li>পুরো পথে: MAC বারবার বদলায়, IP অপরিবর্তিত, payload অস্পৃশ্য ও (TLS-এ) অপঠনীয়।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি HTTPS page লোড হতে ন্যূনতম কতগুলো round trip লাগে (cache খালি, HTTP/1.1)?</summary>
+    <div class="ans"><p>ন্যূনতম চারটি: (১) DNS resolution, (২) TCP handshake, (৩) TLS 1.3 handshake, (৪) HTTP request/response। RTT ২০০ms হলে এটিই ৮০০ms — কোনো server processing time ছাড়াই। তারপর প্রতিটি sub-resource (CSS, JS, image) আরও round trip যোগ করে, যদিও একই origin হলে connection পুনর্ব্যবহৃত হয়।</p></div>
+  </details>
+  <details class="qa"><summary>পুরো যাত্রায় destination MAC address কতবার বদলায়? Destination IP কতবার?</summary>
+    <div class="ans"><p>Destination <strong>MAC</strong> প্রতিটি hop-এ বদলায় — সাধারণত ১০–২০ বার, কারণ MAC কেবল এক hop-এর জন্য। Destination <strong>IP</strong> সাধারণত <strong>০ বার</strong> — এটি end-to-end পরিচয়। ব্যতিক্রম: গন্তব্যে load balancer DNAT করলে একবার। বিপরীতে source IP NAT-এ ১–২ বার বদলায়।</p></div>
+  </details>
+  <details class="qa"><summary>একটি page-এ ৫০টি resource আছে, সবই একই origin-এ। DNS lookup কতবার হবে?</summary>
+    <div class="ans"><p>একবার (বা শূন্য, যদি ইতিমধ্যে cache-এ থাকে)। DNS resolution hostname-প্রতি, resource-প্রতি নয় — এবং ফলাফল browser ও OS দুই জায়গাতেই cache হয়। তবে resource গুলো যদি ভিন্ন origin-এ থাকে (CDN, font provider, analytics), তাহলে প্রতিটি নতুন hostname-এর জন্য আলাদা DNS + TCP + TLS লাগবে — এজন্যই তৃতীয়-পক্ষের domain-এর সংখ্যা page speed-এর একটি বড় নিয়ামক।</p></div>
+  </details>
+  <details class="qa"><summary>ধাপ ১৩-এ (application logic) কেন বলা হলো "এখানে পুরো গল্পটি আবার ঘটছে"?</summary>
+    <div class="ans"><p>কারণ application থেকে cache (Redis) বা database-এ প্রতিটি call নিজেই একটি সম্পূর্ণ network operation — socket, TCP connection (বা pool থেকে পুনর্ব্যবহার), request, response, latency। শুধু পরিসর ছোট (একই data center, RTT ~০.৫ms)। এজন্যই N+1 query সমস্যা এত ব্যয়বহুল: ১০০টি ধারাবাহিক database call মানে ১০০টি round trip, যদিও প্রতিটি মাত্র ০.৫ms।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch47"><div class="d">পূর্ববর্তী</div><div class="t">Ch 47 — Load Balancing</div></a>
+    <a class="nx" href="#ch49"><div class="d">পরবর্তী</div><div class="t">Ch 49 — Developer Mental Models</div></a>
+  </div>
+</section>

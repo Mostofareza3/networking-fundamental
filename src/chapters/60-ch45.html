@@ -1,0 +1,268 @@
+<section class="chapter" id="ch45">
+  <div class="ch-eyebrow">Chapter 45</div>
+  <h1>HTTP/3 এবং QUIC</h1>
+  <p class="ch-lede">QUIC হলো এই বইয়ের বহু chapter-এর সমস্যাগুলোর সম্মিলিত উত্তর। TCP-র HOL blocking, handshake-এর RTT, IP বদলালে connection ভাঙা, এবং TCP-র বিবর্তনের অচলাবস্থা — সবগুলো একসাথে।</p>
+
+  <h2>45.1 Stack-এর তুলনা</h2>
+
+  <div class="cb diagram"><pre>  HTTP/1.1 ও HTTP/2              HTTP/3
+
+   ┌─────────────┐            ┌─────────────┐
+   │   HTTP      │            │   HTTP/3    │
+   ├─────────────┤            ├─────────────┤
+   │   TLS       │            │             │
+   ├─────────────┤            │    QUIC     │ ← TLS 1.3
+   │   TCP       │            │             │   ভেতরেই
+   ├─────────────┤            ├─────────────┤
+   │   IP        │            │    UDP      │
+   └─────────────┘            ├─────────────┤
+                              │    IP       │
+                              └─────────────┘
+
+  kernel-এ TCP                user space-এ QUIC
+  আলাদা TLS handshake         একীভূত handshake</pre></div>
+
+  <h2>45.2 QUIC যে চারটি সমস্যা সমাধান করে</h2>
+
+  <div class="tabs" id="tabs-quic">
+    <div class="tab-btns">
+      <button class="on" data-t="q1">HOL Blocking</button>
+      <button data-t="q2">Handshake RTT</button>
+      <button data-t="q3">Connection Migration</button>
+      <button data-t="q4">Ossification</button>
+    </div>
+    <div class="tab-body">
+      <div class="tab-pane on" id="q1">
+        <h4>সমস্যা ১ — TCP-স্তরের Head-of-Line Blocking</h4>
+        <div class="cb diagram"><pre>HTTP/2 over TCP:
+
+  Stream 1: [A][B][C]
+  Stream 2: [D][E][F]
+  Stream 3: [G][H][I]
+
+  সবই একটি TCP byte stream-এ:
+  [A][D][G][B][E][H][C][F][I]
+          ↑ এই segment হারাল
+
+  TCP: "ক্রম রক্ষা করতে হবে" (Ch 19)
+  → এর পরের সব byte আটকে গেল
+  → ★ তিনটি stream-ই থেমে গেল ★
+  → যদিও stream 1 ও 3-এর data পৌঁছে গেছে!
+
+
+QUIC:
+
+  Stream 1: [A][B][C]  ← নিজস্ব sequence, নিজস্ব reliability
+  Stream 2: [D][E][F]  ← হারালে শুধু এটিই অপেক্ষা করে
+  Stream 3: [G][H][I]  ← অপ্রভাবিত
+
+  QUIC packet হারালে সে জানে কোন stream-এর data ছিল
+  → ★ শুধু সেই stream আটকায় ★
+  → বাকিরা নির্বিঘ্নে চলতে থাকে
+
+★ এই একটি বৈশিষ্ট্যই QUIC তৈরির প্রধান কারণ।
+  উচ্চ packet loss-এর network-এ (mobile, খারাপ Wi-Fi)
+  পার্থক্যটি নাটকীয়।</pre></div>
+      </div>
+      <div class="tab-pane" id="q2">
+        <h4>সমস্যা ২ — Handshake-এর RTT</h4>
+        <div class="cb diagram"><pre>TCP + TLS 1.3 (আলাদা আলাদা):
+
+  Client                          Server
+    │──── SYN ──────────────────────▶│
+    │◀─── SYN-ACK ───────────────────│  RTT 1: TCP
+    │──── ACK ──────────────────────▶│
+    │──── ClientHello ──────────────▶│
+    │◀─── ServerHello, Cert, Fin ────│  RTT 2: TLS
+    │──── Finished + HTTP request ──▶│
+                                      ⇒ ২ RTT
+
+
+QUIC (একীভূত):
+
+  Client                          Server
+    │──── Initial (ClientHello) ────▶│
+    │◀─── Initial + Handshake ───────│  RTT 1: সবকিছু
+    │──── Handshake + HTTP request ─▶│
+                                      ⇒ ১ RTT
+
+
+QUIC 0-RTT (আগে connect করেছিলেন এমন server-এ):
+
+  Client                          Server
+    │──── Initial + ★HTTP request★ ─▶│
+    │◀─── response ──────────────────│
+                                      ⇒ ০ RTT!
+
+★ কারণ QUIC-এ transport ও crypto handshake আলাদা নয় —
+  একই message-এ দুটোই।</pre></div>
+      </div>
+      <div class="tab-pane" id="q3">
+        <h4>সমস্যা ৩ — Connection Migration</h4>
+        <div class="cb diagram"><pre>TCP-তে connection চিহ্নিত হয় 4-tuple দিয়ে:
+  (src IP, src port, dst IP, dst port)   [Ch 15]
+
+আপনি Wi-Fi থেকে mobile data-তে গেলেন:
+  → src IP বদলে গেল
+  → ★ 4-tuple বদলে গেল ★
+  → connection মৃত
+  → download শুরু থেকে
+  → video call কেটে গেল
+
+
+QUIC-এ connection চিহ্নিত হয় ★Connection ID★ দিয়ে:
+
+  Connection ID: 0x4f2a9b3c...   ← IP-নিরপেক্ষ
+
+  Wi-Fi:        192.168.1.5:51234 ──▶ [CID: 4f2a9b3c]
+  Mobile data:  10.20.30.40:38900 ──▶ [CID: 4f2a9b3c]
+                                            │
+                                    Server চিনতে পারে:
+                                    "একই connection,
+                                     নতুন path"
+
+  → ★ Download চলতে থাকে, video call কাটে না ★
+
+  (Server path validation করে নিশ্চিত হয় যে এটি
+   প্রকৃত client, কেউ connection ছিনতাই করছে না)
+
+★ Mobile-first দুনিয়ায় এটি একটি বিশাল ব্যবহারিক জয়।</pre></div>
+      </div>
+      <div class="tab-pane" id="q4">
+        <h4>সমস্যা ৪ — Protocol Ossification</h4>
+        <div class="cb diagram"><pre>TCP kernel-এ, তাই:
+  • নতুন TCP feature = OS update
+  • OS update = বছরের পর বছর
+  • Middlebox (firewall, NAT, proxy) TCP header
+    "বোঝে" এবং অচেনা কিছু দেখলে ফেলে দেয়
+  • ফলে নতুন TCP option deploy করাই যায় না
+
+  একে বলে ★ossification★ — protocol পাথর হয়ে গেছে
+
+  উদাহরণ: TCP Fast Open (0-RTT-র TCP সংস্করণ)
+  ২০১১ সালে তৈরি, কিন্তু middlebox-এর কারণে
+  আজও কার্যত ব্যবহার করা যায় না।
+
+
+QUIC-এর সমাধান:
+
+  1. ★ User space-এ ★
+     → browser update করলেই নতুন version
+     → Chrome/Firefox মাসে মাসে উন্নতি আনতে পারে
+
+  2. ★ প্রায় সব কিছু encrypted ★
+     → middlebox শুধু UDP header দেখে
+     → ভেতরে হস্তক্ষেপ করতে পারে না
+     → তাই ossify হতে পারে না
+
+  3. ★ UDP-র উপর ★
+     → নতুন transport protocol deploy করা অসম্ভব
+       (middlebox অচেনা protocol number ফেলে দেয়)
+     → কিন্তু UDP সবাই চেনে ও যেতে দেয়
+
+★ QUIC-এর নকশায় "ভবিষ্যতে বদলানো যাবে" —
+  এটি একটি স্পষ্ট লক্ষ্য ছিল।</pre></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>45.3 QUIC-এর মূল্য</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>দিক</th><th>বিবেচনা</th></tr></thead>
+    <tbody>
+      <tr><td><strong>CPU খরচ</strong></td><td>User space-এ চলায় প্রতিটি packet kernel↔user সীমানা পেরোয়। TCP-র চেয়ে বেশি CPU (যদিও GSO/GRO ও hardware offload দিয়ে ব্যবধান কমছে)।</td></tr>
+      <tr><td><strong>UDP blocking</strong></td><td>কিছু কর্পোরেট network UDP 443 আটকায়। তাই সব client-কে TCP-তে fallback রাখতে হয়।</td></tr>
+      <tr><td><strong>Middlebox-এর অনভ্যস্ততা</strong></td><td>পুরনো firewall UDP-র বড় flow-কে সন্দেহজনক মনে করতে পারে।</td></tr>
+      <tr><td><strong>Debugging কঠিন</strong></td><td>সব encrypted — <code>tcpdump</code>-এ শুধু UDP packet দেখা যায়। Wireshark-এ দেখতে <code>SSLKEYLOGFILE</code> লাগে।</td></tr>
+      <tr><td><strong>Amplification-এর ঝুঁকি</strong></td><td>UDP-ভিত্তিক বলে সতর্ক নকশা দরকার — QUIC-এ নিয়ম আছে: address যাচাই না হওয়া পর্যন্ত server পাওয়া data-র ৩ গুণের বেশি পাঠাতে পারবে না।</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="box tip">
+    <div class="bt">✓ HTTP/3 কীভাবে আবিষ্কৃত হয়</div>
+    <p>Browser জানে না কোন site HTTP/3 support করে। তাই প্রক্রিয়াটি এমন:</p>
+    <div class="cb diagram"><pre>1. Browser TCP+TLS দিয়ে HTTP/2-তে connect করে
+
+2. Server response-এ একটি header পাঠায়:
+     alt-svc: h3=":443"; ma=86400
+              │              │
+        "HTTP/3 আছে"    "৮৬৪০০ সেকেন্ড মনে রাখো"
+
+3. Browser এটি মনে রাখে
+
+4. ★ পরের বার ★ সে সরাসরি QUIC চেষ্টা করে
+   (এবং সমান্তরালে TCP-ও, যদি QUIC ব্যর্থ হয় —
+    একে বলে "happy eyeballs")</pre></div>
+    <p>এজন্যই একটি site-এ প্রথমবার গেলে HTTP/2 দেখবেন, দ্বিতীয়বার HTTP/3।</p>
+  </div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <ul>
+      <li><strong>HTTP/3 সাধারণত CDN-এর মাধ্যমে আসে</strong> — Cloudflare, Fastly, CloudFront-এ একটি toggle। নিজে nginx-এ চালু করাও সম্ভব (1.25+), কিন্তু CDN-এ সবচেয়ে সহজ।</li>
+      <li><strong>Application code বদলাতে হয় না</strong> — HTTP-র semantics অপরিবর্তিত। শুধু transport বদলায়।</li>
+      <li><strong>সবচেয়ে বেশি লাভ mobile ও উচ্চ-loss network-এ</strong> — HOL blocking ও connection migration সেখানেই সবচেয়ে বেশি কাজে লাগে। ভালো wired সংযোগে পার্থক্য কম।</li>
+      <li><strong>Monitoring মনে রাখুন</strong> — আপনার observability tool HTTP/3 বোঝে কিনা যাচাই করুন; অনেক পুরনো tool শুধু TCP দেখে।</li>
+    </ul>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 45 — HTTP/3 পরীক্ষা করুন</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — কোন site HTTP/3 support করে, কীভাবে তা ঘোষণা করে, এবং QUIC traffic দেখতে কেমন।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># alt-svc header — HTTP/3-এর ঘোষণা
+curl -sI https://www.cloudflare.com | grep -i alt-svc
+curl -sI https://www.google.com | grep -i alt-svc
+
+# HTTP/3 দিয়ে চেষ্টা (curl-এ HTTP/3 support লাগবে)
+curl --http3 -sI https://www.cloudflare.com | head -1
+
+# QUIC traffic দেখুন — শুধু UDP 443
+sudo tcpdump -i any -n 'udp port 443' -c 10
+# তারপর একটি HTTP/3-সক্ষম site ব্রাউজ করুন
+
+# তুলনা: HTTP/2 vs HTTP/3 সময়
+for v in --http2 --http3; do
+  echo -n "$v: "
+  curl $v -o /dev/null -s -w "%{time_total}s\n" https://www.cloudflare.com 2>/dev/null || echo "সমর্থিত নয়"
+done
+
+# আপনার curl কি HTTP/3 জানে?
+curl --version | grep -o HTTP3</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> <code>alt-svc: h3=":443"; ma=86400</code> — এটিই HTTP/3-এর ঘোষণা। tcpdump-এ QUIC traffic দেখবেন শুধুই UDP packet হিসেবে — কোনো handshake, কোনো flag, কিছুই পড়া যায় না, কারণ সব encrypted। এটি TCP-র tcpdump output-এর সাথে তীব্র বৈপরীত্য।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> QUIC-এর "সব encrypted" নীতি middlebox-কে হস্তক্ষেপ থেকে আটকায় — কিন্তু একই সাথে আপনার নিজের debugging-ও কঠিন করে তোলে। এটি একটি সচেতন ট্রেড-অফ: ভবিষ্যতে বিবর্তনের স্বাধীনতার বিনিময়ে দৃশ্যমানতা।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>QUIC = UDP-র উপর নির্মিত একটি সম্পূর্ণ transport, TLS 1.3 অন্তর্নির্মিত।</li>
+      <li><strong>Stream-প্রতি স্বাধীন reliability</strong> → TCP-স্তরের HOL blocking সম্পূর্ণ দূর।</li>
+      <li>একীভূত handshake → ১ RTT (পুনঃসংযোগে ০ RTT)।</li>
+      <li><strong>Connection ID</strong> → IP বদলালেও connection টিকে থাকে (connection migration)।</li>
+      <li>User space + encrypted header → ossification এড়ায়, দ্রুত বিবর্তন সম্ভব।</li>
+      <li>মূল্য: বেশি CPU, কিছু network-এ UDP blocking, debugging কঠিন।</li>
+      <li><code>alt-svc</code> header দিয়ে HTTP/3 আবিষ্কৃত হয়; প্রথম সংযোগ TCP-তেই হয়।</li>
+      <li>সবচেয়ে বেশি লাভ mobile ও উচ্চ-loss network-এ।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>QUIC কীভাবে TCP-স্তরের HOL blocking দূর করে?</summary>
+    <div class="ans"><p>QUIC-এর transport layer নিজেই stream-এর ধারণা জানে। প্রতিটি stream-এর নিজস্ব sequence number ও reliability ব্যবস্থা আছে। একটি QUIC packet হারালে সে জানে সেটি কোন stream-এর data বহন করছিল, তাই শুধু সেই stream অপেক্ষা করে — বাকি stream গুলোর data সঙ্গে সঙ্গে application-কে দেওয়া যায়। TCP এটি পারে না কারণ তার কাছে সবটাই একটি অবিভাজ্য ordered byte stream।</p></div>
+  </details>
+  <details class="qa"><summary>Wi-Fi থেকে mobile data-তে গেলে QUIC connection কেন টিকে থাকে?</summary>
+    <div class="ans"><p>কারণ QUIC connection চিহ্নিত হয় একটি <strong>Connection ID</strong> দিয়ে, 4-tuple দিয়ে নয়। IP ও port বদলালেও Connection ID অপরিবর্তিত থাকে, তাই server চিনতে পারে এটি একই connection — শুধু নতুন network path থেকে আসছে। সে path validation করে নিশ্চিত হয় এবং তারপর সেখানেই পাঠাতে শুরু করে। TCP-তে 4-tuple-ই পরিচয় হওয়ায় IP বদলানো মানেই connection-এর মৃত্যু।</p></div>
+  </details>
+  <details class="qa"><summary>QUIC কেন UDP-র উপর তৈরি হলো, একটি নতুন protocol number নিয়ে নয়?</summary>
+    <div class="ans"><p>কারণ Internet-এ নতুন transport protocol deploy করা কার্যত অসম্ভব। অসংখ্য middlebox (firewall, NAT, load balancer) শুধু TCP ও UDP চেনে এবং অচেনা IP protocol number দেখলে packet ফেলে দেয়। SCTP ও DCCP-র ভাগ্যে এটাই ঘটেছে। UDP সর্বজনীনভাবে অনুমোদিত, তাই QUIC তার উপর নিজের সম্পূর্ণ transport তৈরি করেছে — একটি ব্যবহারিক আপস, তাত্ত্বিক আদর্শ নয়।</p></div>
+  </details>
+  <details class="qa"><summary>QUIC-এ প্রায় সবকিছু encrypted রাখার সুবিধা ও অসুবিধা কী?</summary>
+    <div class="ans"><p><strong>সুবিধা:</strong> Middlebox protocol-এর ভেতরে হস্তক্ষেপ করতে পারে না, তাই ossification হয় না — ভবিষ্যতে protocol বদলানো সম্ভব। গোপনীয়তাও বাড়ে। <strong>অসুবিধা:</strong> আপনার নিজের network monitoring, troubleshooting ও performance analysis কঠিন হয়ে যায় — <code>tcpdump</code>-এ শুধু অস্বচ্ছ UDP packet দেখা যায়। এটি একটি সচেতন ট্রেড-অফ: বিবর্তনের স্বাধীনতার বিনিময়ে দৃশ্যমানতা।</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch44"><div class="d">পূর্ববর্তী</div><div class="t">Ch 44 — HTTP/2</div></a>
+    <a class="nx" href="#ch46"><div class="d">পরবর্তী</div><div class="t">Ch 46 — CDN</div></a>
+  </div>
+</section>

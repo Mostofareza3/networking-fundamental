@@ -1,0 +1,188 @@
+<section class="chapter" id="cheatsheet">
+  <div class="ch-eyebrow">Reference</div>
+  <h1>Quick Reference</h1>
+
+  <h2>Common Ports</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Port</th><th>Protocol</th><th>Service</th><th>মনে রাখার সূত্র</th></tr></thead>
+    <tbody>
+      <tr><td><code>20, 21</code></td><td>TCP</td><td>FTP (data, control)</td><td>পুরনো, আজ প্রায় অব্যবহৃত</td></tr>
+      <tr><td><code>22</code></td><td>TCP</td><td>SSH / SCP / SFTP</td><td>নিরাপদ remote shell</td></tr>
+      <tr><td><code>25</code></td><td>TCP</td><td>SMTP</td><td>Server-থেকে-server mail</td></tr>
+      <tr><td><code>53</code></td><td>UDP + TCP</td><td>DNS</td><td>ছোট query UDP, বড় response TCP</td></tr>
+      <tr><td><code>67, 68</code></td><td>UDP</td><td>DHCP</td><td>Broadcast — তখনো IP নেই</td></tr>
+      <tr><td><code>80</code></td><td>TCP</td><td>HTTP</td><td>Plaintext web</td></tr>
+      <tr><td><code>123</code></td><td>UDP</td><td>NTP</td><td>সময় সমন্বয়</td></tr>
+      <tr><td><code>143 / 993</code></td><td>TCP</td><td>IMAP / IMAPS</td><td>Mail পড়া</td></tr>
+      <tr><td><code>443</code></td><td>TCP + UDP</td><td>HTTPS / QUIC</td><td>UDP 443 = HTTP/3</td></tr>
+      <tr><td><code>587</code></td><td>TCP</td><td>SMTP submission</td><td>Client-থেকে-server mail</td></tr>
+      <tr><td><code>3306</code></td><td>TCP</td><td>MySQL / MariaDB</td><td>কখনো Internet-এ খুলবেন না</td></tr>
+      <tr><td><code>5432</code></td><td>TCP</td><td>PostgreSQL</td><td>একই সতর্কতা</td></tr>
+      <tr><td><code>6379</code></td><td>TCP</td><td>Redis</td><td>Default-এ auth নেই — সাবধান</td></tr>
+      <tr><td><code>8080 / 3000</code></td><td>TCP</td><td>Dev server</td><td>Non-root bind করতে পারে</td></tr>
+      <tr><td><code>27017</code></td><td>TCP</td><td>MongoDB</td><td>একই সতর্কতা</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Essential Commands</h2>
+
+  <div class="cb"><span class="cb-lang">bash</span><pre># ═══ Interface ও Address (L2/L3) ═══
+ip link                          # interface up/down, MTU, MAC
+ip -brief addr                   # সব IP, সংক্ষিপ্ত রূপে
+ip neigh                         # ARP/neighbor table
+ifconfig                         # macOS
+
+# ═══ Routing (L3) ═══
+ip route                         # routing table
+ip route get 8.8.8.8             # ★ এই গন্তব্যে kernel কী করবে
+netstat -rn                      # macOS
+
+# ═══ পৌঁছানো যায় কি (L3) ═══
+ping -c 4 host
+ping -c 1 -M do -s 1472 host     # MTU পরীক্ষা (Linux)
+traceroute -n host
+mtr -r -c 50 host                # ★ loss কোথায় শুরু দেখায়
+
+# ═══ Port ও Socket (L4) ═══
+ss -tlnp                         # ★ কে কোন port-এ শুনছে
+ss -tan state established        # সক্রিয় connection
+ss -ti                           # ★ rtt, cwnd, retrans
+ss -tan | awk 'NR>1{print $1}' | sort | uniq -c   # state গণনা
+nc -zv host 443                  # port খোলা কি
+lsof -i :8080                    # কোন process এই port-এ
+
+# ═══ DNS ═══
+dig example.com                  # সম্পূর্ণ
+dig +short example.com           # শুধু উত্তর
+dig +trace example.com           # ★ root থেকে পুরো পথ
+dig @1.1.1.1 example.com         # নির্দিষ্ট resolver
+dig -x 1.1.1.1                   # reverse
+resolvectl flush-caches          # cache পরিষ্কার
+
+# ═══ HTTP (L7) ═══
+curl -v https://host             # সব header
+curl -I https://host             # শুধু header
+curl -w "%{http_code} %{time_total}s\n" -o /dev/null -s URL
+curl --resolve host:443:1.2.3.4 https://host    # ★ DNS bypass
+
+# ═══ TLS ═══
+openssl s_client -connect host:443 -servername host &lt;/dev/null
+openssl s_client -connect host:443 -showcerts &lt;/dev/null \
+  | grep -E "^ *[0-9] s:|^ *i:"                 # chain দেখুন
+
+# ═══ Packet Capture ═══
+sudo tcpdump -i any -n port 443
+sudo tcpdump -i any -n 'host X and not port 22'
+sudo tcpdump -i any -n 'tcp[tcpflags] & tcp-rst != 0'   # কে RST দিচ্ছে
+sudo tcpdump -i any -n -w cap.pcap 'port 443'  # ফাইলে
+
+# ═══ Firewall ═══
+sudo iptables -L -n -v
+sudo ufw status verbose
+sudo conntrack -L                # stateful table</pre></div>
+
+  <h2>Curl Timing — সবচেয়ে দরকারি এক-লাইনার</h2>
+  <div class="cb"><span class="cb-lang">bash</span><pre>curl -w "
+DNS      : %{time_namelookup}s
+TCP      : %{time_connect}s
+TLS      : %{time_appconnect}s
+পাঠানো   : %{time_pretransfer}s
+প্রথম byte: %{time_starttransfer}s
+মোট      : %{time_total}s
+" -o /dev/null -s https://example.com
+
+# ব্যাখ্যা:
+#   TCP − DNS               = TCP handshake
+#   TLS − TCP               = TLS handshake
+#   starttransfer − pretransfer = ★ server-এর think time ★
+#   total − starttransfer   = data transfer</pre></div>
+
+  <h2>Core Concepts — এক লাইনের mental model</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Concept</th><th>এক লাইনে</th></tr></thead>
+    <tbody>
+      <tr><td><strong>MAC</strong></td><td>Interface-এর hardware পরিচয়; <strong>এক hop-এর জন্য</strong>, প্রতিটি link-এ নতুন করে লেখা হয়</td></tr>
+      <tr><td><strong>IP</strong></td><td>শ্রেণিবদ্ধ, routable ঠিকানা; <strong>end-to-end</strong>, পুরো যাত্রায় অপরিবর্তিত (NAT ছাড়া)</td></tr>
+      <tr><td><strong>Subnet mask</strong></td><td>একটি প্রশ্নের উত্তর দেওয়ার যন্ত্র: "এই destination কি local?"</td></tr>
+      <tr><td><strong>ARP</strong></td><td>Local network-এ IP → MAC; broadcast দিয়ে জিজ্ঞেস, <strong>router পেরোয় না</strong></td></tr>
+      <tr><td><strong>Default gateway</strong></td><td>"যা আমি চিনি না, তা যাকে দিই" — delegation</td></tr>
+      <tr><td><strong>Routing</strong></td><td>Hop-by-hop; কেউ পুরো পথ জানে না, প্রত্যেকে next hop জানে; longest prefix জেতে</td></tr>
+      <tr><td><strong>TTL</strong></td><td>Hop counter; loop-এর বিরুদ্ধে নিরাপত্তা-বেষ্টনী; traceroute-এর ভিত্তি</td></tr>
+      <tr><td><strong>ICMP</strong></td><td>Network-এর ত্রুটি ও নিয়ন্ত্রণ বার্তা; ping ও traceroute এর উপর দাঁড়িয়ে</td></tr>
+      <tr><td><strong>Port</strong></td><td>একটি host-এর ভেতরে process নির্বাচনের ১৬-bit সংখ্যা</td></tr>
+      <tr><td><strong>Socket</strong></td><td>Application ও kernel-এর সীমান্ত; একটি file descriptor</td></tr>
+      <tr><td><strong>4-tuple</strong></td><td>একটি connection-এর প্রকৃত পরিচয়: (srcIP, srcPort, dstIP, dstPort)</td></tr>
+      <tr><td><strong>TCP</strong></td><td>অবিশ্বস্ত packet-ব্যবস্থার উপর নির্ভরযোগ্য, ক্রমবদ্ধ byte stream — শুধু দুই প্রান্তে</td></tr>
+      <tr><td><strong>UDP</strong></td><td>IP + port + checksum; বাকি সব আপনার দায়িত্ব</td></tr>
+      <tr><td><strong>Flow control</strong></td><td>Receiver-কে রক্ষা; <strong>স্পষ্ট</strong> সংকেত (rwnd)</td></tr>
+      <tr><td><strong>Congestion control</strong></td><td>Network-কে রক্ষা; <strong>অনুমাননির্ভর</strong> (loss/delay দেখে cwnd)</td></tr>
+      <tr><td><strong>TIME_WAIT</strong></td><td>শেষ ACK হারালে সামলানো + পুরনো packet নতুন connection-এ ঢুকতে না দেওয়া</td></tr>
+      <tr><td><strong>DNS</strong></td><td>Hierarchy + delegation + caching = বৈশ্বিক scale</td></tr>
+      <tr><td><strong>TTL (DNS)</strong></td><td>একটি প্রতিশ্রুতি — পুরনো উত্তর ততক্ষণ ব্যবহৃত হতে পারে</td></tr>
+      <tr><td><strong>HTTP</strong></td><td>Stateless request/response; state client বহন করে (cookie/token)</td></tr>
+      <tr><td><strong>TLS</strong></td><td>তিনটি একসাথে: confidentiality + integrity + <strong>authentication</strong></td></tr>
+      <tr><td><strong>Certificate</strong></td><td>CA-র স্বাক্ষরিত বিবৃতি: "এই public key এই domain-এর"</td></tr>
+      <tr><td><strong>NAT</strong></td><td>Port দিয়ে বহু private host একটি public IP-তে; state রাখতে বাধ্য</td></tr>
+      <tr><td><strong>Firewall</strong></td><td>ACCEPT / DROP (timeout) / REJECT (refused)</td></tr>
+      <tr><td><strong>CDN</strong></td><td>দূরত্ব কমানো যায় না, তাই content কাছে আনা</td></tr>
+      <tr><td><strong>Load balancer</strong></td><td>L4 = connection বণ্টন; L7 = প্রতিটি request</td></tr>
+      <tr><td><strong>QUIC</strong></td><td>UDP-র উপর TCP-র চেয়ে ভালো transport: stream-প্রতি reliability, 0-RTT, migration</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Error Message → প্রথম সন্দেহ</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Error</th><th>প্রকৃত অর্থ</th><th>প্রথমে দেখুন</th></tr></thead>
+    <tbody>
+      <tr><td><code>ENOTFOUND</code> / <code>NXDOMAIN</code></td><td>নাম resolve হয়নি</td><td>বানান, DNS record, <code>/etc/hosts</code></td></tr>
+      <tr><td><code>ECONNREFUSED</code></td><td><strong>RST এল</strong> — পৌঁছেছে, listener নেই</td><td>Service চলছে? Port ঠিক? <code>0.0.0.0</code>-তে bind?</td></tr>
+      <tr><td><code>ETIMEDOUT</code></td><td>কিছুই ফেরেনি — নীরবে হারাচ্ছে</td><td>Firewall DROP, routing, security group, NACL</td></tr>
+      <tr><td><code>ENETUNREACH</code></td><td>আমার routing table-এ পথ নেই</td><td><code>ip route</code> — default route আছে?</td></tr>
+      <tr><td><code>ECONNRESET</code></td><td>প্রতিষ্ঠিত connection-এ RST</td><td>Peer crash, idle timeout, LB কেটে দিয়েছে</td></tr>
+      <tr><td><code>EPIPE</code></td><td>বন্ধ connection-এ লিখেছেন</td><td>আগে একটি reset/FIN এসেছিল</td></tr>
+      <tr><td><code>EMFILE</code></td><td>File descriptor শেষ</td><td><code>CLOSE_WAIT</code> leak, <code>ulimit -n</code></td></tr>
+      <tr><td><code>EADDRINUSE</code></td><td>Port দখলে</td><td>TIME_WAIT → <code>SO_REUSEADDR</code>; বা অন্য process</td></tr>
+      <tr><td><code>CERT_HAS_EXPIRED</code></td><td>Certificate-এর মেয়াদ শেষ</td><td>নবায়ন; auto-renewal সেট করুন</td></tr>
+      <tr><td><code>UNABLE_TO_VERIFY_LEAF</code></td><td>Chain অসম্পূর্ণ</td><td><code>fullchain.pem</code> ব্যবহার করুন</td></tr>
+      <tr><td><code>502 Bad Gateway</code></td><td>Backend-এ পৌঁছানো যায়নি</td><td>Backend চলছে? সঠিক port?</td></tr>
+      <tr><td><code>504 Gateway Timeout</code></td><td>পৌঁছেছে, সময়মতো উত্তর দেয়নি</td><td>Slow query, deadlock, thread pool</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>দ্রুত হিসাব</h2>
+
+  <div class="cb diagram"><pre>Subnet:
+  Block size   = 2^(32 − prefix) = 256 − mask-এর শেষ octet
+  Usable hosts = 2^(32 − prefix) − 2
+  /24 → 254   /25 → 126   /26 → 62   /27 → 30   /28 → 14
+
+MTU/MSS:
+  MSS = MTU − IP header − TCP header
+      = 1500 − 20 − 20 = 1460   (IPv4)
+      = 1500 − 40 − 20 = 1440   (IPv6)
+
+Throughput:
+  Throughput ≈ window / RTT
+  BDP = bandwidth × RTT   ← পূর্ণ গতির জন্য প্রয়োজনীয় window
+  Mbps ÷ 8 = MB/s
+
+Loss-এর প্রভাব (Mathis):
+  BW ≈ MSS / (RTT × √loss)
+  0.1% loss @ 100ms RTT → ~12 Mbps সর্বোচ্চ
+
+Latency-র উপাদান:
+  propagation (দূরত্ব ÷ 200,000 km/s) — ভৌত সীমা
+  + transmission (size ÷ bandwidth)
+  + processing (μs)
+  + queueing (0 – শত ms, সবচেয়ে পরিবর্তনশীল)
+
+একটি HTTPS request-এর ন্যূনতম:
+  DNS + TCP + TLS + HTTP = 4 RTT</pre></div>
+
+  <div class="chnav">
+    <a href="#ch50"><div class="d">পূর্ববর্তী</div><div class="t">Ch 50 — Final Knowledge Check</div></a>
+    <a class="nx" href="#onepage"><div class="d">পরবর্তী</div><div class="t">Networking in One Page</div></a>
+  </div>
+</section>

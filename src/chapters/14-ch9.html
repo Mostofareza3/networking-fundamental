@@ -1,0 +1,230 @@
+<section class="chapter" id="ch9">
+  <div class="ch-eyebrow">Chapter 9</div>
+  <h1>IP Addresses</h1>
+  <p class="ch-lede"><code>127.0.0.1</code>, <code>0.0.0.0</code>, <code>localhost</code>, <code>192.168.1.5</code> — এই চারটি জিনিস প্রতিদিন ব্যবহার হয় এবং প্রায় সবাই অন্তত একটির অর্থ ভুল জানে। এই chapter সেই ভুলগুলো ঠিক করবে।</p>
+
+  <h2>9.1 Why does this exist?</h2>
+  <p>MAC address দিয়ে local delivery হয়ে গেল (Ch 6–8)। কিন্তু পৃথিবীর অন্য প্রান্তের একটি machine-এ পাঠাতে হলে? MAC address এখানে অকেজো — কারণ এতে কোনো <em>কাঠামো</em> নেই।</p>
+
+  <div class="cb diagram"><pre>MAC ভিত্তিক global routing কল্পনা করুন:
+
+  Router-এর table:
+    AA:BB:CC:DD:EE:01 → port 3
+    AA:BB:CC:DD:EE:02 → port 7
+    AA:BB:CC:DD:EE:03 → port 1
+    ... (পৃথিবীর প্রতিটি device-এর জন্য একটি করে line)
+    ≈ 3,000,000,000+ entries
+
+কোনো সংক্ষেপণ সম্ভব নয়, কারণ AA:BB:CC:DD:EE:01 এবং
+AA:BB:CC:DD:EE:02 পাশাপাশি সংখ্যা হলেও তারা পৃথিবীর
+দুই প্রান্তে থাকতে পারে। MAC-এ ভূগোলের কোনো তথ্য নেই।</pre></div>
+
+  <div class="box why">
+    <div class="bt">💡 Why IP</div>
+    <p>IP address <strong>শ্রেণিবদ্ধ (hierarchical)</strong>। <code>203.0.113.0/24</code> — এই একটি entry দিয়ে ২৫৪টি host বোঝানো যায়। <code>10.0.0.0/8</code> দিয়ে ১ কোটি ৬০ লক্ষের বেশি। এই সংক্ষেপণকে বলে <strong>route aggregation</strong>, এবং এটিই Internet-এর routing table-কে ৯ লক্ষ entry-তে (২০২৬ সালের হিসাবে) ধরে রেখেছে — ৩০০ কোটির বদলে।</p>
+    <p>ডাক ব্যবস্থার সাথে তুলনা: ঢাকার সব চিঠি একসাথে ঢাকার দিকে পাঠানো যায় কারণ postcode-এ শ্রেণিবিন্যাস আছে। যদি প্রতিটি মানুষের একটি random নম্বর থাকত, ডাক ব্যবস্থা কাজ করত না।</p>
+  </div>
+
+  <h2>9.2 IPv4-এর গঠন</h2>
+  <p>একটি <strong>IPv4 address</strong> ৩২ bit। লেখা হয় চারটি dotted-decimal অংশে (প্রতিটি ০–২৫৫):</p>
+
+  <div class="cb diagram"><pre>       192   .   168   .    1    .    5
+        │         │         │         │
+   11000000 . 10101000 . 00000001 . 00000101
+   └───8 bit─┘ └─8 bit─┘ └─8 bit─┘ └─8 bit─┘
+   
+   মোট 32 bit  →  2³² = 4,294,967,296 সম্ভাব্য address
+
+   কিন্তু বাস্তবে ব্যবহারযোগ্য অনেক কম, কারণ বিরাট অংশ
+   সংরক্ষিত (private, multicast, loopback, reserved)।
+   এবং ২০১১ সালেই IANA-র pool শেষ হয়ে গেছে।</pre></div>
+
+  <div class="box note">
+    <div class="bt">ℹ️ IPv4 কেন ফুরিয়ে গেল</div>
+    <p>৪৩০ কোটি সংখ্যাটি ১৯৮১ সালে অসীম মনে হয়েছিল — তখন Internet-এ কয়েকশ computer। আজ প্রতিটি মানুষের হাতে ফোন, laptop, smartwatch, TV, IoT device। ২০১১ সালে IANA-র শেষ block বণ্টিত হয়। দুটি সমাধান এসেছে: <strong>NAT</strong> (একটি public IP-র পেছনে হাজারো device, Ch 34) এবং <strong>IPv6</strong> (১২৮ bit)।</p>
+  </div>
+
+  <h2>9.3 IP address কী identify করে</h2>
+
+  <div class="box warn">
+    <div class="bt">⚠️ একটি সূক্ষ্ম কিন্তু গুরুত্বপূর্ণ পার্থক্য</div>
+    <p>IP address একটি <strong>computer</strong>-কে identify করে না। এটি identify করে একটি <strong>network interface</strong>-কে — আরও নির্দিষ্ট করে বললে, "একটি নির্দিষ্ট network-এ একটি নির্দিষ্ট সংযোগ-বিন্দু"।</p>
+    <p>ফলাফল:</p>
+    <ul>
+      <li>একটি machine-এর <strong>একাধিক IP</strong> থাকতে পারে (Ethernet, Wi-Fi, VPN, Docker — প্রতিটির আলাদা)।</li>
+      <li>একটি router-এর প্রতিটি interface-এ আলাদা IP — এটি router-এর সংজ্ঞারই অংশ।</li>
+      <li>আপনি ভিন্ন Wi-Fi-তে গেলে <strong>আপনার IP বদলে যায়</strong>, কারণ আপনি ভিন্ন network-এ যুক্ত হয়েছেন।</li>
+      <li>এজন্যই mobile device-এ TCP connection ভেঙে যায় Wi-Fi থেকে cellular-এ গেলে — IP বদলে গেছে, তাই connection-এর পরিচয়ই বদলে গেছে (Ch 45-এ QUIC কীভাবে এটি সমাধান করে দেখব)।</li>
+    </ul>
+  </div>
+
+  <h2>9.4 Network Portion এবং Host Portion</h2>
+  <p>প্রতিটি IP address দুটি অংশে ভাগ:</p>
+
+  <div class="cb diagram"><pre>          192.168.1.5 / 24
+          └────────┘ └┘  └┘
+           NETWORK  HOST  prefix length
+
+  /24 মানে: প্রথম 24 bit = network, বাকি 8 bit = host
+
+  11000000.10101000.00000001 . 00000101
+  └──────── network ────────┘  └─ host ─┘
+         192.168.1                 .5
+
+  একই network-এর সবাই:  192.168.1.___
+  ভিন্ন network:         192.168.2.___  ← ভিন্ন, router লাগবে</pre></div>
+
+  <div class="box model">
+    <div class="bt">🧠 Mental Model — দুই স্তরের ঠিকানা</div>
+    <p>IP address = <strong>[কোন এলাকা] + [সেই এলাকার কোন বাড়ি]</strong>। Router-রা শুধু "কোন এলাকা" অংশটি দেখে সিদ্ধান্ত নেয় — বাড়ির নম্বর নিয়ে তাদের মাথাব্যথা নেই। শুধু শেষ router, যে ওই এলাকার ভেতরে আছে, সে বাড়ির নম্বর দেখে (এবং ARP করে MAC বের করে)।</p>
+    <p>এই দুই-স্তরের ব্যবস্থাই Internet-কে scalable করেছে। বিস্তারিত পরের chapter-এ।</p>
+  </div>
+
+  <h2>9.5 বিশেষ address গুলো — যেগুলো নিয়ে সবচেয়ে বেশি বিভ্রান্তি</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Address</th><th>নাম</th><th>প্রকৃত অর্থ</th></tr></thead>
+    <tbody>
+      <tr><td><code>127.0.0.1</code></td><td>Loopback</td><td>"এই machine নিজে"। Traffic কখনো NIC পর্যন্ত পৌঁছায় না — kernel-এর ভেতরেই ঘুরে আসে। পুরো <code>127.0.0.0/8</code> block-ই loopback (<code>127.5.9.2</code>-ও কাজ করে)।</td></tr>
+      <tr><td><code>localhost</code></td><td>Hostname</td><td>একটি <em>নাম</em>, address নয়। <code>/etc/hosts</code> ফাইলে এটি <code>127.0.0.1</code> এবং <code>::1</code>-এ mapped। এটি বদলানো যায়।</td></tr>
+      <tr><td><code>0.0.0.0</code></td><td>Unspecified / Wildcard</td><td>প্রসঙ্গভেদে দুই অর্থ। <strong>bind()-এ:</strong> "এই machine-এর <em>সব</em> interface-এ শোনো"। <strong>Routing table-এ:</strong> "যেকোনো গন্তব্য" (default route)। এটি কখনো কোনো packet-এর গন্তব্য হয় না।</td></tr>
+      <tr><td><code>192.168.0.0/16</code></td><td>Private (RFC 1918)</td><td>ঘর ও ছোট অফিসের জন্য। Internet-এ routable নয়।</td></tr>
+      <tr><td><code>10.0.0.0/8</code></td><td>Private (RFC 1918)</td><td>বড় প্রতিষ্ঠান ও cloud VPC-তে সবচেয়ে প্রচলিত। ১.৬ কোটি address।</td></tr>
+      <tr><td><code>172.16.0.0/12</code></td><td>Private (RFC 1918)</td><td>Docker-এর default bridge এখান থেকে নেয়।</td></tr>
+      <tr><td><code>169.254.0.0/16</code></td><td>Link-local (APIPA)</td><td>DHCP ব্যর্থ হলে machine নিজে নিজে এটি বেছে নেয়। <strong>এই IP দেখলেই বুঝবেন DHCP কাজ করেনি।</strong></td></tr>
+      <tr><td><code>255.255.255.255</code></td><td>Limited broadcast</td><td>"এই segment-এর সবাই"। DHCP Discover এটি ব্যবহার করে (তখনো নিজের IP নেই বলে)।</td></tr>
+      <tr><td><code>::1</code></td><td>IPv6 loopback</td><td>IPv6-এর <code>127.0.0.1</code>।</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>9.6 <code>0.0.0.0</code> বনাম <code>127.0.0.1</code> — সবচেয়ে বেশি জিজ্ঞাসিত প্রশ্ন</h2>
+
+  <p>আপনি Node.js-এ server চালালেন এবং ফোন থেকে সেটি খুলতে পারছেন না। কারণ প্রায় নিশ্চিতভাবে এটি:</p>
+
+  <div class="cb diagram"><pre>app.listen(3000, "127.0.0.1")     app.listen(3000, "0.0.0.0")
+                                   
+Kernel বলে:                        Kernel বলে:
+"শুধু loopback interface-এ         "সব interface-এ শোনো:
+ শোনো"                              lo, eth0, wlan0, docker0..."
+
+┌─────────────────────┐            ┌─────────────────────┐
+│  Machine            │            │  Machine            │
+│                     │            │                     │
+│  lo    (127.0.0.1) ✓│  শুনছে      │  lo    (127.0.0.1) ✓│
+│  wlan0 (192.168.1.5)✗│ শুনছে না   │  wlan0 (192.168.1.5)✓│
+└─────────────────────┘            └─────────────────────┘
+
+নিজের browser: ✓ কাজ করে           নিজের browser: ✓
+ফোন থেকে:     ✗ connection refused  ফোন থেকে:     ✓ কাজ করে</pre></div>
+
+  <div class="box dev">
+    <div class="bt">⚙️ Developer Perspective</div>
+    <p>এটি নিছক তথ্য নয়, একটি নিরাপত্তা-সিদ্ধান্ত। <code>127.0.0.1</code>-এ bind করা মানে <em>"এই service শুধু এই machine-এর ভেতরে ব্যবহার্য"</em> — একটি database বা internal admin panel-এর জন্য এটিই সঠিক। <code>0.0.0.0</code>-তে bind করা মানে <em>"যে কেউ, যেকোনো interface থেকে আসতে পারে"</em> — যা firewall না থাকলে বিপজ্জনক।</p>
+    <p>Docker container-এ এটি আরও জরুরি: container-এর ভেতরে <code>127.0.0.1</code>-এ bind করলে <code>-p 3000:3000</code> দিয়েও বাইরে থেকে পৌঁছানো যাবে না, কারণ Docker-এর port forwarding container-এর <em>bridge interface</em>-এ আসে, loopback-এ নয়। <strong>Container-এর ভেতরে প্রায় সবসময় <code>0.0.0.0</code>-তে bind করতে হয়।</strong></p>
+  </div>
+
+  <h2>9.7 IPv6 সংক্ষেপে</h2>
+  <p><strong>IPv6</strong> ১২৮ bit — সংখ্যাটি ৩.৪ × ১০³⁸, অর্থাৎ পৃথিবীর প্রতিটি বালুকণার জন্য কোটি কোটি address।</p>
+
+  <div class="cb diagram"><pre>পূর্ণ রূপ:
+2001:0db8:0000:0000:0000:ff00:0042:8329
+
+সংক্ষেপের দুটি নিয়ম:
+1. প্রতিটি group-এর শুরুর শূন্য বাদ:
+   2001:db8:0:0:0:ff00:42:8329
+2. পরপর শূন্য group গুলো "::" দিয়ে (শুধু একবার):
+   2001:db8::ff00:42:8329
+
+উদাহরণ:
+  ::1                    → loopback (127.0.0.1-এর সমতুল্য)
+  ::                     → unspecified (0.0.0.0-এর সমতুল্য)
+  fe80::/10              → link-local (প্রতিটি interface-এ থাকে)
+  2000::/3               → global unicast (প্রকৃত public address)
+
+URL-এ লিখতে হয় bracket দিয়ে, port-এর সাথে বিভ্রান্তি এড়াতে:
+  http://[2001:db8::1]:8080/api</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>বৈশিষ্ট্য</th><th>IPv4</th><th>IPv6</th></tr></thead>
+    <tbody>
+      <tr><td>আকার</td><td>32 bit</td><td>128 bit</td></tr>
+      <tr><td>Header</td><td>20 bytes, পরিবর্তনশীল</td><td>40 bytes, স্থির (দ্রুত process)</td></tr>
+      <tr><td>Address resolution</td><td>ARP (broadcast)</td><td>NDP (multicast)</td></tr>
+      <tr><td>Broadcast</td><td>আছে</td><td><strong>নেই</strong> — multicast দিয়েই সব</td></tr>
+      <tr><td>Fragmentation</td><td>router করতে পারে</td><td>শুধু sender করে</td></tr>
+      <tr><td>NAT</td><td>প্রায় সর্বত্র প্রয়োজন</td><td>সাধারণত অপ্রয়োজনীয়</td></tr>
+      <tr><td>Autoconfiguration</td><td>DHCP লাগে</td><td>SLAAC — নিজে নিজে</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>9.8 Common Confusions</h2>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>একটি IP address একটি application বা service-কে identify করে।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>IP address identify করে একটি <strong>network interface</strong>-কে (network layer-এ একটি সংযোগ-বিন্দু)। কোন application পাবে সেটি ঠিক করে <strong>port number</strong> (transport layer, Ch 15)। একটি server-এ ৫০টি service চলতে পারে একই IP-তে — আলাদা করে শুধু port। তাই একটি service-কে সম্পূর্ণভাবে চিহ্নিত করতে লাগে <code>protocol + IP + port</code>।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p><code>localhost</code> এবং <code>127.0.0.1</code> ঠিক একই জিনিস।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p><code>localhost</code> একটি <em>নাম</em> যা resolve করতে হয়; <code>127.0.0.1</code> একটি <em>address</em>। বাস্তব পার্থক্য আছে: (১) আধুনিক system-এ <code>localhost</code> প্রায়ই আগে <code>::1</code> (IPv6)-এ resolve হয় — তাই আপনার server যদি শুধু IPv4-এ শুনছে, <code>localhost</code> ব্যর্থ হতে পারে অথচ <code>127.0.0.1</code> কাজ করবে (Node.js-এ এটি বহুল পরিচিত সমস্যা)। (২) <code>/etc/hosts</code> বদলে <code>localhost</code>-কে অন্য কিছুতে দেখানো যায়। (৩) Name resolution-এ সামান্য বাড়তি খরচ।</p></div>
+  </div>
+
+  <div class="myth">
+    <div class="m-row m"><span class="lbl">MYTH</span><p>Private IP address গুলো "কম নিরাপদ" বা "নকল"।</p></div>
+    <div class="m-row r"><span class="lbl">REALITY</span><p>Private address সম্পূর্ণ বৈধ ও কার্যকর address — শুধু এগুলো <em>Internet-এ globally routable নয়</em>। প্রতিটি ঘরে আলাদা "১ নম্বর ঘর" থাকার মতো — ভবনের ভেতরে অর্থপূর্ণ, বাইরে অর্থহীন। এগুলো NAT-এর মাধ্যমে বাইরে যায় (Ch 34)। প্রকৃতপক্ষে বিশ্বের বেশিরভাগ device-ই private address ব্যবহার করে।</p></div>
+  </div>
+
+  <div class="lab">
+    <div class="lab-h">🧪 Lab 9 — আপনার সব IP address এবং তাদের অর্থ</div>
+    <p class="lab-q">আমরা কী দেখতে চাইছি? — এই chapter-এর প্রতিটি ধরনের address (loopback, private, link-local) আপনার নিজের machine-এ শনাক্ত করা এবং bind-এর পার্থক্যটি হাতে-কলমে পরীক্ষা।</p>
+    <div class="cb"><span class="cb-lang">bash</span><pre># সব interface এবং তাদের address
+ip -brief addr        # Linux — সংক্ষিপ্ত ও পরিষ্কার
+ifconfig              # macOS
+
+# আপনার public IP (যেটি বাইরের দুনিয়া দেখে)
+curl -s ifconfig.me; echo
+
+# পরীক্ষা: দুটি ভিন্ন bind
+python3 -m http.server 8000 --bind 127.0.0.1 &
+curl -s -o /dev/null -w "loopback থেকে: %{http_code}\n" http://127.0.0.1:8000
+curl -s -o /dev/null -w "নিজের LAN IP থেকে: %{http_code}\n" http://$(hostname -I | awk '{print $1}'):8000
+kill %1</pre></div>
+    <p><strong>যা লক্ষ্য করবেন:</strong> প্রথম curl সফল (200), দ্বিতীয়টি ব্যর্থ (000 / connection refused) — যদিও দুটোই <em>একই machine</em>! কারণ server শুধু loopback interface-এ শুনছে। <code>--bind 0.0.0.0</code> দিয়ে আবার চালান — এবার দুটোই সফল। এছাড়া লক্ষ্য করুন <code>curl ifconfig.me</code>-এর public IP আপনার local IP থেকে সম্পূর্ণ আলাদা — এটিই NAT (Ch 34)।</p>
+    <p><strong>আমরা কী শিখলাম:</strong> "Server চলছে" যথেষ্ট নয় — <em>কোন interface-এ</em> শুনছে সেটাই নির্ধারণ করে কে পৌঁছাতে পারবে। আর আপনার machine-এর "IP address" বলে একক কিছু নেই; আছে interface-প্রতি address, এবং বাইরের দুনিয়া আপনাকে সম্পূর্ণ ভিন্ন একটি address-এ দেখে।</p>
+  </div>
+
+  <div class="recap">
+    <div class="rt">📌 Chapter Summary</div>
+    <ul>
+      <li>IP address শ্রেণিবদ্ধ (network + host) — এই কাঠামোই route aggregation ও global routing সম্ভব করেছে।</li>
+      <li>IP address <strong>interface</strong>-কে চিহ্নিত করে, machine বা application-কে নয়।</li>
+      <li><code>127.0.0.1</code> = নিজের machine (kernel-এর ভেতরেই থাকে); <code>localhost</code> = একটি নাম যা এতে resolve হয় (বা <code>::1</code>-এ)।</li>
+      <li><code>0.0.0.0</code> bind-এ মানে "সব interface", routing table-এ মানে "যেকোনো গন্তব্য"।</li>
+      <li>Private range: <code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code> — বৈধ কিন্তু Internet-এ routable নয়।</li>
+      <li><code>169.254.x.x</code> দেখলেই বুঝবেন DHCP ব্যর্থ হয়েছে।</li>
+      <li>IPv6 ১২৮ bit, broadcast নেই, NAT অপ্রয়োজনীয়, ARP-এর বদলে NDP।</li>
+    </ul>
+  </div>
+
+  <div class="quiz-title">✓ Quick Check</div>
+  <details class="qa"><summary>একটি machine-এ কি একাধিক IP address থাকতে পারে? কেন?</summary>
+    <div class="ans"><p>হ্যাঁ, এবং এটিই স্বাভাবিক। IP address interface-এর সাথে যুক্ত, machine-এর সাথে নয়। একটি সাধারণ dev machine-এ থাকে: <code>127.0.0.1</code> (lo), একটি LAN IP (wlan0/eth0), একটি Docker bridge IP (docker0), VPN চালু থাকলে আরেকটি। একটি interface-এ একাধিক IP-ও দেওয়া যায় (IP aliasing)।</p></div>
+  </details>
+  <details class="qa"><summary>আপনার dev server <code>localhost:3000</code>-এ কাজ করে কিন্তু ফোন থেকে <code>192.168.1.5:3000</code> খোলে না। কারণ কী?</summary>
+    <div class="ans"><p>প্রায় নিশ্চিতভাবে server <code>127.0.0.1</code>-এ bind করা, <code>0.0.0.0</code>-তে নয়। Kernel শুধু loopback interface-এ ওই port-এ শুনছে; Wi-Fi interface-এ আসা packet-এর জন্য কোনো listener নেই, তাই kernel TCP RST পাঠায় → "connection refused"। সমাধান: <code>0.0.0.0</code>-তে bind করুন (এবং firewall-এ port খোলা আছে কিনা দেখুন)।</p></div>
+  </details>
+  <details class="qa"><summary><code>169.254.10.23</code> IP দেখলে আপনি কী সিদ্ধান্তে আসবেন?</summary>
+    <div class="ans"><p>DHCP ব্যর্থ হয়েছে। Machine কোনো DHCP server থেকে উত্তর পায়নি, তাই APIPA/link-local নিয়ম মেনে নিজেই <code>169.254.0.0/16</code> থেকে একটি address বেছে নিয়েছে। এই address দিয়ে একই segment-এর অন্যদের সাথে কথা বলা যায়, কিন্তু কোনো gateway নেই — তাই Internet-এ পৌঁছানো যাবে না। সন্দেহের তালিকা: তার/Wi-Fi সংযোগ, DHCP server বন্ধ, VLAN ভুল।</p></div>
+  </details>
+  <details class="qa"><summary>MAC address থাকতেও IP address কেন দরকার — এক বাক্যে?</summary>
+    <div class="ans"><p>কারণ MAC সমতল ও অসংক্ষেপণযোগ্য, ফলে global routing table কয়েকশ কোটি entry-র হতো; IP-তে network prefix থাকায় লক্ষ লক্ষ host-কে একটি route entry-তে সংক্ষেপ করা যায়।</p></div>
+  </details>
+  <details class="qa"><summary>Wi-Fi থেকে mobile data-তে গেলে চলমান download কেন ভেঙে যায়?</summary>
+    <div class="ans"><p>কারণ আপনার IP address বদলে গেছে। একটি TCP connection চিহ্নিত হয় চারটি জিনিস দিয়ে: source IP, source port, destination IP, destination port। source IP বদলে গেলে সেটি আর একই connection নয় — server-এর কাছে পুরনো connection মৃত। (Ch 45-এ দেখব QUIC এটি সমাধান করে connection ID ব্যবহার করে, IP-এর বদলে।)</p></div>
+  </details>
+
+  <div class="chnav">
+    <a href="#ch8"><div class="d">পূর্ববর্তী</div><div class="t">Ch 8 — ARP</div></a>
+    <a class="nx" href="#ch10"><div class="d">পরবর্তী</div><div class="t">Ch 10 — Subnetting</div></a>
+  </div>
+</section>
