@@ -226,6 +226,63 @@ for (const id of NS.LAB_ORDER){
   ok(N.lpm('8.8.8.8', [{dst:'10.0.0.0',prefix:8}]).best === null, 'LPM: না মিললে null');
 })();
 
+/* ───────── Lab-এর শিক্ষাগত দাবিগুলো সত্যি কিনা ─────────
+   এগুলো render নয়, বরং "lab যা শেখাচ্ছে তা আসলেই ঘটছে কিনা" যাচাই করে। */
+(function(){
+  function run(id, cfg){
+    const e = new NS.Engine(NS.labs[id], Object.assign({ seed:1 }, cfg));
+    while (e.step());
+    return e;
+  }
+  const used = (e, actor) => e.steps.some(s => s.actor === actor);
+  const last = e => e.steps[e.steps.length - 1];
+
+  /* IP lab — same subnet হলে Gateway ছোঁয়ার কথা নয় */
+  ok(!used(run('ip', { dst:'local',  mask:'24' }), 'gw'),
+     'IP: একই subnet-এ Gateway লাগে না');
+  ok( used(run('ip', { dst:'remote', mask:'24' }), 'gw'),
+     'IP: ভিন্ন network-এ Gateway লাগে');
+  /* /25 আসলেই .10 আর .130-কে আলাদা করে — এটাই lab-এর মূল দাবি */
+  ok( used(run('ip', { dst:'local',  mask:'25' }), 'gw'),
+     'IP: /25 তে 192.168.1.10 ও .130 ভিন্ন network');
+  ok(last(run('ip', { dst:'remote', mask:'24', nogw:true })).kind === 'error',
+     'IP: Gateway ছাড়া বাইরে যাওয়া যায় না');
+
+  /* LPM — হাতে মিলিয়ে দেখা বিজয়ী */
+  const want = { '10.0.5.20':'Router A', '10.0.9.7':'Router B',
+                 '10.7.7.7':'Router C', '203.0.113.5':'Router D' };
+  for (const dst in want)
+    ok(last(run('lpm', { dst })).what.includes(want[dst]),
+       `LPM: ${dst} → ${want[dst]}`);
+  ok(last(run('lpm', { dst:'203.0.113.5', nodefault:true })).kind === 'error',
+     'LPM: default ছাড়া অচেনা গন্তব্য drop হয়');
+
+  /* TTL — কমতে কমতে শূন্য, আর traceroute প্রতিটি hop খুঁজে পায় */
+  const lowTtl = run('ttl', { mode:'low' });
+  ok(lowTtl.steps.some(s => s.kind === 'error'), 'TTL: TTL 2 তে Packet মাঝপথে মরে');
+  ok(last(run('ttl', { mode:'normal' })).kind === 'ok',  'TTL: TTL 64 তে পৌঁছে যায়');
+  ok(run('ttl', { mode:'trace' }).state.hops.length === 3, 'Traceroute: তিনটি hop পাওয়া গেছে');
+
+  /* Routing — মাঝের Router-এর route মুছলে সেখানেই আটকাবে */
+  ok(last(run('routing', { broken:true })).actor === 'rb',
+     'Routing: ভাঙা route Router B-তেই আটকায়');
+  ok(last(run('routing', { broken:false })).actor === 'srv',
+     'Routing: ঠিক থাকলে Server পর্যন্ত যায়');
+
+  /* Hop — MAC বদলায়, IP বদলায় না (পুরো lab-এর মূল কথা) */
+  const hop = run('hop', {});
+  const macs = new Set(), ips = new Set();
+  for (const s of hop.steps){
+    if (!s.packet) continue;
+    for (const L of s.packet.layers) for (const f of L.fields){
+      if (f[0] === 'dstMAC') macs.add(f[1]);
+      if (f[0] === 'dstIP')  ips.add(f[1]);
+    }
+  }
+  ok(macs.size >= 3, `Hop: destination MAC অন্তত ৩ বার বদলায় (পাওয়া গেছে ${macs.size})`);
+  ok(ips.size === 1,  `Hop: destination IP একটাই থাকে (পাওয়া গেছে ${ips.size})`);
+})();
+
 ok(NS.ui.inspector.packetHTML(null).length > 0, 'packet select না থাকলেও চলে');
 ok(NS.ui.inspector.deviceHTML(null).length > 0, 'device select না থাকলেও চলে');
 ok(missingHelp.size === 0,

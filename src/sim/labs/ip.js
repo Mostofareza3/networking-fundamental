@@ -32,14 +32,14 @@ NS.labs.ip = {
 
   controls: [
     { key:'dst', type:'choice', label:'কোথায় Packet পাঠাবেন', def:'local',
-      options:[ ['local','192.168.1.20 — একই network'],
+      options:[ ['local','192.168.1.130 — /24 তে একই network'],
                 ['remote','8.8.8.8 — বাইরের network'] ],
       help:'দুটোতেই দেখুন destination MAC কীভাবে বদলায়, অথচ destination IP বদলায় না।' },
     { key:'mask', type:'choice', label:'Subnet Mask', def:'24',
       options:[ ['24','255.255.255.0  (/24)'],
                 ['25','255.255.255.128  (/25) — সীমা বদলে যাবে'],
                 ['16','255.255.0.0  (/16) — অনেক বড় network'] ],
-      help:'/25 করলে 192.168.1.20 আর একই network-এ থাকে না — Break-It Mode।' },
+      help:'/25 করলে 192.168.1.130 আর একই network-এ থাকে না — Break-It Mode।' },
     { key:'nogw', type:'toggle', label:'Default Gateway সেট করা নেই', def:false,
       help:'Gateway ছাড়া বাইরের কোথাও যাওয়া যায় না।' }
   ],
@@ -53,7 +53,7 @@ NS.labs.ip = {
     });
     var peer = N.pc('peer', {
       name:'PC-B', x:50, y:18, mac:PEER_MAC,
-      ip:'192.168.1.20', mask: N.subnet('192.168.1.20', cidr).mask, gw:'192.168.1.1'
+      ip:'192.168.1.130', mask: N.subnet('192.168.1.130', cidr).mask, gw:'192.168.1.1'
     });
     var gw = N.router('gw', {
       name:'Gateway', x:50, y:80,
@@ -81,7 +81,7 @@ NS.labs.ip = {
     var myIp  = '192.168.1.10';
     var mask  = N.subnet(myIp, cidr).mask;
     var sub   = N.subnet(myIp, cidr);
-    var dstIp = cfg.dst === 'local' ? '192.168.1.20' : '8.8.8.8';
+    var dstIp = cfg.dst === 'local' ? '192.168.1.130' : '8.8.8.8';
     var same  = N.sameSubnet(myIp, dstIp, mask);
 
     steps.push({
@@ -109,7 +109,7 @@ NS.labs.ip = {
       why : same
         ? 'তাই মাঝখানে কোনো Router লাগবে না। Packet-টি সরাসরি ওই device-এর কাছে পাঠানো যাবে।\n\nএখন শুধু দরকার তার MAC Address — সেটি ARP দিয়ে জানা যাবে।'
         : (cidr === 25 && cfg.dst === 'local'
-            ? 'লক্ষ্য করুন — `192.168.1.10` আর `192.168.1.20`-এর প্রথম তিন অংশ একই, তবু এরা **ভিন্ন network-এ**!\n\nকারণ /25 mask `192.168.1.0`-`192.168.1.127` আর `192.168.1.128`-`192.168.1.255` — এই দুই ভাগে ভেঙে দিয়েছে। এজন্যই "প্রথম তিন অংশ মিললেই একই network" ধারণাটি ভুল।'
+            ? 'লক্ষ্য করুন — `192.168.1.10` আর `192.168.1.130`-এর প্রথম তিন অংশ **হুবহু একই**, তবু এরা ভিন্ন network-এ!\n\nকারণ /25 mask `192.168.1.0`–`192.168.1.127` আর `192.168.1.128`–`192.168.1.255` — এই দুই ভাগে ভেঙে দিয়েছে। `.10` প্রথম ভাগে, `.130` দ্বিতীয় ভাগে।\n\nএজন্যই "প্রথম তিন অংশ মিললেই একই network" ধারণাটি ভুল।'
             : 'তাই Packet-টি নিজে থেকে পাঠানো যাবে না। এটিকে এমন কারো হাতে দিতে হবে যে বাইরের পথ চেনে — অর্থাৎ **Default Gateway**।'),
       apply: function(st){ st.banner = same ? 'একই network — সরাসরি' : 'ভিন্ন network — Gateway লাগবে'; }
     });

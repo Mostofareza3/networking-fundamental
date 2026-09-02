@@ -156,17 +156,17 @@ Chapter ফাইলের কাঠামো:
 ## Simulator Roadmap — কতটুকু হয়েছে, কতটুকু বাকি
 
 মূল পরিকল্পনায় **৩০টি lab**, ৬টি phase-এ ভাগ করা।
-এখন পর্যন্ত **৫টি হয়েছে (১৭%)** — Phase 1 সম্পূর্ণ।
+এখন পর্যন্ত **১১টি হয়েছে (৩৭%)** — Phase 1 ও 2 সম্পূর্ণ।
 
 ```
 Phase 1  ██████████████████████  5/5    ✅ সম্পূর্ণ
-Phase 2  ░░░░░░░░░░░░░░░░░░░░░░  0/6
+Phase 2  ██████████████████████  6/6    ✅ সম্পূর্ণ
 Phase 3  ░░░░░░░░░░░░░░░░░░░░░░  0/7
 Phase 4  ░░░░░░░░░░░░░░░░░░░░░░  0/6
 Phase 5  ░░░░░░░░░░░░░░░░░░░░░░  0/5
 Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
 ─────────────────────────────────────
-মোট      ███░░░░░░░░░░░░░░░░░░░  5/30   (১৭%)
+মোট      ████████░░░░░░░░░░░░░░  11/30  (৩৭%)
 ```
 
 শুধু lab নয় — **core যন্ত্রপাতিও** একবারই বানাতে হয়েছে, সেটা সব lab
@@ -182,6 +182,8 @@ Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
 | Learning System — শিখবেন / ভুল ধারণা / বই-এর link | ✅ |
 | Network Canvas — device, packet, flood, layer stack | ✅ |
 | Break-It Mode (কিছু lab-এ toggle হিসেবে আছে) | 🟡 আংশিক |
+| Calculator panel — interactive lab-এর জন্য (`panel()`) | ✅ |
+| IP / Subnet / LPM-এর গণিত (`core/net.js`) | ✅ |
 | Prediction Mode — ঘটার আগে user predict করবে | ⬜ |
 
 ---
@@ -196,16 +198,16 @@ Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
 | 4 | Switching Lab | `ch7` | ✅ |
 | 5 | ARP Lab | `ch8` | ✅ |
 
-### ⬜ Phase 2 · Layer 3 — IP ও Routing
+### ✅ Phase 2 · Layer 3 — IP ও Routing — সম্পূর্ণ
 
-| # | Lab | বই | কী দেখাবে |
+| # | Lab | বই | অবস্থা |
 |---|---|---|---|
-| 6 | IP Addressing Lab | `ch9`, `ch11` | IP / Mask / Gateway বদলে same বনাম different network |
-| 7 | Subnet Calculator | `ch10` | Network, Broadcast, Host range — প্রতিটির পাশে ব্যাখ্যা |
-| 8 | Routing Lab | `ch12` | Routing Table নিজে edit করে Packet-এর পথ বদলানো |
-| 9 | Longest Prefix Match | `ch12` | একাধিক route মিললে কোনটা কেন জেতে |
-| 10 | TTL & Traceroute | `ch14` | প্রতিটি hop-এ TTL কমা, 0 হলে drop |
-| 11 | Router Hop Visualization | `ch13` | IP একই থাকে, MAC প্রতি hop-এ বদলায় |
+| 6 | IP Addressing Lab | `ch11` | ✅ |
+| 7 | Subnet Calculator | `ch10` | ✅ |
+| 8 | Routing Lab | `ch12` | ✅ |
+| 9 | Longest Prefix Match | `ch12` | ✅ |
+| 10 | TTL & Traceroute | `ch14` | ✅ |
+| 11 | Router Hop Visualization | `ch13` | ✅ |
 
 ### ⬜ Phase 3 · Layer 4 — TCP / UDP
 
