@@ -153,6 +153,116 @@ Chapter ফাইলের কাঠামো:
 
 ---
 
+## Simulator Roadmap — কতটুকু হয়েছে, কতটুকু বাকি
+
+মূল পরিকল্পনায় **৩০টি lab**, ৬টি phase-এ ভাগ করা।
+এখন পর্যন্ত **৫টি হয়েছে (১৭%)** — Phase 1 সম্পূর্ণ।
+
+```
+Phase 1  ██████████████████████  5/5    ✅ সম্পূর্ণ
+Phase 2  ░░░░░░░░░░░░░░░░░░░░░░  0/6
+Phase 3  ░░░░░░░░░░░░░░░░░░░░░░  0/7
+Phase 4  ░░░░░░░░░░░░░░░░░░░░░░  0/6
+Phase 5  ░░░░░░░░░░░░░░░░░░░░░░  0/5
+Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
+─────────────────────────────────────
+মোট      ███░░░░░░░░░░░░░░░░░░░  5/30   (১৭%)
+```
+
+শুধু lab নয় — **core যন্ত্রপাতিও** একবারই বানাতে হয়েছে, সেটা সব lab
+ব্যবহার করে। তাই পরের lab গুলো তুলনামূলক দ্রুত যোগ হবে।
+
+| Core | অবস্থা |
+|---|---|
+| Engine — step / back / seek / replay, deterministic | ✅ |
+| Event Timeline — click করে যেকোনো ধাপে ফেরত | ✅ |
+| Packet Inspector — প্রতিটি field-এ Bangla ব্যাখ্যা | ✅ |
+| Device Inspector — PC / Switch / Router / Server | ✅ |
+| "এখন কী হলো? / কেন?" panel | ✅ |
+| Learning System — শিখবেন / ভুল ধারণা / বই-এর link | ✅ |
+| Network Canvas — device, packet, flood, layer stack | ✅ |
+| Break-It Mode (কিছু lab-এ toggle হিসেবে আছে) | 🟡 আংশিক |
+| Prediction Mode — ঘটার আগে user predict করবে | ⬜ |
+
+---
+
+### ✅ Phase 1 · Foundation + Layer 2 — সম্পূর্ণ
+
+| # | Lab | বই | অবস্থা |
+|---|---|---|---|
+| 1 | Packet Visualizer | `ch4` | ✅ |
+| 2 | Encapsulation Lab | `ch3` | ✅ |
+| 3 | Ethernet & MAC Lab | `ch6` | ✅ |
+| 4 | Switching Lab | `ch7` | ✅ |
+| 5 | ARP Lab | `ch8` | ✅ |
+
+### ⬜ Phase 2 · Layer 3 — IP ও Routing
+
+| # | Lab | বই | কী দেখাবে |
+|---|---|---|---|
+| 6 | IP Addressing Lab | `ch9`, `ch11` | IP / Mask / Gateway বদলে same বনাম different network |
+| 7 | Subnet Calculator | `ch10` | Network, Broadcast, Host range — প্রতিটির পাশে ব্যাখ্যা |
+| 8 | Routing Lab | `ch12` | Routing Table নিজে edit করে Packet-এর পথ বদলানো |
+| 9 | Longest Prefix Match | `ch12` | একাধিক route মিললে কোনটা কেন জেতে |
+| 10 | TTL & Traceroute | `ch14` | প্রতিটি hop-এ TTL কমা, 0 হলে drop |
+| 11 | Router Hop Visualization | `ch13` | IP একই থাকে, MAC প্রতি hop-এ বদলায় |
+
+### ⬜ Phase 3 · Layer 4 — TCP / UDP
+
+| # | Lab | বই | কী দেখাবে |
+|---|---|---|---|
+| 12 | TCP Three-Way Handshake | `ch18` | SYN → SYN-ACK → ACK, প্রতিটির flag ও number |
+| 13 | TCP Reliability | `ch19` | ইচ্ছা করে packet drop → timeout → retransmission |
+| 14 | TCP Ordering | `ch19` | 1,3,2,4 এলে sequence number দিয়ে সাজানো |
+| 15 | TCP Flow Control | `ch20` | Receive Window বদলালে sender-এর গতি বদলায় |
+| 16 | UDP Lab | `ch23` | Handshake নেই, retransmission নেই |
+| 17 | TCP vs UDP | `ch24` | একই packet loss-এ দুজনের আচরণ পাশাপাশি |
+| 18 | Socket & Ports Lab | `ch16` | IP + Port = Socket, closed port-এ কী হয় |
+
+### ⬜ Phase 4 · Application Layer
+
+| # | Lab | বই | কী দেখাবে |
+|---|---|---|---|
+| 19 | DNS Lab | `ch26` | Resolver → Root → TLD → Authoritative |
+| 20 | DNS Cache | `ch27` | প্রথমবার MISS, পরেরবার HIT, TTL শেষ হলে আবার |
+| 21 | HTTP Lab | `ch28` | Request/Response inspect করা |
+| 22 | HTTPS / TLS Lab | `ch33` | TLS Handshake — সরলীকৃত শিক্ষামূলক model |
+| 23 | NAT Lab | `ch34` | Private → Public, translation table |
+| 24 | Firewall Lab | `ch35` | ALLOW / BLOCK rule, কারণসহ |
+
+### ⬜ Phase 5 · Performance ও Scale
+
+| # | Lab | বই | কী দেখাবে |
+|---|---|---|---|
+| 25 | Network Performance Lab | `ch36`–`ch38` | Latency / Bandwidth / Loss / Jitter slider |
+| 26 | Router Queue | `ch38` | Queue ভরে গেলে packet drop |
+| 27 | CDN | `ch46` | Origin বনাম nearest CDN |
+| 28 | Load Balancer | `ch47` | Request distribute হওয়া |
+| 29 | Break-It Mode (পূর্ণাঙ্গ) | — | ১৪ রকম failure + "সমস্যা কোথায়?" প্রশ্ন |
+
+### ⬜ Phase 6 · Master Simulation
+
+| # | Lab | বই | কী দেখাবে |
+|---|---|---|---|
+| 30 | Full URL Journey | `ch48` | URL → DNS → TCP → TLS → HTTP → Router → Server → Response, প্রতিটি ধাপে pause করে inspect |
+
+---
+
+### বাকি কাজের ধরন
+
+| কাজ | অবস্থা |
+|---|---|
+| Prediction Mode — ঘটার আগে option দিয়ে predict করানো | ⬜ |
+| Break-It Mode-কে সব lab-এ ছড়ানো | 🟡 |
+| Packet Inspector-এ payload hex view | ⬜ |
+| প্রতিটি lab-এ "Try it yourself" experiment | 🟡 controls আছে, আলাদা section নেই |
+
+> Core অংশটা (engine, timeline, inspector, learning system) একবারই লেখা
+> হয়েছে এবং সব lab সেটাই ব্যবহার করে — তাই নতুন lab মানে মূলত একটি
+> `build()` আর একটি `script()` লেখা, পুরো UI আবার বানানো নয়।
+
+---
+
 ## Simulator — `src/sim/`
 
 Simulation-এর logic আর UI **আলাদা রাখা হয়েছে**। Engine DOM-এর কিছুই জানে
