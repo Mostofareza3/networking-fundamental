@@ -95,7 +95,39 @@ function render(el, st, opts){
     }
   }
 
+  /* কিছু lab (Encapsulation) movement নয়, স্তর দেখায় — তখন canvas-এ
+     মোড়কগুলো ছবির মতো করে দেখানো হয়। */
+  if(st.stack && st.stack.length){
+    out.push(stackHTML(st.stack));
+  }
+
   el.innerHTML = out.join('');
+}
+
+/* Encapsulation-এর স্তর — বাইরের মোড়ক আগে, ভেতরের data শেষে */
+var STACK_INFO = {
+  L7: ['Application Data', 'payload'],
+  L4: ['TCP / UDP Header',  'L4'],
+  L3: ['IP Header',         'L3'],
+  L2: ['Ethernet Header',   'L2'],
+  L1: ['Bits',              'L1']
+};
+function stackHTML(stack){
+  /* state-এ ক্রম L7→L1 (যোগ হওয়ার ক্রম); দেখাতে হবে বাইরের মোড়ক উপরে */
+  var order = ['L1','L2','L3','L4','L7'];
+  var o = ['<div class="nc-stack">'];
+  for(var i = 0; i < order.length; i++){
+    var k = order[i];
+    if(stack.indexOf(k) === -1) continue;
+    var info = STACK_INFO[k];
+    var isNewest = stack[stack.length - 1] === k;
+    o.push('<div class="ns-row l-' + k + (isNewest ? ' new' : '') + '">' +
+             '<span class="ns-tag">' + k + '</span>' +
+             '<span class="ns-nm">' + info[0] + '</span>' +
+           '</div>');
+  }
+  o.push('</div>');
+  return o.join('');
 }
 
 NS.ui = NS.ui || {};

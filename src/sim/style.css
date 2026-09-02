@@ -166,6 +166,31 @@ strong{font-weight:680;color:var(--text)}
 .nc-pkt.k-data{background:var(--accent);border-color:var(--accent);color:#fff}
 .nc-pkt.k-arp {background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
 .nc-pkt.k-ack {background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+/* Encapsulation-এর স্তর */
+.nc-stack{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;gap:3px;width:min(300px,72%);
+}
+.ns-row{
+  display:flex;align-items:center;gap:8px;padding:6px 11px;border-radius:8px;
+  border:1px solid var(--border);background:var(--panel);
+  font-family:var(--mono);font-size:11.5px;transition:.2s;
+}
+.ns-row .ns-tag{
+  font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;
+  background:var(--bg-sunken);color:var(--text-dim);border:1px solid var(--border);
+}
+.ns-row .ns-nm{color:var(--text-dim);font-weight:600}
+.ns-row.l-L2{border-color:color-mix(in srgb,var(--teal) 42%,transparent);background:var(--teal-soft)}
+.ns-row.l-L3{border-color:color-mix(in srgb,var(--accent) 42%,transparent);background:var(--accent-soft)}
+.ns-row.l-L4{border-color:color-mix(in srgb,var(--purple) 42%,transparent);background:var(--purple-soft)}
+.ns-row.l-L7{border-color:color-mix(in srgb,var(--warn) 42%,transparent);background:var(--warn-soft)}
+.ns-row.new{
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent);
+  animation:nsIn .28s ease;
+}
+@keyframes nsIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+
 #banner{
   position:absolute;left:12px;bottom:11px;font-family:var(--mono);font-size:11.5px;
   color:var(--text-faint);background:color-mix(in srgb,var(--bg) 80%,transparent);
