@@ -74,21 +74,40 @@ body{
 #shell{display:flex;padding-top:56px}
 #sidebar{
   width:var(--sbw);flex:0 0 var(--sbw);height:calc(100vh - 56px);position:sticky;top:56px;
-  overflow-y:auto;border-right:1px solid var(--border);background:var(--bg-alt);padding:18px 10px 80px;
-  scrollbar-width:thin;
+  overflow-y:auto;border-right:1px solid var(--border);background:var(--bg-alt);padding:14px 12px 80px;
+  scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent;
 }
-#sidebar::-webkit-scrollbar{width:8px}
-#sidebar::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
-.toc-part{margin-top:16px;padding:6px 12px 4px;font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)}
-.toc-part:first-child{margin-top:0}
+#sidebar::-webkit-scrollbar{width:10px}
+#sidebar::-webkit-scrollbar-track{background:transparent}
+#sidebar::-webkit-scrollbar-thumb{background:transparent;border-radius:5px;border:3px solid transparent;background-clip:content-box}
+#sidebar:hover::-webkit-scrollbar-thumb{background:var(--border-strong);background-clip:content-box}
+/* Part headings: quiet dividers, not competing with the entries under them. */
+.toc-part{
+  margin:22px 0 6px;padding:0 10px;font-size:10px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--text-faint);opacity:.75;
+}
+.toc-part:first-child{margin-top:2px}
 #sidebar a{
-  display:block;padding:6px 12px;border-radius:7px;font-size:13.6px;line-height:1.45;
-  color:var(--text-dim);text-decoration:none;border-left:2px solid transparent;transition:.12s;
+  display:flex;align-items:baseline;gap:9px;position:relative;
+  padding:5px 10px;border-radius:6px;font-size:13.4px;line-height:1.4;
+  color:var(--text-dim);text-decoration:none;transition:color .12s,background .12s;
 }
 #sidebar a:hover{background:var(--panel-2);color:var(--text)}
-#sidebar a.active{background:var(--accent-soft);color:var(--accent-text);font-weight:600;border-left-color:var(--accent)}
-#sidebar a .n{color:var(--text-faint);font-family:var(--mono);font-size:11.5px;margin-right:6px}
-#sidebar a.active .n{color:var(--accent-text)}
+/* Numbers share a fixed column so every title starts on the same x. */
+#sidebar a .n{
+  flex:0 0 18px;text-align:right;color:var(--text-faint);
+  font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
+}
+/* Unnumbered entries (preface, reference) line up with the titles above. */
+#sidebar a.no-n{padding-left:37px}
+#sidebar a .t{flex:1;min-width:0}
+#sidebar a.active{background:var(--accent-soft);color:var(--accent-text);font-weight:600}
+#sidebar a.active .n{color:var(--accent)}
+/* A thin marker in the gutter instead of a heavy left border on every row. */
+#sidebar a.active::before{
+  content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:3px;height:16px;border-radius:0 3px 3px 0;background:var(--accent);
+}
 #main{flex:1;min-width:0;display:flex;justify-content:center;padding:0 32px 120px}
 #content{width:100%;max-width:var(--readw)}
 /* ============ TYPOGRAPHY ============ */
@@ -12928,9 +12947,10 @@ var html = '';
 TOC.forEach(function(sec){
   html += '<div class="toc-part">' + sec.p + '</div>';
   sec.items.forEach(function(it){
-    html += '<a href="#' + it[0] + '" data-id="' + it[0] + '">' +
+    html += '<a class="' + (it[2] ? '' : 'no-n') + '" href="#' + it[0] +
+            '" data-id="' + it[0] + '">' +
             (it[2] ? '<span class="n">' + it[2] + '</span>' : '') +
-            it[1] + '</a>';
+            '<span class="t">' + it[1] + '</span></a>';
   });
 });
 sb.innerHTML = html;
@@ -12945,7 +12965,8 @@ menuBtn.addEventListener('click', function(){
 });
 backdrop.addEventListener('click', closeMenu);
 sb.addEventListener('click', function(e){
-  if(e.target.tagName === 'A' && window.innerWidth <= 1080) closeMenu();
+  var a = e.target.closest ? e.target.closest('a[data-id]') : null;
+  if(a && window.innerWidth <= 1080) closeMenu();
 });
 
 /* ═══════════════ ACTIVE SECTION + PROGRESS ═══════════════ */
@@ -12957,34 +12978,98 @@ var progress = document.getElementById('progress');
 var currentActive = null;
 var ticking = false;
 
+// A navigated chapter settles with its top edge ~150px down the viewport
+// (html scroll-padding-top plus the chapter's own padding and margin). The
+// activation line must sit just below that landing point: any higher and a
+// chapter never counts as "reached", so the previous one stays lit — the
+// leftover highlight this used to show.
+var ACTIVE_LINE = 160;
+
+function setActive(id, scrollIntoView){
+  if(!id || id === currentActive) return;
+  if(currentActive && linkMap[currentActive]) linkMap[currentActive].classList.remove('active');
+  currentActive = id;
+  var a = linkMap[id];
+  if(!a) return;
+  a.classList.add('active');
+  if(scrollIntoView === false) return;
+  var r = a.getBoundingClientRect(), sr = sb.getBoundingClientRect();
+  if(r.top < sr.top + 48 || r.bottom > sr.bottom - 48){
+    sb.scrollTop += (r.top - sr.top) - sb.clientHeight / 2;
+  }
+}
+
+function currentSectionId(){
+  var found = null;
+  for(var i = 0; i < sections.length; i++){
+    if(sections[i].getBoundingClientRect().top <= ACTIVE_LINE) found = sections[i].id;
+    else break;
+  }
+  // Above the first chapter (hero) nothing is active; below the last, the
+  // final chapter stays active even though its top has scrolled far away.
+  if(!found && sections.length &&
+     window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4){
+    found = sections[sections.length - 1].id;
+  }
+  return found;
+}
+
+// While a click-driven smooth scroll is animating, the intermediate scroll
+// events would drag the highlight back through every chapter in between. Lock
+// it to the requested target until the page stops moving.
+var lockedId = null, lockTimer = null, lastY = -1, settleFrames = 0;
+
+function lockTo(id){
+  if(!linkMap[id]) return;
+  lockedId = id;
+  setActive(id, false);
+  if(lockTimer) cancelAnimationFrame(lockTimer);
+  lastY = -1; settleFrames = 0;
+  (function wait(){
+    var y = window.scrollY;
+    // Two consecutive identical frames means the smooth scroll has landed.
+    settleFrames = (y === lastY) ? settleFrames + 1 : 0;
+    lastY = y;
+    if(settleFrames >= 2){ lockedId = null; lockTimer = null; return; }
+    lockTimer = requestAnimationFrame(wait);
+  })();
+}
+
 function onScroll(){
   var y = window.scrollY;
   var docH = document.documentElement.scrollHeight - window.innerHeight;
   progress.style.width = (docH > 0 ? Math.min(100, (y / docH) * 100) : 0) + '%';
-
-  var found = null;
-  for(var i = 0; i < sections.length; i++){
-    if(sections[i].getBoundingClientRect().top <= 120) found = sections[i].id;
-    else break;
-  }
-  if(found && found !== currentActive){
-    if(currentActive && linkMap[currentActive]) linkMap[currentActive].classList.remove('active');
-    if(linkMap[found]){
-      linkMap[found].classList.add('active');
-      var a = linkMap[found];
-      var r = a.getBoundingClientRect(), sr = sb.getBoundingClientRect();
-      if(r.top < sr.top + 40 || r.bottom > sr.bottom - 40){
-        sb.scrollTop += (r.top - sr.top) - sb.clientHeight / 2;
-      }
-    }
-    currentActive = found;
-  }
+  if(!lockedId) setActive(currentSectionId());
   ticking = false;
 }
 window.addEventListener('scroll', function(){
   if(!ticking){ requestAnimationFrame(onScroll); ticking = true; }
 }, {passive:true});
+
+// Clicking a TOC entry latches it immediately, so the previous chapter never
+// lingers as a leftover highlight.
+sb.addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('a[data-id]') : null;
+  if(a) lockTo(a.getAttribute('data-id'));
+});
+
+// A wheel/touch/key scroll by the reader always wins over the lock.
+['wheel','touchstart','keydown'].forEach(function(ev){
+  window.addEventListener(ev, function(){
+    if(lockedId){
+      if(lockTimer) cancelAnimationFrame(lockTimer);
+      lockedId = null; lockTimer = null;
+    }
+  }, {passive:true});
+});
+
+window.addEventListener('hashchange', function(){
+  var id = location.hash.slice(1);
+  if(linkMap[id]) lockTo(id);
+});
+
 onScroll();
+if(location.hash && linkMap[location.hash.slice(1)]) lockTo(location.hash.slice(1));
 
 /* ═══════════════ COPY BUTTONS ═══════════════ */
 Array.prototype.forEach.call(document.querySelectorAll('.cb'), function(cb){

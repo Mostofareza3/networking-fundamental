@@ -117,9 +117,10 @@ var html = '';
 TOC.forEach(function(sec){
   html += '<div class="toc-part">' + sec.p + '</div>';
   sec.items.forEach(function(it){
-    html += '<a href="#' + it[0] + '" data-id="' + it[0] + '">' +
+    html += '<a class="' + (it[2] ? '' : 'no-n') + '" href="#' + it[0] +
+            '" data-id="' + it[0] + '">' +
             (it[2] ? '<span class="n">' + it[2] + '</span>' : '') +
-            it[1] + '</a>';
+            '<span class="t">' + it[1] + '</span></a>';
   });
 });
 sb.innerHTML = html;
@@ -134,7 +135,8 @@ menuBtn.addEventListener('click', function(){
 });
 backdrop.addEventListener('click', closeMenu);
 sb.addEventListener('click', function(e){
-  if(e.target.tagName === 'A' && window.innerWidth <= 1080) closeMenu();
+  var a = e.target.closest ? e.target.closest('a[data-id]') : null;
+  if(a && window.innerWidth <= 1080) closeMenu();
 });
 
 /* ═══════════════ ACTIVE SECTION + PROGRESS ═══════════════ */
@@ -146,34 +148,98 @@ var progress = document.getElementById('progress');
 var currentActive = null;
 var ticking = false;
 
+// A navigated chapter settles with its top edge ~150px down the viewport
+// (html scroll-padding-top plus the chapter's own padding and margin). The
+// activation line must sit just below that landing point: any higher and a
+// chapter never counts as "reached", so the previous one stays lit — the
+// leftover highlight this used to show.
+var ACTIVE_LINE = 160;
+
+function setActive(id, scrollIntoView){
+  if(!id || id === currentActive) return;
+  if(currentActive && linkMap[currentActive]) linkMap[currentActive].classList.remove('active');
+  currentActive = id;
+  var a = linkMap[id];
+  if(!a) return;
+  a.classList.add('active');
+  if(scrollIntoView === false) return;
+  var r = a.getBoundingClientRect(), sr = sb.getBoundingClientRect();
+  if(r.top < sr.top + 48 || r.bottom > sr.bottom - 48){
+    sb.scrollTop += (r.top - sr.top) - sb.clientHeight / 2;
+  }
+}
+
+function currentSectionId(){
+  var found = null;
+  for(var i = 0; i < sections.length; i++){
+    if(sections[i].getBoundingClientRect().top <= ACTIVE_LINE) found = sections[i].id;
+    else break;
+  }
+  // Above the first chapter (hero) nothing is active; below the last, the
+  // final chapter stays active even though its top has scrolled far away.
+  if(!found && sections.length &&
+     window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4){
+    found = sections[sections.length - 1].id;
+  }
+  return found;
+}
+
+// While a click-driven smooth scroll is animating, the intermediate scroll
+// events would drag the highlight back through every chapter in between. Lock
+// it to the requested target until the page stops moving.
+var lockedId = null, lockTimer = null, lastY = -1, settleFrames = 0;
+
+function lockTo(id){
+  if(!linkMap[id]) return;
+  lockedId = id;
+  setActive(id, false);
+  if(lockTimer) cancelAnimationFrame(lockTimer);
+  lastY = -1; settleFrames = 0;
+  (function wait(){
+    var y = window.scrollY;
+    // Two consecutive identical frames means the smooth scroll has landed.
+    settleFrames = (y === lastY) ? settleFrames + 1 : 0;
+    lastY = y;
+    if(settleFrames >= 2){ lockedId = null; lockTimer = null; return; }
+    lockTimer = requestAnimationFrame(wait);
+  })();
+}
+
 function onScroll(){
   var y = window.scrollY;
   var docH = document.documentElement.scrollHeight - window.innerHeight;
   progress.style.width = (docH > 0 ? Math.min(100, (y / docH) * 100) : 0) + '%';
-
-  var found = null;
-  for(var i = 0; i < sections.length; i++){
-    if(sections[i].getBoundingClientRect().top <= 120) found = sections[i].id;
-    else break;
-  }
-  if(found && found !== currentActive){
-    if(currentActive && linkMap[currentActive]) linkMap[currentActive].classList.remove('active');
-    if(linkMap[found]){
-      linkMap[found].classList.add('active');
-      var a = linkMap[found];
-      var r = a.getBoundingClientRect(), sr = sb.getBoundingClientRect();
-      if(r.top < sr.top + 40 || r.bottom > sr.bottom - 40){
-        sb.scrollTop += (r.top - sr.top) - sb.clientHeight / 2;
-      }
-    }
-    currentActive = found;
-  }
+  if(!lockedId) setActive(currentSectionId());
   ticking = false;
 }
 window.addEventListener('scroll', function(){
   if(!ticking){ requestAnimationFrame(onScroll); ticking = true; }
 }, {passive:true});
+
+// Clicking a TOC entry latches it immediately, so the previous chapter never
+// lingers as a leftover highlight.
+sb.addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('a[data-id]') : null;
+  if(a) lockTo(a.getAttribute('data-id'));
+});
+
+// A wheel/touch/key scroll by the reader always wins over the lock.
+['wheel','touchstart','keydown'].forEach(function(ev){
+  window.addEventListener(ev, function(){
+    if(lockedId){
+      if(lockTimer) cancelAnimationFrame(lockTimer);
+      lockedId = null; lockTimer = null;
+    }
+  }, {passive:true});
+});
+
+window.addEventListener('hashchange', function(){
+  var id = location.hash.slice(1);
+  if(linkMap[id]) lockTo(id);
+});
+
 onScroll();
+if(location.hash && linkMap[location.hash.slice(1)]) lockTo(location.hash.slice(1));
 
 /* ═══════════════ COPY BUTTONS ═══════════════ */
 Array.prototype.forEach.call(document.querySelectorAll('.cb'), function(cb){
