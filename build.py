@@ -21,6 +21,8 @@ SIM_JS = [
     'core/engine.js', 'core/packet.js', 'core/net.js', 'core/registry.js',
     'labs/packet.js', 'labs/encap.js', 'labs/ethernet.js',
     'labs/switching.js', 'labs/arp.js',
+    'labs/ip.js', 'labs/subnet.js', 'labs/routing.js',
+    'labs/lpm.js', 'labs/ttl.js', 'labs/hop.js',
     'ui/canvas.js', 'ui/inspector.js', 'ui/timeline.js', 'ui/app.js',
 ]
 

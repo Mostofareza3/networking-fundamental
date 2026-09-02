@@ -139,7 +139,10 @@ strong{font-weight:680;color:var(--text)}
   position:relative;border:1px solid var(--border);border-radius:14px;
   background:var(--bg-alt);height:270px;overflow:hidden;
 }
+/* Calculator-এ topology নেই, তাই উচ্চতা content অনুযায়ী — কাটা পড়বে না */
+#canvasWrap.calc{height:auto;min-height:270px}
 #canvas{position:absolute;inset:0}
+#canvasWrap.calc #canvas{position:static}
 .nc-wires{position:absolute;inset:0;width:100%;height:100%}
 .nc-wire{stroke:var(--border-strong);stroke-width:.35;vector-effect:non-scaling-stroke}
 .nc-node{
@@ -173,6 +176,44 @@ strong{font-weight:680;color:var(--text)}
 .nc-pkt.k-data{background:var(--accent);border-color:var(--accent);color:#fff}
 .nc-pkt.k-arp {background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
 .nc-pkt.k-ack {background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+/* Subnet Calculator-এর ফলাফল */
+.cp{padding:14px 16px}
+.cp-err{padding:26px 18px;color:var(--danger);font-size:13.6px;text-align:center}
+.cp-bits{
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;word-break:break-all;
+  padding:9px 12px;border-radius:9px;background:var(--panel);border:1px solid var(--border);
+}
+.cp-bits .n{color:var(--accent);font-weight:700}
+.cp-bits .h{color:var(--text-faint)}
+.cp-legend{display:flex;gap:16px;margin:7px 2px 12px;font-size:11.4px;color:var(--text-faint)}
+.cp-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.cp-legend .sw-n{background:var(--accent)}
+.cp-legend .sw-h{background:var(--text-faint)}
+.cp-rows{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel)}
+.cp-row{
+  display:flex;width:100%;gap:10px;align-items:baseline;padding:8px 13px;background:none;
+  border:0;border-bottom:1px solid var(--border);cursor:pointer;text-align:left;
+  font-family:inherit;transition:.12s;
+}
+.cp-row:hover{background:var(--panel-2)}
+.cp-row .k{flex:0 0 140px;min-width:0;font-size:12.4px;color:var(--text-dim)}
+.cp-row .v{flex:1;min-width:0;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent-text);word-break:break-all;text-align:right}
+.cp-row.open{background:var(--accent-soft)}
+.cp-why{
+  display:none;padding:8px 13px 11px;font-size:12.2px;line-height:1.6;
+  color:var(--text-dim);background:var(--bg-alt);border-bottom:1px solid var(--border);
+}
+.cp-why.on{display:block}
+.cp-rows .cp-row:last-of-type{border-bottom:0}
+/* Control-এর text/range */
+.ctl-row input[type=text]{
+  width:100%;font-family:var(--mono);font-size:13px;padding:6px 9px;border-radius:7px;
+  border:1px solid var(--border-strong);background:var(--panel);color:var(--text);
+}
+.ctl-row input[type=text]:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+.ctl-row input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+.ctl-v{font-family:var(--mono);color:var(--accent);font-weight:700}
+
 /* Encapsulation-এর স্তর */
 .nc-stack{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -198,6 +239,8 @@ strong{font-weight:680;color:var(--text)}
 }
 @keyframes nsIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
+/* Banner topology-র উপরে ভাসে; calculator-এ সেটি শেষ সারিটি ঢেকে দেয় */
+#canvasWrap.calc #banner{display:none}
 #banner{
   position:absolute;left:12px;bottom:11px;font-family:var(--mono);font-size:11.5px;
   color:var(--text-faint);background:color-mix(in srgb,var(--bg) 80%,transparent);
@@ -849,10 +892,78 @@ function netAddr(ipn, maskn){
   return out;
 }
 
+/* ───────── Subnet হিসাব — Subnet Calculator ও IP lab দুটোই ব্যবহার করে ─────────
+   JS-এর bitwise operator 32-bit signed, তাই 255.255.255.255-এর মতো মান
+   ঋণাত্মক হয়ে যায়। সেজন্য সব হিসাব ভাগ-গুণ দিয়ে করা হচ্ছে। */
+function subnet(ipStr, cidr){
+  var n = ip2int(ipStr);
+  if(n === null) return { err:'IP Address টি সঠিক নয়। উদাহরণ: 192.168.1.10' };
+  if(cidr === null || isNaN(cidr) || cidr < 0 || cidr > 32)
+    return { err:'CIDR ০ থেকে ৩২-এর মধ্যে হতে হবে।' };
+
+  var m     = maskInt(cidr);
+  var net   = netAddr(n, m);
+  var size  = Math.pow(2, 32 - cidr);
+  var bcast = net + size - 1;
+
+  /* /31 আর /32 বিশেষ — এদের স্বাভাবিক host range নেই */
+  var usable, first, last;
+  if(cidr >= 31){
+    usable = cidr === 32 ? 1 : 2;   /* /31 point-to-point link (RFC 3021) */
+    first  = net;
+    last   = bcast;
+  } else {
+    usable = size - 2;              /* network ও broadcast বাদ */
+    first  = net + 1;
+    last   = bcast - 1;
+  }
+
+  return {
+    ip:        ipStr,
+    cidr:      cidr,
+    mask:      int2ip(m),
+    network:   int2ip(net),
+    broadcast: int2ip(bcast),
+    first:     int2ip(first),
+    last:      int2ip(last),
+    total:     size,
+    usable:    usable,
+    special:   cidr >= 31
+  };
+}
+
+/* একটি IP-কে 8-bit করে binary-তে দেখানো — কোন bit network, কোনটি host */
+function bits(ipStr){
+  var n = ip2int(ipStr);
+  if(n === null) return '';
+  var out = [];
+  for(var o = 3; o >= 0; o--){
+    var byte = Math.floor(n / Math.pow(256, o)) % 256, s = '';
+    for(var b = 7; b >= 0; b--) s += (Math.floor(byte / Math.pow(2, b)) % 2);
+    out.push(s);
+  }
+  return out.join('.');
+}
+
+/* Longest Prefix Match — সব মিল বের করে, সবচেয়ে দীর্ঘ prefix জেতে */
+function lpm(dstStr, routes){
+  var d = ip2int(dstStr), matches = [];
+  for(var i = 0; i < routes.length; i++){
+    var r = routes[i];
+    var rn = ip2int(r.dst);
+    if(rn === null) continue;
+    var m = maskInt(r.prefix);
+    if(netAddr(d, m) === netAddr(rn, m)) matches.push(r);
+  }
+  matches.sort(function(a, b){ return b.prefix - a.prefix; });
+  return { matches: matches, best: matches.length ? matches[0] : null };
+}
+
 NS.net = {
   pc:pc, sw:sw, router:router, server:server, link:link,
   ip2int:ip2int, int2ip:int2ip, maskInt:maskInt,
-  maskToCidr:maskToCidr, sameSubnet:sameSubnet, netAddr:netAddr
+  maskToCidr:maskToCidr, sameSubnet:sameSubnet, netAddr:netAddr,
+  subnet:subnet, bits:bits, lpm:lpm
 };
 
 })(window.NetLab = window.NetLab || {});
@@ -869,7 +980,8 @@ NS.net = {
 NS.labs = NS.labs || {};
 
 /* Sidebar-এ lab গুলো এই ক্রমে দেখাবে */
-NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp'];
+NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp',
+                'ip','subnet','routing','lpm','ttl','hop'];
 
 NS.labList = function(){
   var out = [];
@@ -1643,6 +1755,947 @@ NS.labs.arp = {
 
 })(window.NetLab);
 
+/* ─── labs/ip.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · IP Addressing — "Destination কি আমার নিজের network-এ?"
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+var MY_MAC = 'AA:AA:AA:AA:AA:AA';
+var GW_MAC = 'RR:RR:RR:RR:RR:RR';
+var PEER_MAC = 'BB:BB:BB:BB:BB:BB';
+
+NS.labs.ip = {
+  id: 'ip',
+  title: 'IP Addressing Lab',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch11',
+  blurb: 'Packet পাঠানোর আগে প্রতিটি machine একটাই প্রশ্ন করে — গন্তব্য কি আমার নিজের network-এ? উত্তরের উপরেই সব নির্ভর করে।',
+
+  learn: [
+    'Subnet Mask কীভাবে "আমার network"-এর সীমারেখা আঁকে',
+    'একই network হলে সরাসরি, না হলে Default Gateway — কেন',
+    'দুই ক্ষেত্রেই destination IP এক, কিন্তু destination MAC আলাদা',
+    'Subnet Mask ভুল হলে ঠিক কোথায় গিয়ে যোগাযোগ ভাঙে'
+  ],
+
+  mistakes: [
+    { m:'Default Gateway-এর কাজ হলো Packet-এর গন্তব্য ঠিক করে দেওয়া।',
+      r:'গন্তব্য আগে থেকেই destination IP-তে লেখা আছে। Gateway শুধু সেই Packet-টিকে পরের ধাপে এগিয়ে দেয় — "আমি চিনি না, কিন্তু যে চেনে তার কাছে দিচ্ছি"। এটি delegation, গন্তব্য নির্ধারণ নয়।' },
+    { m:'একই network-এ আছে কিনা বোঝা যায় IP-র প্রথম তিনটি অংশ মিলিয়ে।',
+      r:'সেটি শুধু `/24`-এর ক্ষেত্রে কাকতালীয়ভাবে ঠিক। আসল হিসাব হয় Subnet Mask দিয়ে — `/25`-এ `192.168.1.10` আর `192.168.1.130` ভিন্ন network-এ, যদিও প্রথম তিন অংশ একই।' }
+  ],
+
+  controls: [
+    { key:'dst', type:'choice', label:'কোথায় Packet পাঠাবেন', def:'local',
+      options:[ ['local','192.168.1.20 — একই network'],
+                ['remote','8.8.8.8 — বাইরের network'] ],
+      help:'দুটোতেই দেখুন destination MAC কীভাবে বদলায়, অথচ destination IP বদলায় না।' },
+    { key:'mask', type:'choice', label:'Subnet Mask', def:'24',
+      options:[ ['24','255.255.255.0  (/24)'],
+                ['25','255.255.255.128  (/25) — সীমা বদলে যাবে'],
+                ['16','255.255.0.0  (/16) — অনেক বড় network'] ],
+      help:'/25 করলে 192.168.1.20 আর একই network-এ থাকে না — Break-It Mode।' },
+    { key:'nogw', type:'toggle', label:'Default Gateway সেট করা নেই', def:false,
+      help:'Gateway ছাড়া বাইরের কোথাও যাওয়া যায় না।' }
+  ],
+
+  build: function(cfg){
+    var cidr = parseInt(cfg.mask, 10);
+    var me = N.pc('me', {
+      name:'আমার PC', x:14, y:50, mac:MY_MAC,
+      ip:'192.168.1.10', mask: N.subnet('192.168.1.10', cidr).mask,
+      gw: cfg.nogw ? '' : '192.168.1.1'
+    });
+    var peer = N.pc('peer', {
+      name:'PC-B', x:50, y:18, mac:PEER_MAC,
+      ip:'192.168.1.20', mask: N.subnet('192.168.1.20', cidr).mask, gw:'192.168.1.1'
+    });
+    var gw = N.router('gw', {
+      name:'Gateway', x:50, y:80,
+      ifaces:[{ name:'eth0', ip:'192.168.1.1', mac:GW_MAC, mask: N.subnet('192.168.1.1', cidr).mask }]
+    });
+    var out = N.server('net', {
+      name:'8.8.8.8', x:88, y:80, mac:'88:88:88:88:88:88', ip:'8.8.8.8',
+      listening:[{ port:53, service:'DNS', open:true }]
+    });
+    if(cfg.nogw) me.note = 'no GW';
+
+    return {
+      devices: [me, peer, gw, out],
+      links: [ N.link('me','peer'), N.link('me','gw'), N.link('gw','net') ],
+      hub: null, wire: null, banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var cidr  = parseInt(cfg.mask, 10);
+    var myIp  = '192.168.1.10';
+    var mask  = N.subnet(myIp, cidr).mask;
+    var sub   = N.subnet(myIp, cidr);
+    var dstIp = cfg.dst === 'local' ? '192.168.1.20' : '8.8.8.8';
+    var same  = N.sameSubnet(myIp, dstIp, mask);
+
+    steps.push({
+      t:at(), actor:'me', layer:'L3', kind:'info',
+      title:'Packet পাঠানোর সিদ্ধান্ত শুরু',
+      what:'Application `' + dstIp + '`-এ data পাঠাতে চাইল। কিন্তু Packet তারে দেওয়ার আগে kernel-কে একটা সিদ্ধান্ত নিতে হবে।',
+      why :'প্রশ্নটি একটাই — **গন্তব্য কি আমার নিজের network-এ?**\n\nউত্তর "হ্যাঁ" হলে সরাসরি পাঠানো যাবে। "না" হলে Packet-টি Default Gateway-এর হাতে তুলে দিতে হবে। এই একটি সিদ্ধান্তের উপরেই পরের সব ধাপ নির্ভর করছে।',
+      apply: function(st){ st.banner = 'সিদ্ধান্ত: গন্তব্য কি local?'; }
+    });
+
+    steps.push({
+      t:at(), actor:'me', layer:'L3', kind:'info',
+      title:'Subnet Mask দিয়ে হিসাব',
+      what:'নিজের IP `' + myIp + '` আর Mask `' + mask + '` (/' + cidr + ') মিলিয়ে বের হলো — আমার network হলো **`' + sub.network + '/' + cidr + '`**, আর তার সীমা `' + sub.first + '` থেকে `' + sub.last + '` পর্যন্ত।',
+      why :'Mask-এর যত ঘর `1`, ততগুলো bit "network" অংশ। বাকিটা host অংশ।\n\n`' + myIp + '` = `' + N.bits(myIp) + '`\n`' + mask + '` = `' + N.bits(mask) + '`\n\nএই দুটো মিলিয়েই "আমার network" বলতে ঠিক কোন কোন address বোঝায় তা ঠিক হয়।',
+      apply: function(st){ st.banner = 'আমার network: ' + sub.network + '/' + cidr; }
+    });
+
+    steps.push({
+      t:at(), actor:'me', layer:'L3', kind: same ? 'ok' : 'warn',
+      title: same ? 'গন্তব্য একই network-এ' : 'গন্তব্য ভিন্ন network-এ',
+      what: same
+        ? '`' + dstIp + '` হিসাব করে দেখা গেল সেটিও `' + sub.network + '/' + cidr + '`-এর ভেতরেই পড়ে।'
+        : '`' + dstIp + '` হিসাব করে দেখা গেল সেটি `' + sub.network + '/' + cidr + '`-এর বাইরে।',
+      why : same
+        ? 'তাই মাঝখানে কোনো Router লাগবে না। Packet-টি সরাসরি ওই device-এর কাছে পাঠানো যাবে।\n\nএখন শুধু দরকার তার MAC Address — সেটি ARP দিয়ে জানা যাবে।'
+        : (cidr === 25 && cfg.dst === 'local'
+            ? 'লক্ষ্য করুন — `192.168.1.10` আর `192.168.1.20`-এর প্রথম তিন অংশ একই, তবু এরা **ভিন্ন network-এ**!\n\nকারণ /25 mask `192.168.1.0`-`192.168.1.127` আর `192.168.1.128`-`192.168.1.255` — এই দুই ভাগে ভেঙে দিয়েছে। এজন্যই "প্রথম তিন অংশ মিললেই একই network" ধারণাটি ভুল।'
+            : 'তাই Packet-টি নিজে থেকে পাঠানো যাবে না। এটিকে এমন কারো হাতে দিতে হবে যে বাইরের পথ চেনে — অর্থাৎ **Default Gateway**।'),
+      apply: function(st){ st.banner = same ? 'একই network — সরাসরি' : 'ভিন্ন network — Gateway লাগবে'; }
+    });
+
+    /* ── Break-It: বাইরে যেতে হবে কিন্তু Gateway নেই ── */
+    if(!same && cfg.nogw){
+      steps.push({
+        t:at(), actor:'me', layer:'L3', kind:'error',
+        title:'Default Gateway নেই — Packet পাঠানো গেল না',
+        what:'Packet-টি বাইরের network-এ যেতে হবে, কিন্তু কোনো Default Gateway সেট করা নেই। তাই এটি কোথাও পাঠানোই হলো না।',
+        why :'Machine-টি পৃথিবীর সব network-এর পথ জানে না — জানার দরকারও নেই। তার শুধু একটা ঠিকানা জানা দরকার: "যা আমি চিনি না, তা কার কাছে দেব।"\n\nসেই ঠিকানাটাই নেই। তাই local network-এর ভেতরে সব ঠিক থাকলেও বাইরের কিছুতেই পৌঁছানো যাবে না। Linux-এ এটি `Network is unreachable` হিসেবে দেখা যায়।',
+        apply: function(st){ st.banner = 'Network is unreachable'; }
+      });
+      return steps;
+    }
+
+    /* ── কার MAC লাগবে সেটিই আসল পার্থক্য ── */
+    var nextHopIp  = same ? dstIp : '192.168.1.1';
+    var nextHopMac = same ? PEER_MAC : GW_MAC;
+    var nextHopName = same ? 'PC-B' : 'Gateway';
+
+    steps.push({
+      t:at(), actor:'me', layer:'L2', kind:'info',
+      title:'কার MAC Address লাগবে?',
+      what:'ARP করা হবে **`' + nextHopIp + '`**-এর জন্য — অর্থাৎ ' + nextHopName + '-এর MAC Address জানতে।',
+      why : same
+        ? 'গন্তব্য নিজেই পাশে আছে, তাই তারই MAC Address দরকার।'
+        : 'এখানে একটা সূক্ষ্ম কিন্তু গুরুত্বপূর্ণ ব্যাপার — ARP করা হচ্ছে **Gateway-এর IP** `192.168.1.1`-এর জন্য, `' + dstIp + '`-এর জন্য নয়।\n\nকারণ `' + dstIp + '` এই local network-এ নেই, তাকে ARP করে পাওয়া যাবে না। ARP শুধু নিজের network-এর ভেতরেই কাজ করে।',
+      apply: function(st){ st.banner = 'ARP: ' + nextHopIp + ' কার?'; }
+    });
+
+    var pkt = P.make([
+      P.ethernet(MY_MAC, nextHopMac, 'ip'),
+      P.ip(myIp, dstIp, 64, 'tcp', 60),
+      P.tcp(54321, same ? 80 : 53, 1000, 0, 'SYN', 64240)
+    ], { label:'Frame', kind:'data', from:'me', to: same ? 'peer' : 'gw' });
+
+    steps.push({
+      t:at(), actor:'me', layer:'L2', kind:'ok',
+      title:'Frame তৈরি হলো', packet:pkt,
+      what:'Destination IP `' + dstIp + '`, কিন্তু destination MAC `' + nextHopMac + '` — অর্থাৎ ' + nextHopName + '-এর।',
+      why : same
+        ? 'এখানে IP আর MAC দুটোই একই device-এর, কারণ গন্তব্য পাশেই।'
+        : '**এটাই পুরো lab-এর সবচেয়ে গুরুত্বপূর্ণ কথা।**\n\nIP Header বলছে Packet-টি শেষ পর্যন্ত `' + dstIp + '`-এ যাবে। কিন্তু Ethernet Header বলছে এই মুহূর্তে এটি যাচ্ছে শুধু Gateway পর্যন্ত।\n\nIP = পুরো যাত্রার গন্তব্য। MAC = এই এক ধাপের ঠিকানা। প্রতিটি hop-এ MAC বদলাবে, IP বদলাবে না।',
+      apply: function(st){
+        st.wire = { pkt:pkt, from:'me', to: same ? 'peer' : 'gw' };
+        st.devices[0].arp[nextHopIp] = { mac:nextHopMac, age:0 };
+        st.banner = 'dst IP ' + dstIp + ' · dst MAC ' + nextHopMac;
+      }
+    });
+
+    if(same){
+      steps.push({
+        t:at(), actor:'peer', layer:'L3', kind:'ok',
+        title:'PC-B সরাসরি পেয়ে গেল', packet:pkt,
+        what:'কোনো Router ছুঁতে হলো না — Frame-টি সরাসরি PC-B-তে পৌঁছাল।',
+        why :'একই network-এর ভেতরে যোগাযোগ Layer 2-তেই সম্পন্ন হয়। Router শুধু তখনই দরকার যখন network-এর সীমানা পার হতে হয়।',
+        apply: function(st){ st.wire = null; st.banner = 'সরাসরি পৌঁছাল'; }
+      });
+      return steps;
+    }
+
+    steps.push({
+      t:at(), actor:'gw', layer:'L3', kind:'ok',
+      title:'Gateway Packet টি এগিয়ে দিল', packet:pkt,
+      what:'Gateway Frame-টি খুলে ভেতরের IP Packet দেখল — গন্তব্য `' + dstIp + '`, যা তার নিজের নয়। তাই সে TTL ১ কমিয়ে Packet-টি পরের দিকে পাঠিয়ে দিল।',
+      why :'Gateway নতুন একটি Ethernet Header বানাল — নতুন source MAC (তার নিজের), নতুন destination MAC (পরের hop-এর)। পুরোনো MAC দুটি মুছে গেল।\n\nকিন্তু ভেতরের IP Header-এ `' + myIp + '` → `' + dstIp + '` অপরিবর্তিত রইল। শুধু TTL ৬৪ থেকে ৬৩ হলো।',
+      apply: function(st){ st.wire = { pkt:pkt, from:'gw', to:'net' }; st.banner = 'TTL 64 → 63, নতুন MAC'; }
+    });
+
+    steps.push({
+      t:at(), actor:'net', layer:'L3', kind:'ok',
+      title:'গন্তব্যে পৌঁছাল', packet:pkt,
+      what:'`8.8.8.8` Packet-টি পেল। পথে MAC Address কয়েকবার বদলেছে, কিন্তু IP Header-এর গন্তব্য শুরু থেকে শেষ পর্যন্ত একই ছিল।',
+      why :'এটাই IP-র মূল নকশা — একটি global ঠিকানা যা পুরো পথে অপরিবর্তিত থাকে, আর প্রতিটি local link-এ আলাদা MAC যা শুধু এক ধাপের জন্য।\n\nএই দুটো স্তর আলাদা বলেই Internet কাজ করে।',
+      apply: function(st){ st.wire = null; st.banner = 'পৌঁছে গেল'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/subnet.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Subnet Calculator
+   ───────────────────────────────────────────────────────────────────
+   এই lab-টি step-ভিত্তিক নয় — এটি interactive। তাই এখানে script()
+   ছোট, আর আসল কাজটা করে panel() — user যা টাইপ করে তার হিসাব।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net;
+
+/* CIDR অনুযায়ী কোন bit network আর কোনটি host — রঙ দিয়ে দেখানোর জন্য */
+function splitBits(ipStr, cidr){
+  var b = N.bits(ipStr).replace(/\./g, '');
+  return { net: b.slice(0, cidr), host: b.slice(cidr) };
+}
+
+NS.labs.subnet = {
+  id: 'subnet',
+  title: 'Subnet Calculator',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch10',
+  blurb: 'একটি IP আর একটি CIDR দিন — Network, Broadcast, Host range সব বেরিয়ে আসবে, প্রতিটির পাশে কেন সেটা তাই তার ব্যাখ্যাসহ।',
+
+  learn: [
+    'CIDR সংখ্যাটা আসলে কী গোনে',
+    'Network Address আর Broadcast Address কেন host হিসেবে ব্যবহার করা যায় না',
+    'ব্যবহারযোগ্য host সংখ্যা কেন মোটের চেয়ে ২ কম',
+    '/24 থেকে /25-এ গেলে network কীভাবে দুই ভাগ হয়ে যায়'
+  ],
+
+  mistakes: [
+    { m:'/24 মানে ২৫৬টি device যুক্ত করা যাবে।',
+      r:'মোট address ২৫৬টি, কিন্তু ব্যবহারযোগ্য ২৫৪টি। প্রথমটি Network Address (পুরো network-কে বোঝায়) আর শেষটি Broadcast Address (সবাইকে বোঝায়) — এই দুটি কোনো নির্দিষ্ট device-কে দেওয়া যায় না।' },
+    { m:'CIDR সংখ্যা যত বড়, network তত বড়।',
+      r:'ঠিক উল্টো। CIDR গোনে network অংশের bit — বেশি bit network-এ গেলে host-এর জন্য কম bit বাকি থাকে। তাই `/24`-এ ২৫৪টি host, কিন্তু `/26`-এ মাত্র ৬২টি।' }
+  ],
+
+  controls: [
+    { key:'ip', type:'text', label:'IP Address', def:'192.168.1.10',
+      help:'যেকোনো IPv4 address লিখুন।' },
+    { key:'cidr', type:'range', label:'CIDR', def:24, min:0, max:32,
+      help:'Slider সরিয়ে দেখুন network-এর আকার কীভাবে বদলায়।' }
+  ],
+
+  /* Canvas-এর বদলে এই lab নিজের হিসাবের ফলাফল দেখায় */
+  panel: function(cfg){
+    var cidr = parseInt(cfg.cidr, 10);
+    var r = N.subnet(cfg.ip, cidr);
+    if(r.err) return { err: r.err };
+
+    var sp = splitBits(r.ip, cidr);
+    var rows = [
+      ['Network Address', r.network + '/' + cidr,
+       'পুরো network-টিকে বোঝায়। কোনো device-কে এই address দেওয়া যায় না।'],
+      ['Broadcast Address', r.broadcast,
+       'এই network-এর সবার উদ্দেশ্যে পাঠানোর address। এটিও কোনো device পায় না।'],
+      ['First Host', r.first,
+       'প্রথম যে address কোনো device-কে দেওয়া যায়।'],
+      ['Last Host', r.last,
+       'শেষ যে address কোনো device-কে দেওয়া যায়।'],
+      ['Subnet Mask', r.mask,
+       'CIDR /' + cidr + '-এর dotted-decimal রূপ। বাঁ দিক থেকে ' + cidr + 'টি bit এক।'],
+      ['Total Addresses', r.total.toLocaleString('en-US'),
+       '2^(32-' + cidr + ') = ' + r.total.toLocaleString('en-US') + 'টি address এই range-এ আছে।'],
+      ['Usable Hosts', r.usable.toLocaleString('en-US'),
+       r.special
+         ? (cidr === 32 ? 'একটিমাত্র host — এটি একটি নির্দিষ্ট address বোঝায়।'
+                        : '/31 বিশেষ ক্ষেত্র — দুটি router-এর মাঝের link-এ ব্যবহার হয় (RFC 3021)।')
+         : 'মোট থেকে Network আর Broadcast — এই ২টি বাদ দিয়ে ' + r.usable.toLocaleString('en-US') + 'টি।']
+    ];
+    return { r:r, rows:rows, bits:sp, cidr:cidr };
+  },
+
+  build: function(cfg){
+    return { devices: [], links: [], hub: null, wire: null, banner: null, calc: true };
+  },
+
+  script: function(s0, cfg){
+    var cidr = parseInt(cfg.cidr, 10);
+    var r = N.subnet(cfg.ip, cidr);
+    if(r.err){
+      return [{
+        t:1, actor:'calc', layer:'L3', kind:'error',
+        title:'Input টি সঠিক নয়',
+        what: r.err,
+        why :'একটি IPv4 address চারটি অংশে লেখা হয়, প্রতিটি ০ থেকে ২৫৫-এর মধ্যে। যেমন `192.168.1.10`।',
+        apply: function(st){ st.banner = 'ভুল input'; }
+      }];
+    }
+
+    return [
+      { t:1, actor:'calc', layer:'L3', kind:'info',
+        title:'CIDR /' + cidr + ' মানে কী',
+        what:'`/' + cidr + '` মানে address-এর প্রথম **' + cidr + 'টি bit** network অংশ, বাকি **' + (32 - cidr) + 'টি bit** host অংশ।',
+        why :'`' + r.ip + '` = `' + N.bits(r.ip) + '`\n\nবাঁ দিক থেকে ' + cidr + 'টি bit যাদের একই, তারা সবাই একই network-এ। বাকি ' + (32 - cidr) + 'টি bit বদলে বদলে ওই network-এর ভেতরের আলাদা আলাদা device হয়।',
+        apply: function(st){ st.banner = '/' + cidr + ' → ' + cidr + ' bit network'; } },
+
+      { t:2, actor:'calc', layer:'L3', kind:'ok',
+        title:'Network Address বের করা',
+        what:'Host অংশের সব bit **শূন্য** করে দিলে পাওয়া যায় Network Address — `' + r.network + '`।',
+        why :'এটি কোনো নির্দিষ্ট device নয়, বরং পুরো network-টির নাম। Routing Table-এ ঠিক এই রূপেই লেখা হয়: `' + r.network + '/' + cidr + '`।',
+        apply: function(st){ st.banner = 'Network: ' + r.network; } },
+
+      { t:3, actor:'calc', layer:'L3', kind:'ok',
+        title:'Broadcast Address বের করা',
+        what:'Host অংশের সব bit **এক** করে দিলে পাওয়া যায় Broadcast Address — `' + r.broadcast + '`।',
+        why :'এই address-এ পাঠালে ওই network-এর প্রতিটি device Packet-টি পায়। তাই এটিও কোনো একক device-কে দেওয়া যায় না।',
+        apply: function(st){ st.banner = 'Broadcast: ' + r.broadcast; } },
+
+      { t:4, actor:'calc', layer:'L3', kind: r.special ? 'warn' : 'ok',
+        title:'ব্যবহারযোগ্য host কতগুলো',
+        what: r.special
+          ? '/' + cidr + ' একটি বিশেষ ক্ষেত্র — এখানে স্বাভাবিক host range-এর নিয়ম খাটে না। ব্যবহারযোগ্য: **' + r.usable + '**।'
+          : 'মোট `' + r.total.toLocaleString('en-US') + '`টি address, কিন্তু ব্যবহারযোগ্য **`' + r.usable.toLocaleString('en-US') + '`**টি — `' + r.first + '` থেকে `' + r.last + '` পর্যন্ত।',
+        why : r.special
+          ? (cidr === 32
+              ? '`/32` মানে একটিমাত্র address — সাধারণত একটি নির্দিষ্ট host বোঝাতে ব্যবহার হয়।'
+              : '`/31`-এ Network আর Broadcast বাদ দিলে কিছুই থাকত না। তাই RFC 3021 অনুযায়ী দুটি router-এর মাঝের point-to-point link-এ দুটি address-ই ব্যবহার করা হয়।')
+          : 'দুটি address সবসময় সংরক্ষিত — শুরুরটি Network Address, শেষেরটি Broadcast Address। তাই ব্যবহারযোগ্য সংখ্যা সবসময় মোটের চেয়ে ২ কম।\n\nএজন্যই `/24`-এ ২৫৬ নয়, **২৫৪**টি device বসানো যায়।',
+        apply: function(st){ st.banner = r.usable.toLocaleString('en-US') + 'টি usable host'; } }
+    ];
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/routing.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Routing — hop by hop, প্রত্যেকে শুধু পরের ধাপ জানে
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+NS.labs.routing = {
+  id: 'routing',
+  title: 'Routing Lab',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch12',
+  blurb: 'কোনো Router পুরো পথ জানে না। প্রত্যেকে শুধু "পরের ধাপ" জানে — তবু Packet গন্তব্যে পৌঁছে যায়।',
+
+  learn: [
+    'Routing Table-এর প্রতিটি কলাম আসলে কী বলে',
+    'প্রতিটি Router স্বাধীনভাবে সিদ্ধান্ত নেয় — কেউ পুরো পথ জানে না',
+    'একটি Router-এর table ভুল হলে ঠিক কোথায় Packet আটকে যায়',
+    'IP কেন stateless — Packet নিজে কিছু মনে রাখে না'
+  ],
+
+  mistakes: [
+    { m:'প্রথম Router পুরো পথটা ঠিক করে দেয়, বাকিরা শুধু অনুসরণ করে।',
+      r:'প্রতিটি Router সম্পূর্ণ স্বাধীনভাবে নিজের সিদ্ধান্ত নেয়। Packet-এর ভেতরে "পথ" বলে কিছু লেখা থাকে না — শুধু গন্তব্য লেখা থাকে। এজন্যই একই গন্তব্যের দুটি Packet ভিন্ন পথে যেতে পারে।' },
+    { m:'Packet নিজে মনে রাখে সে কোথা দিয়ে এসেছে।',
+      r:'IP stateless — Packet কোনো ইতিহাস বহন করে না। প্রতিটি Router শুধু destination IP দেখে নিজের table-এ খোঁজে। এজন্যই ফেরার পথ সম্পূর্ণ আলাদা হতে পারে।' }
+  ],
+
+  controls: [
+    { key:'broken', type:'toggle', label:'Router B-র route মুছে দিন', def:false,
+      help:'মাঝপথের একটি Router গন্তব্য না চিনলে কী হয় — Break-It Mode।' }
+  ],
+
+  build: function(cfg){
+    var ra = N.router('ra', { name:'Router A', x:34, y:50,
+      ifaces:[{ name:'eth0', ip:'192.168.1.1', mac:'A1:A1:A1:A1:A1:A1', mask:'255.255.255.0' },
+              { name:'eth1', ip:'10.0.0.1',    mac:'A2:A2:A2:A2:A2:A2', mask:'255.255.255.0' }],
+      routes:[ { dst:'192.168.1.0', prefix:24, via:'', iface:'eth0' },
+               { dst:'10.0.0.0',    prefix:24, via:'', iface:'eth1' },
+               { dst:'192.168.2.0', prefix:24, via:'10.0.0.2', iface:'eth1' } ] });
+
+    var rbRoutes = [ { dst:'10.0.0.0', prefix:24, via:'', iface:'eth0' },
+                     { dst:'192.168.1.0', prefix:24, via:'10.0.0.1', iface:'eth0' } ];
+    if(!cfg.broken) rbRoutes.push({ dst:'192.168.2.0', prefix:24, via:'', iface:'eth1' });
+
+    var rb = N.router('rb', { name:'Router B', x:66, y:50,
+      ifaces:[{ name:'eth0', ip:'10.0.0.2',    mac:'B1:B1:B1:B1:B1:B1', mask:'255.255.255.0' },
+              { name:'eth1', ip:'192.168.2.1', mac:'B2:B2:B2:B2:B2:B2', mask:'255.255.255.0' }],
+      routes: rbRoutes });
+    if(cfg.broken) rb.note = 'route নেই';
+
+    return {
+      devices: [
+        N.pc('client', { name:'Client', x:8, y:50, mac:'AA:AA:AA:AA:AA:AA',
+                         ip:'192.168.1.10', gw:'192.168.1.1' }),
+        ra, rb,
+        N.server('srv', { name:'Server', x:92, y:50, mac:'SS:SS:SS:SS:SS:SS',
+                          ip:'192.168.2.50', gw:'192.168.2.1',
+                          listening:[{ port:443, service:'HTTPS', open:true }] })
+      ],
+      links: [ N.link('client','ra'), N.link('ra','rb'), N.link('rb','srv') ],
+      hub: null, wire: null, banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+    var SRC = '192.168.1.10', DST = '192.168.2.50';
+
+    function frame(sm, dm, ttl, label, from, to){
+      return P.make([
+        P.ethernet(sm, dm, 'ip'),
+        P.ip(SRC, DST, ttl, 'tcp', 60),
+        P.tcp(54321, 443, 1000, 0, 'SYN', 64240)
+      ], { label:label, kind:'data', from:from, to:to });
+    }
+
+    var f1 = frame('AA:AA:AA:AA:AA:AA', 'A1:A1:A1:A1:A1:A1', 64, 'Frame → Router A', 'client', 'ra');
+    steps.push({
+      t:at(), actor:'client', layer:'L3', kind:'info',
+      title:'Client Packet পাঠাল', packet:f1,
+      what:'গন্তব্য `' + DST + '` নিজের network-এ নেই, তাই Client Packet-টি নিজের Default Gateway — Router A-কে দিয়ে দিল।',
+      why :'Client পুরো পথ জানে না, জানার দরকারও নেই। তার শুধু একটাই কাজ — "যা আমি চিনি না, তা Gateway-কে দাও।"',
+      apply: function(st){ st.wire = { pkt:f1, from:'client', to:'ra' }; st.banner = 'Client → Router A'; }
+    });
+
+    var f2 = frame('A2:A2:A2:A2:A2:A2', 'B1:B1:B1:B1:B1:B1', 63, 'Frame → Router B', 'ra', 'rb');
+    steps.push({
+      t:at(), actor:'ra', layer:'L3', kind:'ok',
+      title:'Router A: পরের ধাপ Router B', packet:f2,
+      what:'Router A তার table-এ `' + DST + '` খুঁজে পেল — `192.168.2.0/24 via 10.0.0.2 dev eth1`। তাই Packet-টি Router B-এর দিকে পাঠাল।',
+      why :'লক্ষ্য করুন Router A **পুরো পথ জানে না** — সে শুধু জানে "192.168.2.0/24-এর জন্য 10.0.0.2-কে দাও"। এরপর কী হবে তা Router B-এর ব্যাপার।\n\nসে নতুন Ethernet Header বানাল (নতুন source ও destination MAC) আর TTL ৬৪ থেকে ৬৩ করল। কিন্তু ভেতরের source/destination IP অপরিবর্তিত।',
+      apply: function(st){ st.wire = { pkt:f2, from:'ra', to:'rb' }; st.banner = 'TTL 63 · নতুন MAC'; }
+    });
+
+    if(cfg.broken){
+      steps.push({
+        t:at(), actor:'rb', layer:'L3', kind:'error',
+        title:'Router B গন্তব্য চেনে না — Packet drop',
+        what:'Router B তার table-এ `' + DST + '` খুঁজল, কিন্তু কোনো route পেল না। তাই Packet-টি ফেলে দিল।',
+        why :'মজার ব্যাপার — Router B-এর `eth1` interface-টি সরাসরি `192.168.2.0/24`-এ যুক্ত, অর্থাৎ **Server ঠিক তার পাশেই**। তবু route না থাকায় সে Packet পাঠাল না।\n\nRouter অনুমান করে না, সে শুধু table পড়ে। Table-এ না থাকলে গন্তব্য পাশে থাকলেও Packet drop হয়।\n\nএখানে Client-এর কোনো দোষ নেই, Router A-রও নয় — সমস্যা শুধু পথের মাঝের একটি table-এ। এজন্যই network debug করার সময় প্রতিটি hop আলাদা করে দেখতে হয়।',
+        apply: function(st){ st.wire = null; st.banner = 'Router B: no route'; }
+      });
+      return steps;
+    }
+
+    var f3 = frame('B2:B2:B2:B2:B2:B2', 'SS:SS:SS:SS:SS:SS', 62, 'Frame → Server', 'rb', 'srv');
+    steps.push({
+      t:at(), actor:'rb', layer:'L3', kind:'ok',
+      title:'Router B: গন্তব্য সরাসরি যুক্ত', packet:f3,
+      what:'Router B তার table-এ পেল `192.168.2.0/24 dev eth1` — কোনো next hop নেই, অর্থাৎ এই network তার সাথে **সরাসরি যুক্ত**।',
+      why :'"Directly connected" মানে আর কোনো Router লাগবে না। Router B এখন ARP করে Server-এর MAC Address বের করে সরাসরি Frame পাঠাবে।\n\nTTL আরেকবার কমে ৬২ হলো।',
+      apply: function(st){ st.wire = { pkt:f3, from:'rb', to:'srv' }; st.banner = 'directly connected · TTL 62'; }
+    });
+
+    steps.push({
+      t:at(), actor:'srv', layer:'L3', kind:'ok',
+      title:'Server পেয়ে গেল', packet:f3,
+      what:'Packet গন্তব্যে পৌঁছাল। পথে দুটি Router পার হয়েছে, TTL ৬৪ থেকে ৬২ হয়েছে, MAC Address তিনবার বদলেছে।',
+      why :'কিন্তু source IP `' + SRC + '` আর destination IP `' + DST + '` — এই দুটি শুরু থেকে শেষ পর্যন্ত এক রইল।\n\nএবং সবচেয়ে গুরুত্বপূর্ণ: **কেউই পুরো পথটা জানত না**। Client জানত শুধু Router A-কে। Router A জানত শুধু Router B-কে। Router B জানত Server তার পাশে। তিনটি স্থানীয় সিদ্ধান্ত মিলে একটি সম্পূর্ণ যাত্রা তৈরি হলো।',
+      apply: function(st){ st.wire = null; st.banner = 'পৌঁছাল · 2 hop'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/lpm.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Longest Prefix Match — একাধিক route মিললে কে জেতে
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+/* বই-এর ch12-এর টেবিলটিই এখানে ব্যবহার করা হয়েছে */
+var ROUTES = [
+  { dst:'10.0.5.0', prefix:24, via:'Router A', iface:'eth1' },
+  { dst:'10.0.0.0', prefix:16, via:'Router B', iface:'eth2' },
+  { dst:'10.0.0.0', prefix:8,  via:'Router C', iface:'eth3' },
+  { dst:'0.0.0.0',  prefix:0,  via:'Router D', iface:'eth0' }
+];
+
+NS.labs.lpm = {
+  id: 'lpm',
+  title: 'Longest Prefix Match',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch12',
+  blurb: 'একটি destination একসাথে অনেকগুলো route-এর সাথে মিলতে পারে। Router কোনটা বেছে নেবে, আর কেন?',
+
+  learn: [
+    'একটি destination কীভাবে একসাথে চারটি route-এর সাথে মিলতে পারে',
+    'সবচেয়ে দীর্ঘ prefix কেন জেতে',
+    'Default route `0.0.0.0/0` কেন সবার সাথেই মেলে, তবু সবার শেষে আসে',
+    'কোনো route না মিললে কী হয়'
+  ],
+
+  mistakes: [
+    { m:'Routing Table-এ যে route উপরে আছে সেটাই আগে প্রয়োগ হয়।',
+      r:'ক্রম দিয়ে কিছু হয় না। Router সব মিল বের করে, তারপর যেটির prefix সবচেয়ে দীর্ঘ সেটিই বেছে নেয়। Table-এ কোন লাইন আগে লেখা তা অপ্রাসঙ্গিক।' },
+    { m:'Default route থাকা মানে বাকি route গুলো অপ্রয়োজনীয়।',
+      r:'Default route (`0.0.0.0/0`) সবার সাথে মেলে, কিন্তু তার prefix সবচেয়ে ছোট — তাই সে সবার শেষে। নির্দিষ্ট route থাকলে সেটিই জেতে; default শুধু "আর কিছু না মিললে" কাজে আসে।' }
+  ],
+
+  controls: [
+    { key:'dst', type:'choice', label:'Destination IP', def:'10.0.5.20',
+      options:[ ['10.0.5.20','10.0.5.20 — চারটিই মিলবে'],
+                ['10.0.9.7','10.0.9.7 — /24 মিলবে না'],
+                ['10.7.7.7','10.7.7.7 — শুধু /8 আর default'],
+                ['203.0.113.5','203.0.113.5 — শুধু default'] ],
+      help:'প্রতিটিতে দেখুন কয়টি route মেলে আর শেষে কে জেতে।' },
+    { key:'nodefault', type:'toggle', label:'Default route মুছে দিন', def:false,
+      help:'Default route না থাকলে অচেনা গন্তব্যের Packet-এর কী হয়?' }
+  ],
+
+  build: function(cfg){
+    var routes = ROUTES.slice();
+    if(cfg.nodefault) routes = routes.filter(function(r){ return r.prefix !== 0; });
+
+    var rt = N.router('r1', { name:'Router', x:50, y:50, routes:routes,
+      ifaces:[{ name:'eth0', ip:'10.0.0.1', mac:'RR:RR:RR:RR:RR:RR', mask:'255.0.0.0' }] });
+
+    return {
+      devices: [
+        N.pc('client', { name:'Client', x:12, y:50, mac:'AA:AA:AA:AA:AA:AA', ip:'10.0.1.9' }),
+        rt,
+        N.server('a', { name:'Router A', x:88, y:16, mac:'A1:A1:A1:A1:A1:A1', ip:'10.0.5.1' }),
+        N.server('b', { name:'Router B', x:88, y:38, mac:'B1:B1:B1:B1:B1:B1', ip:'10.0.9.1' }),
+        N.server('c', { name:'Router C', x:88, y:62, mac:'C1:C1:C1:C1:C1:C1', ip:'10.7.0.1' }),
+        N.server('d', { name:'Router D', x:88, y:84, mac:'D1:D1:D1:D1:D1:D1', ip:'203.0.113.1' })
+      ],
+      links: [ N.link('client','r1'), N.link('r1','a'), N.link('r1','b'),
+               N.link('r1','c'), N.link('r1','d') ],
+      hub: null, wire: null, banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var dst = cfg.dst;
+    var routes = ROUTES.slice();
+    if(cfg.nodefault) routes = routes.filter(function(r){ return r.prefix !== 0; });
+
+    var res = N.lpm(dst, routes);
+    var pkt = P.make([
+      P.ethernet('AA:AA:AA:AA:AA:AA', 'RR:RR:RR:RR:RR:RR', 'ip'),
+      P.ip('10.0.1.9', dst, 64, 'tcp', 60),
+      P.tcp(51000, 443, 1, 0, 'SYN', 64240)
+    ], { label:'Packet → ' + dst, kind:'data', from:'client', to:'r1' });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L3', kind:'info',
+      title:'Packet Router-এ পৌঁছাল', packet:pkt,
+      what:'একটি Packet এসেছে যার destination IP `' + dst + '`। Router-কে এখন ঠিক করতে হবে এটি কোন দিকে পাঠাবে।',
+      why :'Router-এর কাছে ' + routes.length + 'টি route আছে। সে একটা একটা করে দেখবে — এই destination কি এই route-এর সাথে মেলে?',
+      apply: function(st){ st.wire = { pkt:pkt, from:'client', to:'r1' }; st.banner = 'গন্তব্য ' + dst; }
+    });
+
+    /* প্রতিটি route আলাদা ধাপে যাচাই — শেখার জন্য এটাই আসল অংশ */
+    for(var i = 0; i < routes.length; i++){
+      (function(r){
+        var hit = res.matches.indexOf(r) !== -1;
+        steps.push({
+          t:at(), actor:'r1', layer:'L3', kind: hit ? 'ok' : 'warn',
+          title:(hit ? '✓ মিলছে — ' : '✗ মিলছে না — ') + r.dst + '/' + r.prefix,
+          what:'`' + r.dst + '/' + r.prefix + '` (via ' + r.via + ') যাচাই করা হলো: ' +
+               (hit ? '**মিলছে**।' : '**মিলছে না**।'),
+          why : r.prefix === 0
+            ? 'Default route-এর prefix `0` — অর্থাৎ ০টি bit মিলতে হবে, যা সবসময়ই সত্য। তাই এটি **সব destination-এর সাথেই মেলে**।\n\nকিন্তু ঠিক এই কারণেই সে সবচেয়ে দুর্বল প্রার্থী — সে আসলে কিছুই "জানে" না।'
+            : 'প্রথম ' + r.prefix + 'টি bit মেলাতে হবে।\n\n`' + dst + '` = `' + N.bits(dst) + '`\n`' + r.dst + '` = `' + N.bits(r.dst) + '`\n\n' +
+              (hit ? 'প্রথম ' + r.prefix + 'টি bit মিলে গেছে, তাই এই route-টি প্রার্থী তালিকায় থাকল।'
+                   : 'প্রথম ' + r.prefix + 'টি bit-এর মধ্যেই পার্থক্য আছে, তাই এই route বাদ।'),
+          apply: function(st){ st.banner = r.dst + '/' + r.prefix + (hit ? ' ✓' : ' ✗'); }
+        });
+      })(routes[i]);
+    }
+
+    /* ── কোনো route না মিললে ── */
+    if(!res.best){
+      steps.push({
+        t:at(), actor:'r1', layer:'L3', kind:'error',
+        title:'কোনো route মিলল না — Packet drop',
+        what:'`' + dst + '`-এর জন্য একটিও route নেই, আর default route-ও মুছে দেওয়া হয়েছে। তাই Router Packet-টি ফেলে দিল।',
+        why :'Router শুধু তা-ই করতে পারে যা তার table-এ লেখা আছে। কোথায় পাঠাতে হবে না জানলে সে অনুমান করে না — Packet ফেলে দেয়।\n\nএরপর সে সাধারণত প্রেরককে একটি ICMP **Destination Unreachable — Network** বার্তা পাঠায়, যাতে প্রেরক বুঝতে পারে কী হয়েছে।',
+        apply: function(st){ st.wire = null; st.banner = 'No route to host'; }
+      });
+      return steps;
+    }
+
+    var best = res.best;
+    var target = { 'Router A':'a', 'Router B':'b', 'Router C':'c', 'Router D':'d' }[best.via];
+
+    steps.push({
+      t:at(), actor:'r1', layer:'L3', kind:'ok',
+      title:'সবচেয়ে দীর্ঘ prefix জিতল — /' + best.prefix,
+      what: res.matches.length > 1
+        ? '**' + res.matches.length + 'টি route** মিলেছিল, কিন্তু `' + best.dst + '/' + best.prefix + '` সবচেয়ে নির্দিষ্ট। তাই Packet যাবে **' + best.via + '**-এর দিকে।'
+        : 'মাত্র একটি route মিলেছে — `' + best.dst + '/' + best.prefix + '`। তাই Packet যাবে **' + best.via + '**-এর দিকে।',
+      why : res.matches.length > 1
+        ? 'যে route যত বেশি bit মিলিয়েছে, সে গন্তব্য সম্পর্কে তত বেশি "জানে"। `/' + best.prefix + '` মানে ' + best.prefix + 'টি bit মিলেছে — এটাই সবচেয়ে কঠিন শর্ত, তাই এর সিদ্ধান্তই সবচেয়ে নির্ভরযোগ্য।\n\nলক্ষ্য করুন — Table-এ কোন route আগে লেখা ছিল তাতে কিছুই যায় আসেনি। শুধু prefix-এর দৈর্ঘ্যই সব ঠিক করেছে।'
+        : 'অন্য কোনো route এই destination-এর সাথে মেলেনি, তাই প্রতিযোগিতাই হলো না।',
+      apply: function(st){ st.wire = { pkt:pkt, from:'r1', to:target }; st.banner = best.via + ' জিতল (/' + best.prefix + ')'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/ttl.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · TTL & Traceroute — একটি সংখ্যা কমতে কমতে শূন্য
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+var HOPS = [
+  { id:'r1', name:'Router 1', ip:'192.168.1.1',  mac:'11:11:11:11:11:11' },
+  { id:'r2', name:'Router 2', ip:'10.0.0.1',     mac:'22:22:22:22:22:22' },
+  { id:'r3', name:'Router 3', ip:'172.16.0.1',   mac:'33:33:33:33:33:33' }
+];
+
+NS.labs.ttl = {
+  id: 'ttl',
+  title: 'TTL & Traceroute',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch14',
+  blurb: 'TTL একটি সাধারণ কাউন্টার, কিন্তু এর উপরেই দাঁড়িয়ে আছে loop protection এবং traceroute — দুটোই।',
+
+  learn: [
+    'প্রতিটি Router কেন TTL এক কমায়',
+    'TTL শূন্য হলে ঠিক কী ঘটে, আর কে জানতে পারে',
+    'Traceroute কীভাবে এই একই নিয়মকে কাজে লাগিয়ে পুরো পথ আবিষ্কার করে',
+    'TTL ছাড়া routing loop কেন ভয়ঙ্কর হতো'
+  ],
+
+  mistakes: [
+    { m:'TTL মানে Packet কত সেকেন্ড বাঁচবে।',
+      r:'নামটি "Time To Live" হলেও এটি সময় নয়, **hop গোনে**। প্রতিটি Router একে ১ কমায়। শূন্য হলে Packet drop — তাতে কত সময় লেগেছে সেটা অপ্রাসঙ্গিক।' },
+    { m:'Traceroute-এর জন্য আলাদা কোনো বিশেষ protocol লাগে।',
+      r:'Traceroute কোনো নতুন জিনিস আবিষ্কার করেনি — সে শুধু TTL-এর স্বাভাবিক নিয়মটাকে কাজে লাগায়। TTL=1 দিয়ে পাঠালে প্রথম Router নালিশ করে, TTL=2 দিয়ে পাঠালে দ্বিতীয় — এভাবেই পুরো পথ বেরিয়ে আসে।' }
+  ],
+
+  controls: [
+    { key:'mode', type:'choice', label:'কী চালাবেন', def:'normal',
+      options:[ ['normal','সাধারণ Packet — TTL 64'],
+                ['low','TTL 2 দিয়ে পাঠান — মাঝপথে মরবে'],
+                ['trace','Traceroute — পুরো পথ আবিষ্কার'] ],
+      help:'Traceroute দেখলে বোঝা যাবে TTL কীভাবে একটি tool-এ পরিণত হয়।' }
+  ],
+
+  build: function(){
+    var devs = [ N.pc('client', { name:'Client', x:8, y:50, mac:'AA:AA:AA:AA:AA:AA',
+                                  ip:'192.168.1.10', gw:'192.168.1.1' }) ];
+    for(var i = 0; i < HOPS.length; i++){
+      var h = HOPS[i];
+      devs.push(N.router(h.id, { name:h.name, x:26 + i * 22, y:50,
+        ifaces:[{ name:'eth0', ip:h.ip, mac:h.mac, mask:'255.255.255.0' }] }));
+    }
+    devs.push(N.server('srv', { name:'Server', x:92, y:50, mac:'SS:SS:SS:SS:SS:SS',
+                                ip:'93.184.216.34' }));
+    return {
+      devices: devs,
+      links: [ N.link('client','r1'), N.link('r1','r2'),
+               N.link('r2','r3'), N.link('r3','srv') ],
+      hub: null, wire: null, banner: null, hops: []
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+    var SRC = '192.168.1.10', DST = '93.184.216.34';
+
+    function pkt(ttl, label, from, to){
+      return P.make([
+        P.ethernet('AA:AA:AA:AA:AA:AA', '11:11:11:11:11:11', 'ip'),
+        P.ip(SRC, DST, ttl, 'icmp', 60)
+      ], { label:label, kind:'data', from:from, to:to });
+    }
+    function icmp(fromIp, label, from){
+      return P.make([
+        P.ethernet('11:11:11:11:11:11', 'AA:AA:AA:AA:AA:AA', 'ip'),
+        P.ip(fromIp, SRC, 64, 'icmp', 56)
+      ], { label:label, kind:'ack', from:from, to:'client' });
+    }
+
+    /* ── Traceroute: একই কৌশল বারবার, প্রতিবার TTL এক বাড়িয়ে ── */
+    if(cfg.mode === 'trace'){
+      steps.push({
+        t:at(), actor:'client', layer:'L3', kind:'info',
+        title:'Traceroute শুরু',
+        what:'Client পুরো পথটা জানতে চায় — কোন কোন Router পার হয়ে Packet গন্তব্যে যায়।',
+        why :'কিন্তু Packet-এর ভেতরে তো পথ লেখা থাকে না, আর কোনো Router-ও নিজে থেকে পরিচয় দেয় না।\n\nTraceroute একটি চতুর কৌশল ব্যবহার করে — ইচ্ছা করে TTL কম দিয়ে Packet পাঠায়, যাতে Router বাধ্য হয়ে নালিশ করে। সেই নালিশ থেকেই Router-এর পরিচয় পাওয়া যায়।',
+        apply: function(st){ st.banner = 'Traceroute শুরু'; st.hops = []; }
+      });
+
+      for(var i = 0; i < HOPS.length; i++){
+        (function(n, h){
+          var p = pkt(n, 'TTL=' + n, 'client', h.id);
+          steps.push({
+            t:at(), actor:'client', layer:'L3', kind:'info',
+            title:'TTL=' + n + ' দিয়ে পাঠানো হলো', packet:p,
+            what:'এবার Packet পাঠানো হলো TTL=**' + n + '** দিয়ে।',
+            why : n === 1
+              ? 'TTL=1 মানে প্রথম Router-ই একে ০ করে ফেলবে, তাই সে-ই নালিশ করবে। এভাবে প্রথম hop-এর পরিচয় জানা যাবে।'
+              : 'TTL=' + n + ' মানে Packet-টি ' + n + ' নম্বর Router পর্যন্ত পৌঁছে তারপর মরবে। তাই এবার ' + n + ' নম্বর hop নিজের পরিচয় দেবে।',
+            apply: function(st){ st.wire = { pkt:p, from:'client', to:h.id }; st.banner = 'TTL=' + n; }
+          });
+
+          var rep = icmp(h.ip, 'Time Exceeded', h.id);
+          steps.push({
+            t:at(), actor:h.id, layer:'L3', kind:'warn',
+            title:'Hop ' + n + ' নিজের পরিচয় দিল', packet:rep,
+            what:'`' + h.name + '` TTL ০ পেয়ে Packet ফেলে দিল এবং Client-কে একটি **ICMP Time Exceeded** বার্তা পাঠাল। সেই বার্তার source IP `' + h.ip + '` — এটিই hop ' + n + '-এর পরিচয়।',
+            why :'Router যখন TTL শূন্য করে Packet ফেলে, তখন সে চুপ করে থাকে না — প্রেরককে জানায়। আর সেই বার্তাটি পাঠাতে গিয়ে সে নিজের IP Address ব্যবহার করে।\n\nএটাই traceroute-এর পুরো রহস্য — Router নিজের অজান্তেই নিজের পরিচয় দিয়ে দেয়।',
+            apply: function(st){
+              st.wire = { pkt:rep, from:h.id, to:'client' };
+              st.hops = st.hops.concat([{ n:n, ip:h.ip, name:h.name }]);
+              st.banner = 'hop ' + n + ' = ' + h.ip;
+            }
+          });
+        })(i + 1, HOPS[i]);
+      }
+
+      var last = pkt(64, 'TTL=64', 'client', 'srv');
+      steps.push({
+        t:at(), actor:'srv', layer:'L3', kind:'ok',
+        title:'গন্তব্যে পৌঁছে গেল — Traceroute শেষ', packet:last,
+        what:'যথেষ্ট TTL দিয়ে পাঠানোয় Packet এবার Server পর্যন্ত পৌঁছাল। Server নিজে উত্তর দিল, তাই বোঝা গেল পথের শেষ এসেছে।',
+        why :'পুরো পথটি এখন জানা:\n\n`1. 192.168.1.1`\n`2. 10.0.0.1`\n`3. 172.16.0.1`\n`4. 93.184.216.34` (গন্তব্য)\n\nএকটি সাধারণ কাউন্টারকে বারবার ব্যবহার করে পুরো পথ আবিষ্কার হয়ে গেল। TTL-এর নকশা যখন করা হয়েছিল, তখন কেউ এই ব্যবহারের কথা ভাবেনি।',
+        apply: function(st){ st.wire = null; st.banner = 'Traceroute সম্পন্ন — 3 hop'; }
+      });
+      return steps;
+    }
+
+    /* ── সাধারণ Packet, অথবা TTL কম দিয়ে ── */
+    var startTtl = cfg.mode === 'low' ? 2 : 64;
+    var p0 = pkt(startTtl, 'TTL=' + startTtl, 'client', 'r1');
+
+    steps.push({
+      t:at(), actor:'client', layer:'L3', kind:'info',
+      title:'Packet পাঠানো হলো — TTL ' + startTtl, packet:p0,
+      what:'Packet-টি TTL=**' + startTtl + '** নিয়ে যাত্রা শুরু করল।',
+      why : cfg.mode === 'low'
+        ? 'TTL মাত্র ২ — অর্থাৎ এই Packet সর্বোচ্চ ২টি Router পার হতে পারবে। কিন্তু গন্তব্যে পৌঁছাতে ৩টি Router লাগে। দেখা যাক কী হয়।'
+        : 'সাধারণত OS ৬৪ (কখনো ১২৮ বা ২৫৫) দিয়ে শুরু করে। Internet-এ বেশিরভাগ গন্তব্য ৩০ hop-এর মধ্যেই, তাই ৬৪ যথেষ্ট বেশি।',
+      apply: function(st){ st.wire = { pkt:p0, from:'client', to:'r1' }; st.banner = 'TTL ' + startTtl; }
+    });
+
+    var ttl = startTtl;
+    for(var k = 0; k < HOPS.length; k++){
+      var h = HOPS[k];
+      ttl--;
+      var dead = ttl === 0;
+      var nextId = k < HOPS.length - 1 ? HOPS[k + 1].id : 'srv';
+
+      (function(h, ttlNow, dead, nextId, idx){
+        if(dead){
+          var rep = icmp(h.ip, 'Time Exceeded', h.id);
+          steps.push({
+            t:at(), actor:h.id, layer:'L3', kind:'error',
+            title:'TTL শূন্য — Packet drop', packet:rep,
+            what:'`' + h.name + '` TTL ১ কমিয়ে **০** পেল। তাই সে Packet-টি আর এগিয়ে দিল না, ফেলে দিল।',
+            why :'এটাই TTL-এর মূল উদ্দেশ্য। যদি কোনো কারণে routing table ভুল হয়ে Packet একই কয়েকটি Router-এর মধ্যে ঘুরতে থাকত, TTL ছাড়া সেটি **চিরকাল ঘুরত** এবং ধীরে ধীরে পুরো network-এর bandwidth খেয়ে ফেলত।\n\nTTL নিশ্চিত করে প্রতিটি Packet-এর একটি নির্দিষ্ট আয়ু আছে। তারপর সে মরবেই।\n\nRouter প্রেরককে একটি **ICMP Time Exceeded** পাঠাল — এটিই traceroute-এর ভিত্তি।',
+            apply: function(st){ st.wire = { pkt:rep, from:h.id, to:'client' }; st.banner = 'TTL 0 — drop'; }
+          });
+        } else {
+          var fp = pkt(ttlNow, 'TTL=' + ttlNow, h.id, nextId);
+          steps.push({
+            t:at(), actor:h.id, layer:'L3', kind:'ok',
+            title:h.name + ': TTL ' + (ttlNow + 1) + ' → ' + ttlNow, packet:fp,
+            what:'`' + h.name + '` Packet-টি পেয়ে TTL ১ কমিয়ে **' + ttlNow + '** করল, তারপর পরের দিকে পাঠিয়ে দিল।',
+            why :'প্রতিটি Router এই কাজটি বাধ্যতামূলকভাবে করে — এটি IP-র নিয়ম। TTL কমানো ছাড়া কোনো Router Packet forward করতে পারে না।\n\nএখনো ' + ttlNow + ' বাকি, তাই Packet বেঁচে আছে।',
+            apply: function(st){ st.wire = { pkt:fp, from:h.id, to:nextId }; st.banner = 'TTL ' + ttlNow; }
+          });
+        }
+      })(h, ttl, dead, nextId, k);
+
+      if(dead){
+        steps.push({
+          t:at(), actor:'client', layer:'L3', kind:'warn',
+          title:'Client নালিশটি পেল',
+          what:'Client একটি ICMP Time Exceeded বার্তা পেল `' + h.ip + '` থেকে। সে বুঝল Packet গন্তব্যে পৌঁছায়নি।',
+          why :'এখানে একটা গুরুত্বপূর্ণ কথা — Client জানতে পারল **কোথায়** Packet মরেছে, কারণ নালিশকারী Router নিজের IP দিয়ে বার্তা পাঠিয়েছে।\n\nএই তথ্যটুকুই traceroute-কে সম্ভব করে তোলে। Control mode-এ `Traceroute` বেছে দেখুন কীভাবে।',
+          apply: function(st){ st.wire = null; st.banner = 'Time Exceeded from ' + h.ip; }
+        });
+        return steps;
+      }
+    }
+
+    steps.push({
+      t:at(), actor:'srv', layer:'L3', kind:'ok',
+      title:'গন্তব্যে পৌঁছাল — TTL ' + ttl + ' বাকি',
+      what:'৩টি Router পার হয়ে Packet Server-এ পৌঁছাল। TTL ' + startTtl + ' থেকে কমে ' + ttl + ' হয়েছে।',
+      why :'TTL-এর এই কমে যাওয়া থেকেই একটা কাজের তথ্য পাওয়া যায় — `ping`-এর উত্তরে TTL দেখে অনুমান করা যায় গন্তব্য কত hop দূরে।\n\nযেমন উত্তরে TTL=৫৬ দেখলে বোঝা যায় শুরু হয়েছিল ৬৪ দিয়ে, তাই প্রায় ৮টি hop পার হয়েছে।',
+      apply: function(st){ st.wire = null; st.banner = 'পৌঁছাল · TTL ' + ttl; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/hop.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Router Hop — IP একই থাকে, MAC প্রতি hop-এ বদলায়
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+var SRC = '192.168.1.10', DST = '8.8.8.8';
+
+NS.labs.hop = {
+  id: 'hop',
+  title: 'Router Hop Visualization',
+  group: 'Phase 2 · Layer 3',
+  chapter: 'ch13',
+  blurb: 'এক Packet, তিনটি link, তিন জোড়া MAC Address — অথচ IP Header প্রায় অপরিবর্তিত। এই পার্থক্যটাই networking-এর মূল ধারণা।',
+
+  learn: [
+    'কেন destination IP পুরো পথে একই থাকে',
+    'কেন destination MAC প্রতিটি link-এ বদলে যায়',
+    'একটি Router আসলে ঠিক কী কী বদলায় আর কী কী রেখে দেয়',
+    'Layer 2 আর Layer 3-এর "পরিধি" কেন আলাদা'
+  ],
+
+  mistakes: [
+    { m:'Packet-এর সাথে প্রেরকের MAC Address পুরো পথে যায়, তাই Server জানে কার NIC থেকে এসেছে।',
+      r:'Server কখনোই আপনার MAC Address দেখে না। প্রথম Router-েই আপনার MAC মুছে গিয়ে তার নিজের MAC বসে যায়। Server শুধু শেষ Router-এর MAC দেখে — আর IP Header থেকে আপনার IP।' },
+    { m:'MAC Address আর IP Address আসলে একই কাজ করে, শুধু লেখার ধরন আলাদা।',
+      r:'দুটোর পরিধি সম্পূর্ণ আলাদা। MAC-এর পরিধি একটি local link — এক hop। IP-এর পরিধি পুরো যাত্রা — শুরু থেকে শেষ। এজন্যই MAC বারবার বদলায় আর IP বদলায় না।' }
+  ],
+
+  controls: [
+    { key:'show', type:'choice', label:'কী হাইলাইট করব', def:'both',
+      options:[ ['both','দুটোই — MAC ও IP'],
+                ['mac','শুধু MAC — কীভাবে বদলায়'],
+                ['ip','শুধু IP — কীভাবে অপরিবর্তিত থাকে'] ],
+      help:'আলাদা করে দেখলে পার্থক্যটা আরও পরিষ্কার হয়।' }
+  ],
+
+  build: function(){
+    return {
+      devices: [
+        N.pc('client', { name:'Client', x:9, y:50, mac:'AA:AA:AA:AA:AA:AA',
+                         ip:SRC, gw:'192.168.1.1' }),
+        N.router('r1', { name:'Router 1', x:36, y:50,
+          ifaces:[{ name:'eth0', ip:'192.168.1.1', mac:'R1:LA:N0:00:00:01', mask:'255.255.255.0' },
+                  { name:'eth1', ip:'10.0.0.1',    mac:'R1:WA:N0:00:00:02', mask:'255.255.255.0' }] }),
+        N.router('r2', { name:'Router 2', x:64, y:50,
+          ifaces:[{ name:'eth0', ip:'10.0.0.2',    mac:'R2:LA:N0:00:00:01', mask:'255.255.255.0' },
+                  { name:'eth1', ip:'203.0.113.1', mac:'R2:WA:N0:00:00:02', mask:'255.255.255.0' }] }),
+        N.server('srv', { name:'8.8.8.8', x:91, y:50, mac:'SS:SS:SS:SS:SS:SS', ip:DST,
+                          listening:[{ port:53, service:'DNS', open:true }] })
+      ],
+      links: [ N.link('client','r1'), N.link('r1','r2'), N.link('r2','srv') ],
+      hub: null, wire: null, banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+    var show = cfg.show || 'both';
+
+    /* তিনটি link, প্রতিটিতে আলাদা MAC জোড়া — কিন্তু IP এক */
+    var LINKS = [
+      { from:'client', to:'r1',  sm:'AA:AA:AA:AA:AA:AA', dm:'R1:LA:N0:00:00:01',
+        ttl:64, name:'Link 1 · Client → Router 1', net:'192.168.1.0/24' },
+      { from:'r1', to:'r2',  sm:'R1:WA:N0:00:00:02', dm:'R2:LA:N0:00:00:01',
+        ttl:63, name:'Link 2 · Router 1 → Router 2', net:'10.0.0.0/24' },
+      { from:'r2', to:'srv', sm:'R2:WA:N0:00:00:02', dm:'SS:SS:SS:SS:SS:SS',
+        ttl:62, name:'Link 3 · Router 2 → Server', net:'203.0.113.0/24' }
+    ];
+
+    function frame(L){
+      return P.make([
+        P.ethernet(L.sm, L.dm, 'ip'),
+        P.ip(SRC, DST, L.ttl, 'udp', 60)
+      ], { label:'Frame', kind:'data', from:L.from, to:L.to });
+    }
+
+    for(var i = 0; i < LINKS.length; i++){
+      (function(L, n){
+        var isFirst = n === 0;
+        var what, why;
+
+        if(show === 'ip'){
+          what = 'এই link-এ Packet-টির IP Header: `' + SRC + '` → `' + DST + '`।' +
+                 (isFirst ? '' : ' আগের link-এ ঠিক এটাই ছিল।');
+          why  = isFirst
+            ? 'IP Header-এর কাজ পুরো যাত্রার গন্তব্য মনে রাখা। এটি এখন থেকে শেষ পর্যন্ত এক থাকবে — শুধু TTL কমবে।'
+            : 'লক্ষ্য করুন — source আর destination IP এক চুলও বদলায়নি। শুধু TTL ' + (L.ttl + 1) + ' থেকে ' + L.ttl + ' হয়েছে।\n\nএজন্যই গন্তব্যের Server জানতে পারে Packet-টি মূলত কার কাছ থেকে এসেছে।';
+        } else if(show === 'mac'){
+          what = 'এই link-এ Frame-এর MAC জোড়া: `' + L.sm + '` → `' + L.dm + '`।';
+          why  = isFirst
+            ? 'এটি প্রথম link-এর MAC জোড়া। পরের link-এ এই দুটোই সম্পূর্ণ বদলে যাবে।'
+            : 'আগের link-এর MAC দুটো **সম্পূর্ণ মুছে গেছে**। Router পুরোনো Ethernet Header ফেলে দিয়ে একদম নতুন একটি বানিয়েছে।\n\nকারণ MAC Address শুধু একটি local link-এর ভেতরে অর্থবহ। নতুন link মানে নতুন ঠিকানা।';
+        } else {
+          what = '**' + L.name + '** (`' + L.net + '`)\n\n' +
+                 'MAC: `' + L.sm + '` → `' + L.dm + '`\n' +
+                 'IP: `' + SRC + '` → `' + DST + '`  (TTL ' + L.ttl + ')';
+          why  = isFirst
+            ? 'শুরুতে দুটোই "স্বাভাবিক" মনে হচ্ছে। কিন্তু পরের ধাপে খেয়াল করুন কোনটা বদলায় আর কোনটা বদলায় না।'
+            : 'এই link-এ **MAC জোড়া সম্পূর্ণ নতুন**, অথচ **IP জোড়া হুবহু আগের মতোই**।\n\n' +
+              'কারণ দুটোর দায়িত্ব আলাদা:\n\n' +
+              '`MAC` — "এই তারের ওপাশে কে?" — পরিধি এক hop\n' +
+              '`IP` — "শেষ পর্যন্ত কোথায় যাবে?" — পরিধি পুরো যাত্রা';
+        }
+
+        steps.push({
+          t:at(), actor: isFirst ? 'client' : L.from, layer:'L2', kind: isFirst ? 'info' : 'ok',
+          title: L.name, packet: frame(L),
+          what: what, why: why,
+          apply: function(st){
+            st.wire = { pkt: frame(L), from:L.from, to:L.to };
+            st.banner = show === 'ip' ? 'IP অপরিবর্তিত · TTL ' + L.ttl
+                      : show === 'mac' ? 'নতুন MAC জোড়া'
+                      : 'hop ' + (n + 1) + ' · TTL ' + L.ttl;
+          }
+        });
+      })(LINKS[i], i);
+    }
+
+    steps.push({
+      t:at(), actor:'srv', layer:'L3', kind:'ok',
+      title:'গন্তব্যে — সব মিলিয়ে কী বদলাল',
+      what:'Packet পৌঁছে গেল। পুরো যাত্রায়:\n\n' +
+           '`MAC জোড়া` — ৩ বার সম্পূর্ণ বদলেছে\n' +
+           '`Source IP` — একবারও বদলায়নি\n' +
+           '`Destination IP` — একবারও বদলায়নি\n' +
+           '`TTL` — ৬৪ থেকে ৬২ হয়েছে',
+      why :'Server এখন IP Header দেখে জানতে পারছে Packet-টি `' + SRC + '` থেকে এসেছে।\n\nকিন্তু সে Client-এর MAC Address `AA:AA:AA:AA:AA:AA` কখনোই দেখেনি — সেটি প্রথম Router-েই মুছে গিয়েছিল। Server শুধু শেষ Router-এর MAC দেখেছে।\n\n**এটাই মূল কথা:** MAC এক ধাপের ঠিকানা, IP পুরো যাত্রার ঠিকানা। দুটো আলাদা স্তরে কাজ করে বলেই একই IP নিয়ে পৃথিবীর যেকোনো প্রান্তে যাওয়া যায়, অথচ প্রতিটি local network নিজের মতো করে delivery সামলাতে পারে।',
+      apply: function(st){ st.wire = null; st.banner = 'MAC বদলাল ৩ বার · IP বদলাল ০ বার'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
 /* ─── ui/canvas.js ─── */
 /* ═══════════════════════════════════════════════════════════════════
    UI · NETWORK CANVAS
@@ -1776,8 +2829,37 @@ function stackHTML(stack){
   return o.join('');
 }
 
+/* ───────── Calculator panel (Subnet Calculator-এর মতো lab-এর জন্য) ───────── */
+function renderPanel(el, p){
+  if(p.err){
+    el.innerHTML = '<div class="cp-err">' + esc(p.err) + '</div>';
+    return;
+  }
+  var o = ['<div class="cp">'];
+
+  /* bit গুলো — কোনটা network আর কোনটা host, রঙ দিয়ে আলাদা */
+  o.push('<div class="cp-bits"><span class="n">' + esc(p.bits.net) + '</span>' +
+         '<span class="h">' + esc(p.bits.host) + '</span></div>');
+  o.push('<div class="cp-legend">' +
+           '<span><i class="sw-n"></i>' + p.cidr + ' bit network</span>' +
+           '<span><i class="sw-h"></i>' + (32 - p.cidr) + ' bit host</span>' +
+         '</div>');
+
+  o.push('<div class="cp-rows">');
+  for(var i = 0; i < p.rows.length; i++){
+    var r = p.rows[i];
+    o.push('<button class="cp-row" data-why="' + esc(r[2]) + '">' +
+             '<span class="k">' + esc(r[0]) + '</span>' +
+             '<span class="v">' + esc(r[1]) + '</span>' +
+           '</button>' +
+           '<div class="cp-why">' + esc(r[2]) + '</div>');
+  }
+  o.push('</div></div>');
+  el.innerHTML = o.join('');
+}
+
 NS.ui = NS.ui || {};
-NS.ui.canvas = { render: render, esc: esc };
+NS.ui.canvas = { render: render, renderPanel: renderPanel, esc: esc };
 
 })(window.NetLab);
 
@@ -2018,8 +3100,8 @@ function renderLabs(){
   }
   /* এখনো যেসব lab বাকি — roadmap হিসেবে দেখানো হচ্ছে */
   o.push('<div class="lab-group">পরের ধাপে আসছে</div>');
-  var soon = ['IP Addressing','Subnet Calculator','Routing','Longest Prefix Match',
-              'TTL & Traceroute','TCP Handshake','DNS','HTTP','NAT','Full URL Journey'];
+  var soon = ['TCP Handshake','TCP Reliability','UDP','Sockets & Ports',
+              'DNS','HTTP','TLS','NAT','Firewall','Full URL Journey'];
   for(var s = 0; s < soon.length; s++)
     o.push('<div class="lab-soon">' + esc(soon[s]) + '</div>');
 
@@ -2034,6 +3116,15 @@ function renderControls(){
     if(ct.type === 'toggle'){
       o.push('<label class="ctl-row"><input type="checkbox" data-ctl="' + esc(ct.key) + '"' +
              (v ? ' checked' : '') + '><span class="cl">' + esc(ct.label) + '</span></label>');
+    } else if(ct.type === 'text'){
+      o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) + '</span>' +
+             '<input type="text" data-ctl="' + esc(ct.key) + '" value="' + esc(v) +
+             '" spellcheck="false" autocomplete="off"></div>');
+    } else if(ct.type === 'range'){
+      o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) +
+               ' <b class="ctl-v">/' + esc(v) + '</b></span>' +
+             '<input type="range" data-ctl="' + esc(ct.key) + '" value="' + esc(v) +
+             '" min="' + ct.min + '" max="' + ct.max + '" step="1"></div>');
     } else if(ct.type === 'choice'){
       o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) + '</span>' +
              '<select data-ctl="' + esc(ct.key) + '">');
@@ -2108,10 +3199,15 @@ function renderWhat(){
 function paint(){
   var eng = App.eng, st = eng.state, cur = eng.current();
 
-  NS.ui.canvas.render($('canvas'), st, {
-    active: cur ? cur.actor : null,
-    selected: App.selDev
-  });
+  $('canvasWrap').classList.toggle('calc', !!App.lab.panel);
+  if(App.lab.panel){
+    NS.ui.canvas.renderPanel($('canvas'), App.lab.panel(App.cfg));
+  } else {
+    NS.ui.canvas.render($('canvas'), st, {
+      active: cur ? cur.actor : null,
+      selected: App.selDev
+    });
+  }
 
   /* current step-এ packet থাকলে সেটিই inspector-এ দেখাও */
   if(cur && cur.packet) App.selPkt = cur.packet;
@@ -2186,7 +3282,7 @@ function rebuild(){
   stop();
   App.eng = new NS.Engine(App.lab, App.cfg);
   App.selPkt = null;
-  paint();
+  paint();     /* controls নিজে আবার আঁকা হয় না — তাই typing-এর caret ঠিক থাকে */
 }
 
 /* ───────── EVENTS ───────── */
@@ -2196,13 +3292,18 @@ function bind(){
     if(b) loadLab(b.getAttribute('data-lab'));
   });
 
-  $('labControls').addEventListener('change', function(e){
+  function onCtl(e){
     var el = e.target.closest('[data-ctl]');
     if(!el) return;
     App.cfg[el.getAttribute('data-ctl')] =
       el.type === 'checkbox' ? el.checked : el.value;
+    /* range-এর পাশের সংখ্যাটা সাথে সাথে বদলাক */
+    var lbl = el.parentNode.querySelector('.ctl-v');
+    if(lbl && el.type === 'range') lbl.textContent = '/' + el.value;
     rebuild();
-  });
+  }
+  $('labControls').addEventListener('change', onCtl);
+  $('labControls').addEventListener('input', onCtl);
 
   $('btnPlay').addEventListener('click', play);
   $('btnStep').addEventListener('click', function(){ stop(); App.eng.step(); paint(); });
@@ -2249,6 +3350,17 @@ function bind(){
   });
 
   /* field-এ click করলে তার ব্যাখ্যা খোলে/বন্ধ হয় */
+  /* Calculator-এর সারিতে click করলে ব্যাখ্যা খোলে */
+  $('canvas').addEventListener('click', function(e){
+    var r = e.target.closest('.cp-row');
+    if(!r) return;
+    var why = r.nextElementSibling;
+    if(why && why.classList.contains('cp-why')){
+      why.classList.toggle('on');
+      r.classList.toggle('open');
+    }
+  });
+
   $('insBody').addEventListener('click', function(e){
     var f = e.target.closest('.ins-f');
     if(!f) return;

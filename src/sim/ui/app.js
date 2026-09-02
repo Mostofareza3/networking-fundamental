@@ -53,8 +53,8 @@ function renderLabs(){
   }
   /* এখনো যেসব lab বাকি — roadmap হিসেবে দেখানো হচ্ছে */
   o.push('<div class="lab-group">পরের ধাপে আসছে</div>');
-  var soon = ['IP Addressing','Subnet Calculator','Routing','Longest Prefix Match',
-              'TTL & Traceroute','TCP Handshake','DNS','HTTP','NAT','Full URL Journey'];
+  var soon = ['TCP Handshake','TCP Reliability','UDP','Sockets & Ports',
+              'DNS','HTTP','TLS','NAT','Firewall','Full URL Journey'];
   for(var s = 0; s < soon.length; s++)
     o.push('<div class="lab-soon">' + esc(soon[s]) + '</div>');
 
@@ -152,6 +152,7 @@ function renderWhat(){
 function paint(){
   var eng = App.eng, st = eng.state, cur = eng.current();
 
+  $('canvasWrap').classList.toggle('calc', !!App.lab.panel);
   if(App.lab.panel){
     NS.ui.canvas.renderPanel($('canvas'), App.lab.panel(App.cfg));
   } else {

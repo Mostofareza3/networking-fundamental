@@ -55,7 +55,16 @@ const ok = (c, m) => { checks++; if(!c){ fail++; console.log('  ✗ ' + m); } };
 function combos(lab){
   let out = [{ seed:1 }];
   for (const c of (lab.controls || [])){
-    const vals = c.type === 'toggle' ? [true, false] : c.options.map(o => o[0]);
+    let vals;
+    if (c.type === 'toggle')      vals = [true, false];
+    else if (c.type === 'choice') vals = c.options.map(o => o[0]);
+    /* range: প্রান্ত ও মাঝের মান — /0, /31, /32-এর মতো বিশেষ ক্ষেত্র সহ */
+    else if (c.type === 'range')  vals = [c.min, 8, 16, 24, 25, 30, 31, 32, c.max]
+                                    .filter((v,i,a) => v >= c.min && v <= c.max && a.indexOf(v) === i);
+    /* text: বৈধ, সীমান্ত এবং অবৈধ — ভুল input-এ crash হয় কিনা দেখতে */
+    else if (c.type === 'text')   vals = [c.def, '10.0.0.1', '0.0.0.0', '255.255.255.255',
+                                          '999.1.1.1', 'abc', '', '192.168.1'];
+    else continue;
     const next = [];
     for (const base of out) for (const v of vals) next.push(Object.assign({}, base, { [c.key]: v }));
     out = next;
@@ -118,7 +127,9 @@ for (const id of NS.LAB_ORDER){
       catch(e){ ok(false, `${tag}: canvas throw — ${e.message}`); continue; }
       ok(!/undefined/.test(el.innerHTML), `${tag}: canvas-এ "undefined" নেই (step ${n})`);
 
-      if (cur){
+      /* actor একটি বাস্তব device হতে হবে — তবে panel()-ভিত্তিক lab-এর
+         (Subnet Calculator) কোনো topology নেই, তাই সেখানে এই নিয়ম খাটে না। */
+      if (cur && !lab.panel){
         const ids = view.state.devices.map(d => d.id)
           .concat(view.state.hub ? [view.state.hub.id] : []);
         ok(ids.includes(cur.actor), `${tag}: actor "${cur.actor}" canvas-এ আছে`);
@@ -131,6 +142,20 @@ for (const id of NS.LAB_ORDER){
         const others = view.state.devices.filter(d => d.id !== w.from && d.id !== w.origin).length;
         ok(chips === others,
            `${tag}: flood-এ ${others}টি packet দেখানোর কথা, দেখাচ্ছে ${chips}টি`);
+      }
+
+      /* panel()-ভিত্তিক lab (Subnet Calculator) — render + হিসাব যাচাই */
+      if (lab.panel){
+        const pel = mkEl('p');
+        let pv;
+        try { pv = lab.panel(cfg); NS.ui.canvas.renderPanel(pel, pv); }
+        catch(e){ ok(false, `${tag}: panel throw — ${e.message}`); }
+        ok(!/undefined/.test(pel.innerHTML), `${tag}: panel-এ "undefined" নেই`);
+        if (pv && !pv.err){
+          ok(pv.bits.net.length + pv.bits.host.length === 32,
+             `${tag}: bit ভাগ ৩২ হতে হবে`);
+          ok(pv.bits.net.length === pv.cidr, `${tag}: network bit = CIDR`);
+        }
       }
 
       const tl = mkEl('t');
@@ -159,6 +184,47 @@ for (const id of NS.LAB_ORDER){
   }
   console.log(`  ${id.padEnd(10)} ${String(variants).padStart(2)} variants · ${total} steps`);
 }
+
+/* ───────── IP / Subnet / LPM-এর হিসাব ─────────
+   এই সংখ্যাগুলো হাতে বা ipcalc দিয়ে মিলিয়ে দেখা যায়। */
+(function(){
+  const N = NS.net;
+  const cases = [
+    ['192.168.1.10', 24, { network:'192.168.1.0', broadcast:'192.168.1.255',
+      first:'192.168.1.1', last:'192.168.1.254', total:256, usable:254, mask:'255.255.255.0' }],
+    ['10.0.5.20', 8, { network:'10.0.0.0', broadcast:'10.255.255.255',
+      total:16777216, usable:16777214, mask:'255.0.0.0' }],
+    ['192.168.1.130', 26, { network:'192.168.1.128', broadcast:'192.168.1.191',
+      first:'192.168.1.129', last:'192.168.1.190', total:64, usable:62 }],
+    ['192.168.1.10', 30, { network:'192.168.1.8', broadcast:'192.168.1.11', usable:2 }],
+    ['0.0.0.0', 0, { network:'0.0.0.0', broadcast:'255.255.255.255', total:4294967296 }]
+  ];
+  for (const [ip, cidr, want] of cases){
+    const r = N.subnet(ip, cidr);
+    for (const k in want)
+      ok(r[k] === want[k], `subnet(${ip}/${cidr}).${k} = ${r[k]}, চাই ${want[k]}`);
+  }
+  ok(N.subnet('10.0.0.1', 31).usable === 2, '/31 point-to-point (RFC 3021)');
+  ok(N.subnet('10.0.0.1', 32).usable === 1, '/32 একটিমাত্র address');
+
+  for (const [ip, c] of [['999.1.1.1',24], ['abc',24], ['',24], ['1.2.3.4',33], ['1.2.3.4',-1]])
+    ok(!!N.subnet(ip, c).err, `subnet(${ip}/${c}) ভুল input ধরতে হবে`);
+
+  ok(N.sameSubnet('192.168.1.10','192.168.1.20','255.255.255.0') === true,  'একই /24');
+  ok(N.sameSubnet('192.168.1.10','192.168.2.20','255.255.255.0') === false, 'ভিন্ন /24');
+  ok(N.sameSubnet('192.168.1.10','192.168.1.130','255.255.255.128') === false,
+     '/25 সীমানা আলাদা করে');
+  ok(N.bits('192.168.1.5') === '11000000.10101000.00000001.00000101', 'bits() (বই ch9)');
+
+  /* বই-এর ch12-এর টেবিল */
+  const rts = [{dst:'10.0.5.0',prefix:24,via:'A'},{dst:'10.0.0.0',prefix:16,via:'B'},
+               {dst:'10.0.0.0',prefix:8,via:'C'},{dst:'0.0.0.0',prefix:0,via:'D'}];
+  const m = N.lpm('10.0.5.20', rts);
+  ok(m.matches.length === 4, 'LPM: চারটিই মেলে');
+  ok(m.best.via === 'A',     'LPM: /24 জেতে (বই ch12)');
+  ok(N.lpm('203.0.113.5', rts).best.via === 'D', 'LPM: default route শেষ ভরসা');
+  ok(N.lpm('8.8.8.8', [{dst:'10.0.0.0',prefix:8}]).best === null, 'LPM: না মিললে null');
+})();
 
 ok(NS.ui.inspector.packetHTML(null).length > 0, 'packet select না থাকলেও চলে');
 ok(NS.ui.inspector.deviceHTML(null).length > 0, 'device select না থাকলেও চলে');

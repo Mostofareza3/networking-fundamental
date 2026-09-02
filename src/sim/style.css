@@ -132,7 +132,10 @@ strong{font-weight:680;color:var(--text)}
   position:relative;border:1px solid var(--border);border-radius:14px;
   background:var(--bg-alt);height:270px;overflow:hidden;
 }
+/* Calculator-এ topology নেই, তাই উচ্চতা content অনুযায়ী — কাটা পড়বে না */
+#canvasWrap.calc{height:auto;min-height:270px}
 #canvas{position:absolute;inset:0}
+#canvasWrap.calc #canvas{position:static}
 .nc-wires{position:absolute;inset:0;width:100%;height:100%}
 .nc-wire{stroke:var(--border-strong);stroke-width:.35;vector-effect:non-scaling-stroke}
 .nc-node{
@@ -167,7 +170,7 @@ strong{font-weight:680;color:var(--text)}
 .nc-pkt.k-arp {background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
 .nc-pkt.k-ack {background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
 /* Subnet Calculator-এর ফলাফল */
-.cp{position:absolute;inset:0;overflow-y:auto;padding:14px 16px}
+.cp{padding:14px 16px}
 .cp-err{padding:26px 18px;color:var(--danger);font-size:13.6px;text-align:center}
 .cp-bits{
   font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;word-break:break-all;
@@ -186,8 +189,8 @@ strong{font-weight:680;color:var(--text)}
   font-family:inherit;transition:.12s;
 }
 .cp-row:hover{background:var(--panel-2)}
-.cp-row .k{flex:0 0 148px;font-size:12.4px;color:var(--text-dim)}
-.cp-row .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent-text);word-break:break-all}
+.cp-row .k{flex:0 0 140px;min-width:0;font-size:12.4px;color:var(--text-dim)}
+.cp-row .v{flex:1;min-width:0;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent-text);word-break:break-all;text-align:right}
 .cp-row.open{background:var(--accent-soft)}
 .cp-why{
   display:none;padding:8px 13px 11px;font-size:12.2px;line-height:1.6;
@@ -229,6 +232,8 @@ strong{font-weight:680;color:var(--text)}
 }
 @keyframes nsIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
+/* Banner topology-র উপরে ভাসে; calculator-এ সেটি শেষ সারিটি ঢেকে দেয় */
+#canvasWrap.calc #banner{display:none}
 #banner{
   position:absolute;left:12px;bottom:11px;font-family:var(--mono);font-size:11.5px;
   color:var(--text-faint);background:color-mix(in srgb,var(--bg) 80%,transparent);

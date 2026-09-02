@@ -9,7 +9,8 @@
 NS.labs = NS.labs || {};
 
 /* Sidebar-এ lab গুলো এই ক্রমে দেখাবে */
-NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp'];
+NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp',
+                'ip','subnet','routing','lpm','ttl','hop'];
 
 NS.labList = function(){
   var out = [];
