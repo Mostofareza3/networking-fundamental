@@ -198,9 +198,13 @@ function stop(){
 }
 function play(){
   if(App.timer) { stop(); paint(); return; }
+  /* শেষ পর্যন্ত চলে গেলে ▶ চাপলে আবার শুরু থেকে */
   if(App.eng.done()) App.eng.seek(-1);
   App.timer = setInterval(function(){
-    if(!App.eng.step()){ stop(); paint(); }
+    var moved = App.eng.step();
+    if(!moved) stop();
+    /* প্রতিটি ধাপেই আঁকতে হবে — নইলে state এগোয় কিন্তু পর্দায় কিছু বদলায় না */
+    paint();
   }, App.speed);
   paint();
 }
