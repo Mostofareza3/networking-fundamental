@@ -107,10 +107,78 @@ function netAddr(ipn, maskn){
   return out;
 }
 
+/* ───────── Subnet হিসাব — Subnet Calculator ও IP lab দুটোই ব্যবহার করে ─────────
+   JS-এর bitwise operator 32-bit signed, তাই 255.255.255.255-এর মতো মান
+   ঋণাত্মক হয়ে যায়। সেজন্য সব হিসাব ভাগ-গুণ দিয়ে করা হচ্ছে। */
+function subnet(ipStr, cidr){
+  var n = ip2int(ipStr);
+  if(n === null) return { err:'IP Address টি সঠিক নয়। উদাহরণ: 192.168.1.10' };
+  if(cidr === null || isNaN(cidr) || cidr < 0 || cidr > 32)
+    return { err:'CIDR ০ থেকে ৩২-এর মধ্যে হতে হবে।' };
+
+  var m     = maskInt(cidr);
+  var net   = netAddr(n, m);
+  var size  = Math.pow(2, 32 - cidr);
+  var bcast = net + size - 1;
+
+  /* /31 আর /32 বিশেষ — এদের স্বাভাবিক host range নেই */
+  var usable, first, last;
+  if(cidr >= 31){
+    usable = cidr === 32 ? 1 : 2;   /* /31 point-to-point link (RFC 3021) */
+    first  = net;
+    last   = bcast;
+  } else {
+    usable = size - 2;              /* network ও broadcast বাদ */
+    first  = net + 1;
+    last   = bcast - 1;
+  }
+
+  return {
+    ip:        ipStr,
+    cidr:      cidr,
+    mask:      int2ip(m),
+    network:   int2ip(net),
+    broadcast: int2ip(bcast),
+    first:     int2ip(first),
+    last:      int2ip(last),
+    total:     size,
+    usable:    usable,
+    special:   cidr >= 31
+  };
+}
+
+/* একটি IP-কে 8-bit করে binary-তে দেখানো — কোন bit network, কোনটি host */
+function bits(ipStr){
+  var n = ip2int(ipStr);
+  if(n === null) return '';
+  var out = [];
+  for(var o = 3; o >= 0; o--){
+    var byte = Math.floor(n / Math.pow(256, o)) % 256, s = '';
+    for(var b = 7; b >= 0; b--) s += (Math.floor(byte / Math.pow(2, b)) % 2);
+    out.push(s);
+  }
+  return out.join('.');
+}
+
+/* Longest Prefix Match — সব মিল বের করে, সবচেয়ে দীর্ঘ prefix জেতে */
+function lpm(dstStr, routes){
+  var d = ip2int(dstStr), matches = [];
+  for(var i = 0; i < routes.length; i++){
+    var r = routes[i];
+    var rn = ip2int(r.dst);
+    if(rn === null) continue;
+    var m = maskInt(r.prefix);
+    if(netAddr(d, m) === netAddr(rn, m)) matches.push(r);
+  }
+  matches.sort(function(a, b){ return b.prefix - a.prefix; });
+  return { matches: matches, best: matches.length ? matches[0] : null };
+}
+
 NS.net = {
   pc:pc, sw:sw, router:router, server:server, link:link,
   ip2int:ip2int, int2ip:int2ip, maskInt:maskInt,
-  maskToCidr:maskToCidr, sameSubnet:sameSubnet, netAddr:netAddr
+  maskToCidr:maskToCidr, sameSubnet:sameSubnet, netAddr:netAddr,
+  subnet:subnet, bits:bits, lpm:lpm
 };
 
 })(window.NetLab = window.NetLab || {});
