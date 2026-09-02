@@ -1174,7 +1174,7 @@ NS.labs.ethernet = {
         title:'Broadcast — Switch সবাইকে পাঠাল', packet:f,
         what:'Destination MAC `FF:FF:FF:FF:FF:FF` দেখে Switch কোনো lookup-ই করল না, সোজা সব port-এ পাঠিয়ে দিল।',
         why :'`FF:FF:FF:FF:FF:FF` একটি বিশেষ সংরক্ষিত address — এর মানেই "এই network-এর সবাই"। ARP ঠিক এভাবেই কাজ করে।',
-        apply: function(st){ st.wire = { pkt:f, from:'sw1', to:'flood' }; st.banner = 'সবাইকে পাঠানো হলো'; }
+        apply: function(st){ st.wire = { pkt:f, from:'sw1', to:'flood', origin:'pcA' }; st.banner = 'সবাইকে পাঠানো হলো'; }
       });
       steps.push({
         t:at(), actor:'pcB', layer:'L3', kind:'ok',
@@ -1196,7 +1196,7 @@ NS.labs.ethernet = {
         ? 'Switch শুধু MAC দেখে সিদ্ধান্ত নেয় — ভেতরের IP Address সে খুলেও দেখে না। এটি বিশুদ্ধ Layer 2 device।'
         : 'অজানা destination হলে Switch flood করে, এই আশায় যে কেউ না কেউ Frame-টি নেবে। কিন্তু এই MAC-টি কারোরই নয়…',
       apply: function(st){
-        st.wire = { pkt:f, from:'sw1', to: mode === 'ok' ? 'pcB' : 'flood' };
+        st.wire = { pkt:f, from:'sw1', to: mode === 'ok' ? 'pcB' : 'flood', origin:'pcA' };
         st.banner = mode === 'ok' ? 'PC-B এর দিকে' : 'অজানা MAC — flood';
       }
     });
@@ -1338,7 +1338,7 @@ NS.labs.switching = {
         title:'Destination অজানা — flood করল', packet:f1,
         what:'Switch Destination MAC `' + B + '` তার Table-এ খুঁজল, কিন্তু পেল না। তাই সে Frame-টি **Port 1 বাদে সব port-এ** পাঠিয়ে দিল।',
         why :'PC-B এখনো একটিও Frame পাঠায়নি, তাই Switch তার অস্তিত্বই জানে না। এই অবস্থায় Frame ফেলে দিলে যোগাযোগ কখনোই শুরু হতো না।\n\nতাই Switch নিরাপদ পথ নেয় — সবাইকে পাঠাও, ঠিক device-টি নিজেই নিয়ে নেবে। একে বলে **Unknown Unicast Flooding**।',
-        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'flood' }; st.banner = 'অজানা destination — flood'; }
+        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'flood', origin:'pcA' }; st.banner = 'অজানা destination — flood'; }
       });
 
       steps.push({
@@ -1529,7 +1529,7 @@ NS.labs.arp = {
       what:'Switch broadcast Frame-টি পেয়ে সেটি সব port-এ পাঠিয়ে দিল (যে port দিয়ে এসেছে সেটি বাদে)।',
       why :'Destination MAC broadcast হলে Switch কোনো lookup করে না — broadcast-এর সংজ্ঞাই হলো সবার কাছে পৌঁছানো।',
       apply: function(st){
-        st.wire = { pkt:req, from:'sw1', to:'both' };
+        st.wire = { pkt:req, from:'sw1', to:'both', origin:'client' };
         st.hub.macTable[CLIENT_MAC] = { port:1, age:0 };
         st.banner = 'সব port-এ flood';
       }
@@ -1682,10 +1682,13 @@ function render(el, st, opts){
     var from = findNode(st, w.from);
     var targets = [];
     if(w.to === 'flood' || w.to === 'both'){
-      /* broadcast — from ছাড়া বাকি সবার দিকে */
+      /* Broadcast/flood: Switch থেকে সবার দিকে — কিন্তু যে port দিয়ে Frame টি
+         ঢুকেছে সেদিকে ফেরত যায় না। তাই মূল প্রেরককেও (w.origin) বাদ দিতে হয়। */
       for(var k = 0; k < nodes.length; k++){
         var n = nodes[k];
-        if(n.id !== w.from && n.type !== 'switch') targets.push(n);
+        if(n.id === w.from || n.id === w.origin) continue;
+        if(n.type === 'switch') continue;
+        targets.push(n);
       }
     } else {
       var tnode = findNode(st, w.to);

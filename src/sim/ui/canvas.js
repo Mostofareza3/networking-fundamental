@@ -68,10 +68,13 @@ function render(el, st, opts){
     var from = findNode(st, w.from);
     var targets = [];
     if(w.to === 'flood' || w.to === 'both'){
-      /* broadcast — from ছাড়া বাকি সবার দিকে */
+      /* Broadcast/flood: Switch থেকে সবার দিকে — কিন্তু যে port দিয়ে Frame টি
+         ঢুকেছে সেদিকে ফেরত যায় না। তাই মূল প্রেরককেও (w.origin) বাদ দিতে হয়। */
       for(var k = 0; k < nodes.length; k++){
         var n = nodes[k];
-        if(n.id !== w.from && n.type !== 'switch') targets.push(n);
+        if(n.id === w.from || n.id === w.origin) continue;
+        if(n.type === 'switch') continue;
+        targets.push(n);
       }
     } else {
       var tnode = findNode(st, w.to);

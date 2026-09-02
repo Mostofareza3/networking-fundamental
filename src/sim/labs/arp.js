@@ -129,7 +129,7 @@ NS.labs.arp = {
       what:'Switch broadcast Frame-টি পেয়ে সেটি সব port-এ পাঠিয়ে দিল (যে port দিয়ে এসেছে সেটি বাদে)।',
       why :'Destination MAC broadcast হলে Switch কোনো lookup করে না — broadcast-এর সংজ্ঞাই হলো সবার কাছে পৌঁছানো।',
       apply: function(st){
-        st.wire = { pkt:req, from:'sw1', to:'both' };
+        st.wire = { pkt:req, from:'sw1', to:'both', origin:'client' };
         st.hub.macTable[CLIENT_MAC] = { port:1, age:0 };
         st.banner = 'সব port-এ flood';
       }

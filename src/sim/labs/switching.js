@@ -103,7 +103,7 @@ NS.labs.switching = {
         title:'Destination অজানা — flood করল', packet:f1,
         what:'Switch Destination MAC `' + B + '` তার Table-এ খুঁজল, কিন্তু পেল না। তাই সে Frame-টি **Port 1 বাদে সব port-এ** পাঠিয়ে দিল।',
         why :'PC-B এখনো একটিও Frame পাঠায়নি, তাই Switch তার অস্তিত্বই জানে না। এই অবস্থায় Frame ফেলে দিলে যোগাযোগ কখনোই শুরু হতো না।\n\nতাই Switch নিরাপদ পথ নেয় — সবাইকে পাঠাও, ঠিক device-টি নিজেই নিয়ে নেবে। একে বলে **Unknown Unicast Flooding**।',
-        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'flood' }; st.banner = 'অজানা destination — flood'; }
+        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'flood', origin:'pcA' }; st.banner = 'অজানা destination — flood'; }
       });
 
       steps.push({

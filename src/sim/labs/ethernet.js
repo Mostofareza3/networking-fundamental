@@ -78,7 +78,7 @@ NS.labs.ethernet = {
         title:'Broadcast — Switch সবাইকে পাঠাল', packet:f,
         what:'Destination MAC `FF:FF:FF:FF:FF:FF` দেখে Switch কোনো lookup-ই করল না, সোজা সব port-এ পাঠিয়ে দিল।',
         why :'`FF:FF:FF:FF:FF:FF` একটি বিশেষ সংরক্ষিত address — এর মানেই "এই network-এর সবাই"। ARP ঠিক এভাবেই কাজ করে।',
-        apply: function(st){ st.wire = { pkt:f, from:'sw1', to:'flood' }; st.banner = 'সবাইকে পাঠানো হলো'; }
+        apply: function(st){ st.wire = { pkt:f, from:'sw1', to:'flood', origin:'pcA' }; st.banner = 'সবাইকে পাঠানো হলো'; }
       });
       steps.push({
         t:at(), actor:'pcB', layer:'L3', kind:'ok',
@@ -100,7 +100,7 @@ NS.labs.ethernet = {
         ? 'Switch শুধু MAC দেখে সিদ্ধান্ত নেয় — ভেতরের IP Address সে খুলেও দেখে না। এটি বিশুদ্ধ Layer 2 device।'
         : 'অজানা destination হলে Switch flood করে, এই আশায় যে কেউ না কেউ Frame-টি নেবে। কিন্তু এই MAC-টি কারোরই নয়…',
       apply: function(st){
-        st.wire = { pkt:f, from:'sw1', to: mode === 'ok' ? 'pcB' : 'flood' };
+        st.wire = { pkt:f, from:'sw1', to: mode === 'ok' ? 'pcB' : 'flood', origin:'pcA' };
         st.banner = mode === 'ok' ? 'PC-B এর দিকে' : 'অজানা MAC — flood';
       }
     });
