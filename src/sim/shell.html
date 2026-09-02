@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="bn" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Core Lab — Interactive Networking Simulator</title>
+<style>
+<!--INJECT:CSS-->
+</style>
+</head>
+<body>
+<header id="topbar">
+  <button class="iconbtn" id="menuBtn" aria-label="Menu">☰</button>
+  <div class="brand">Network Core Lab <span>— দেখে বোঝার simulator</span></div>
+  <div class="tb-spacer"></div>
+  <a class="iconbtn" href="index.html">📖 বই</a>
+  <button class="iconbtn" id="themeBtn" aria-label="Theme">🌙</button>
+</header>
+<div id="backdrop"></div>
+
+<div id="shell">
+  <!-- ══ বামপাশ: Lab তালিকা + Control ══ -->
+  <nav id="sidebar">
+    <div id="labList"></div>
+    <div class="side-sec">
+      <div class="side-h">এই Lab-এর Setting</div>
+      <div id="labControls"></div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- ══ মাঝখান: Canvas ══ -->
+    <section id="stage">
+      <div id="stageHead">
+        <div>
+          <h1 id="labTitle">—</h1>
+          <p id="labBlurb"></p>
+        </div>
+        <div id="controls">
+          <button class="pbtn primary" id="btnPlay">▶ চালু</button>
+          <button class="pbtn" id="btnBack" title="আগের ধাপ (←)">◀</button>
+          <button class="pbtn" id="btnStep" title="এক ধাপ এগিয়ে যান (→)">এক ধাপ ▶</button>
+          <button class="pbtn" id="btnReset" title="আবার শুরু করুন (r)">⟳ Reset</button>
+          <span class="sp-wrap">
+            <input type="range" id="speed" min="200" max="2200" step="200" value="1200">
+            <span id="speedLbl">1.2s</span>
+          </span>
+          <span class="step-n" id="stepNow">0 / 0</span>
+        </div>
+      </div>
+
+      <div id="canvasWrap">
+        <div id="canvas"></div>
+        <div id="banner"></div>
+      </div>
+
+      <div id="whatPanel"></div>
+      <div id="learnPanel"></div>
+    </section>
+
+    <!-- ══ ডানপাশ: Inspector ══ -->
+    <aside id="inspector">
+      <div id="insTabs">
+        <button data-ins="packet" class="on">Packet</button>
+        <button data-ins="device">Device</button>
+      </div>
+      <div id="insBody"></div>
+    </aside>
+  </main>
+</div>
+
+<!-- ══ নিচে: Event Timeline ══ -->
+<footer id="tlWrap">
+  <div class="tl-h">Event Timeline <span>— যেকোনো ধাপে click করে সেখানে ফিরে যান</span></div>
+  <div id="timeline"></div>
+</footer>
+
+<script>
+<!--INJECT:JS-->
+</script>
+</body>
+</html>

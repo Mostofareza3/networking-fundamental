@@ -11,7 +11,18 @@ import json, os, re, sys, time, hashlib
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(ROOT, 'src')
 CH   = os.path.join(SRC, 'chapters')
+SIM  = os.path.join(SRC, 'sim')
 OUT  = os.path.join(ROOT, 'index.html')
+SIMOUT = os.path.join(ROOT, 'simulator.html')
+
+# Simulator JS load order matters: core defines the namespace the labs and UI
+# attach themselves to, and registry must exist before any lab registers.
+SIM_JS = [
+    'core/engine.js', 'core/packet.js', 'core/net.js', 'core/registry.js',
+    'labs/packet.js', 'labs/encap.js', 'labs/ethernet.js',
+    'labs/switching.js', 'labs/arp.js',
+    'ui/canvas.js', 'ui/inspector.js', 'ui/timeline.js', 'ui/app.js',
+]
 
 GREEN, RED, YEL, DIM, OFF = '\033[32m', '\033[31m', '\033[33m', '\033[2m', '\033[0m'
 
@@ -59,6 +70,74 @@ def build():
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write(html)
     return html, files
+
+
+def build_sim():
+    """Bundle src/sim/ into a single self-contained simulator.html."""
+    shell = read(os.path.join(SIM, 'shell.html'))
+    css   = read(os.path.join(SIM, 'style.css')).rstrip('\n')
+
+    parts = []
+    for rel in SIM_JS:
+        path = os.path.join(SIM, rel)
+        if not os.path.exists(path):
+            raise SystemExit(f'src/sim/{rel} is missing (listed in SIM_JS)')
+        parts.append(f'/* ─── {rel} ─── */\n' + read(path).rstrip('\n'))
+    js = '\n\n'.join(parts)
+
+    if '<!--INJECT:CSS-->' not in shell:
+        raise SystemExit('src/sim/shell.html is missing the <!--INJECT:CSS--> marker')
+    if '<!--INJECT:JS-->' not in shell:
+        raise SystemExit('src/sim/shell.html is missing the <!--INJECT:JS--> marker')
+
+    html = shell.replace('<!--INJECT:CSS-->', css).replace('<!--INJECT:JS-->', js)
+    with open(SIMOUT, 'w', encoding='utf-8') as f:
+        f.write(html)
+    return html, len(SIM_JS)
+
+
+def verify_sim(html):
+    """Simulator-specific checks. The book's rules do not all apply here."""
+    errs = []
+
+    for tag in ('script', 'style'):
+        o = len(re.findall(r'<%s[\s>]' % tag, html))
+        c = len(re.findall(r'</%s>' % tag, html))
+        if o != c:
+            errs.append(f'sim: <{tag}> unbalanced: {o} open, {c} close')
+
+    css = re.search(r'<style>(.*?)</style>', html, re.S)
+    if css and css.group(1).count('{') != css.group(1).count('}'):
+        errs.append('sim: CSS braces unbalanced')
+
+    # Self-contained, exactly like the book.
+    for e in sorted(set(re.findall(r'(?:src|href)="(https?://[^"]+)"', html))):
+        errs.append(f'sim: external resource breaks self-containment: {e}')
+
+    # Every element the UI reaches for by id must exist in the shell.
+    ids = set(re.findall(r'\sid="([^"]+)"', html))
+    for need in re.findall(r"\$\('([A-Za-z0-9_]+)'\)", html):
+        if need not in ids:
+            errs.append(f'sim: app.js uses #{need} but the shell has no such element')
+
+    # Every registered lab must point at a chapter that exists in the book.
+    if os.path.exists(OUT):
+        book = read(OUT)
+        book_ids = set(re.findall(r'\sid="([^"]+)"', book))
+        for ch in re.findall(r"chapter:\s*'([^']+)'", html):
+            if ch not in book_ids:
+                errs.append(f'sim: lab links to missing book section #{ch}')
+
+    # Every lab named in LAB_ORDER must actually register itself.
+    order = re.search(r'LAB_ORDER\s*=\s*\[([^\]]*)\]', html)
+    if order:
+        declared = re.findall(r"'([^']+)'", order.group(1))
+        defined  = set(re.findall(r"NS\.labs\.([A-Za-z0-9_]+)\s*=", html))
+        for d in declared:
+            if d not in defined:
+                errs.append(f'sim: LAB_ORDER lists "{d}" but no lab registers it')
+
+    return errs
 
 
 def verify(html):
@@ -142,6 +221,9 @@ def once():
     errs, warns = verify(html)
     st = stats(html, files)
 
+    sim_html, sim_n = build_sim()
+    errs += verify_sim(sim_html)
+
     for w in warns:
         print(f'{YEL}  warn  {w}{OFF}')
     if errs:
@@ -158,6 +240,11 @@ def once():
     print(f'{DIM}  {st["chapters"]} chapters · {st["parts"]} parts · '
           f'{st["diagrams"]} diagrams · {st["code"]} code blocks · '
           f'{st["tables"]} tables · {st["qa"]} Q&A · {st["labs"]} labs{OFF}')
+
+    n_labs = len(re.findall(r'NS\.labs\.[A-Za-z0-9_]+\s*=', sim_html))
+    print(f'{GREEN}✓ simulator.html{OFF}  '
+          f'{len(sim_html.encode("utf-8")):,} bytes  from {sim_n} modules')
+    print(f'{DIM}  {n_labs} labs · engine + UI আলাদা · deterministic{OFF}')
     return True
 
 

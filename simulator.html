@@ -1,0 +1,2220 @@
+<!DOCTYPE html>
+<html lang="bn" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Core Lab — Interactive Networking Simulator</title>
+<style>
+/* ═══════════ TOKENS — বই-এর সাথে হুবহু একই, তাই দুটো একই product মনে হয় ═══════════ */
+:root{
+  --bg:#ffffff; --bg-alt:#f7f8fa; --bg-sunken:#eef0f4;
+  --panel:#ffffff; --panel-2:#f4f6f9;
+  --text:#1a1d23; --text-dim:#5b6472; --text-faint:#8a93a3;
+  --border:#e0e4ea; --border-strong:#c8cfd9;
+  --accent:#1f6feb; --accent-soft:#e7f0fe; --accent-text:#0b4fc4;
+  --ok:#127a3d; --ok-soft:#e4f6ea;
+  --warn:#9a5b00; --warn-soft:#fdf1dd;
+  --danger:#b3261e; --danger-soft:#fdeceb;
+  --purple:#6c3fc5; --purple-soft:#f0eafd;
+  --teal:#0d6b70; --teal-soft:#e2f4f4;
+  --code-bg:#f5f7fa; --code-border:#e2e6ec; --code-text:#1f2933;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 4px 14px rgba(16,24,40,.06);
+  --shadow-lg:0 10px 40px rgba(16,24,40,.12);
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans Bengali","Hind Siliguri",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --sbw:300px; --insw:330px; --tlh:132px;
+}
+[data-theme="dark"]{
+  --bg:#0d1117; --bg-alt:#131922; --bg-sunken:#0a0e14;
+  --panel:#151b24; --panel-2:#1b222d;
+  --text:#e6edf3; --text-dim:#9fb0c3; --text-faint:#6b7d92;
+  --border:#232c39; --border-strong:#334052;
+  --accent:#58a6ff; --accent-soft:#12233d; --accent-text:#79b8ff;
+  --ok:#4ec97e; --ok-soft:#0f2a1c;
+  --warn:#e3b341; --warn-soft:#2b2110;
+  --danger:#ff7b72; --danger-soft:#2d1416;
+  --purple:#b992ff; --purple-soft:#221a35;
+  --teal:#4fd1c5; --teal-soft:#0c2a29;
+  --code-bg:#0f151d; --code-border:#222c39; --code-text:#d7e2ee;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25);
+  --shadow-lg:0 14px 50px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+  font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased;overflow:hidden;
+}
+code{font-family:var(--mono);font-size:.86em;background:var(--code-bg);border:1px solid var(--code-border);padding:1px 5px;border-radius:5px;color:var(--code-text)}
+strong{font-weight:680;color:var(--text)}
+
+/* ═══════════ TOPBAR ═══════════ */
+#topbar{
+  position:fixed;top:0;left:0;right:0;height:52px;z-index:150;
+  background:var(--bg);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;padding:0 14px;
+}
+#topbar .brand{font-weight:700;font-size:14.5px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#topbar .brand span{color:var(--text-faint);font-weight:500}
+.tb-spacer{flex:1}
+.iconbtn{
+  background:var(--panel);border:1px solid var(--border);color:var(--text-dim);
+  height:32px;padding:0 11px;border-radius:8px;cursor:pointer;text-decoration:none;
+  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-family:inherit;transition:.15s;
+}
+.iconbtn:hover{color:var(--text);border-color:var(--border-strong);background:var(--panel-2)}
+#menuBtn{display:none}
+
+/* ═══════════ LAYOUT ═══════════ */
+#shell{position:fixed;top:52px;left:0;right:0;bottom:var(--tlh);display:flex}
+#sidebar{
+  width:var(--sbw);flex:0 0 var(--sbw);border-right:1px solid var(--border);
+  background:var(--bg-alt);overflow-y:auto;padding:12px 10px 40px;
+}
+#main{flex:1;min-width:0;display:flex}
+#stage{flex:1;min-width:0;overflow-y:auto;padding:18px 22px 40px}
+#inspector{
+  width:var(--insw);flex:0 0 var(--insw);border-left:1px solid var(--border);
+  background:var(--bg-alt);overflow-y:auto;display:flex;flex-direction:column;
+}
+
+/* ═══════════ SIDEBAR — LAB LIST ═══════════ */
+.lab-group{
+  font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--text-faint);margin:16px 0 6px;padding:0 8px;
+}
+.lab-group:first-child{margin-top:2px}
+.lab-item{
+  display:block;width:100%;text-align:left;background:none;border:1px solid transparent;
+  border-radius:9px;padding:8px 10px;cursor:pointer;font-family:inherit;margin-bottom:2px;transition:.13s;
+}
+.lab-item:hover{background:var(--panel-2)}
+.lab-item .t{display:block;font-size:13.8px;font-weight:650;color:var(--text)}
+.lab-item .d{display:block;font-size:11.8px;color:var(--text-faint);line-height:1.5;margin-top:2px}
+.lab-item.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 32%,transparent)}
+.lab-item.on .t{color:var(--accent-text)}
+.lab-soon{
+  padding:5px 10px;font-size:12.4px;color:var(--text-faint);opacity:.55;
+  display:flex;align-items:center;gap:6px;
+}
+.lab-soon::before{content:"○";font-size:9px}
+.side-sec{margin-top:22px;border-top:1px solid var(--border);padding-top:14px}
+.side-h{
+  font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--text-faint);margin:0 0 9px;padding:0 8px;
+}
+/* Control */
+.ctl-row{display:flex;align-items:flex-start;gap:8px;padding:5px 8px;cursor:pointer;font-size:13.2px;color:var(--text-dim)}
+.ctl-row.col{flex-direction:column;gap:5px}
+.ctl-row input[type=checkbox]{margin-top:5px;accent-color:var(--accent);cursor:pointer}
+.ctl-row .cl{flex:1;line-height:1.45}
+.ctl-row select{
+  width:100%;font-family:inherit;font-size:13px;padding:6px 9px;border-radius:7px;
+  border:1px solid var(--border-strong);background:var(--panel);color:var(--text);cursor:pointer;
+}
+.ctl-help{font-size:11.6px;color:var(--text-faint);line-height:1.55;padding:0 8px 9px;margin-top:-2px}
+
+/* ═══════════ STAGE HEAD ═══════════ */
+#stageHead{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}
+#stageHead>div:first-child{flex:1;min-width:220px}
+#labTitle{font-size:1.32rem;margin:0;letter-spacing:-.015em;font-weight:750}
+#labBlurb{margin:3px 0 0;color:var(--text-dim);font-size:13.6px;line-height:1.6}
+#controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pbtn{
+  background:var(--panel);border:1px solid var(--border);color:var(--text-dim);
+  height:32px;padding:0 12px;border-radius:8px;cursor:pointer;font-family:inherit;
+  font-size:12.8px;font-weight:600;transition:.14s;white-space:nowrap;
+}
+.pbtn:hover:not(:disabled){color:var(--text);border-color:var(--border-strong);background:var(--panel-2)}
+.pbtn:disabled{opacity:.38;cursor:default}
+.pbtn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.pbtn.primary:hover{filter:brightness(1.08)}
+.sp-wrap{display:flex;align-items:center;gap:6px;margin-left:2px}
+#speed{width:78px;accent-color:var(--accent);cursor:pointer}
+#speedLbl,.step-n{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);font-variant-numeric:tabular-nums}
+.step-n{padding-left:6px;border-left:1px solid var(--border);margin-left:2px}
+
+/* ═══════════ CANVAS ═══════════ */
+#canvasWrap{
+  position:relative;border:1px solid var(--border);border-radius:14px;
+  background:var(--bg-alt);height:328px;overflow:hidden;
+}
+#canvas{position:absolute;inset:0}
+.nc-wires{position:absolute;inset:0;width:100%;height:100%}
+.nc-wire{stroke:var(--border-strong);stroke-width:.35;vector-effect:non-scaling-stroke}
+.nc-node{
+  position:absolute;transform:translate(-50%,-50%);
+  background:var(--panel);border:1px solid var(--border);border-radius:11px;
+  padding:8px 12px;min-width:96px;cursor:pointer;font-family:inherit;
+  display:flex;flex-direction:column;align-items:center;gap:1px;transition:.16s;box-shadow:var(--shadow);
+}
+.nc-node:hover{border-color:var(--border-strong)}
+.nc-node .ic{font-size:17px;line-height:1.2}
+.nc-node .nm{font-size:12.4px;font-weight:650;color:var(--text)}
+.nc-node .ip{font-family:var(--mono);font-size:10.2px;color:var(--text-faint)}
+.nc-node .badge{
+  position:absolute;top:-7px;right:-7px;background:var(--danger);color:#fff;
+  font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;
+}
+.nc-node.t-router{border-color:color-mix(in srgb,var(--accent) 34%,transparent)}
+.nc-node.t-switch{border-color:color-mix(in srgb,var(--teal) 34%,transparent)}
+.nc-node.active{
+  border-color:var(--accent);background:var(--accent-soft);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.nc-node.sel{border-color:var(--purple);box-shadow:0 0 0 3px color-mix(in srgb,var(--purple) 20%,transparent)}
+.nc-pkt{
+  position:absolute;transform:translate(-50%,-50%);
+  font-family:var(--mono);font-size:10.5px;font-weight:700;
+  padding:4px 9px;border-radius:20px;cursor:pointer;border:1px solid;white-space:nowrap;
+  animation:pktIn .3s ease;
+}
+@keyframes pktIn{from{opacity:0;transform:translate(-50%,-50%) scale(.7)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.nc-pkt.k-data{background:var(--accent);border-color:var(--accent);color:#fff}
+.nc-pkt.k-arp {background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+.nc-pkt.k-ack {background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+#banner{
+  position:absolute;left:12px;bottom:11px;font-family:var(--mono);font-size:11.5px;
+  color:var(--text-faint);background:color-mix(in srgb,var(--bg) 80%,transparent);
+  padding:3px 9px;border-radius:6px;pointer-events:none;
+}
+
+/* ═══════════ "এখন কী হলো?" ═══════════ */
+#whatPanel{
+  margin-top:16px;border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:12px;background:var(--panel);padding:14px 17px;
+}
+.wh-idle{color:var(--text-dim);font-size:13.6px;line-height:1.7}
+.wh-idle span{color:var(--text-faint);font-size:12.6px}
+.wh-top{display:flex;align-items:center;gap:9px;margin-bottom:9px;flex-wrap:wrap}
+.wh-k{
+  font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;
+  background:var(--accent-soft);color:var(--accent-text);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);
+}
+.wh-k.k-ok   {background:var(--ok-soft);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+.wh-k.k-warn {background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 38%,transparent)}
+.wh-k.k-error{background:var(--danger-soft);color:var(--danger);border-color:color-mix(in srgb,var(--danger) 38%,transparent)}
+.wh-layer{font-size:11.5px;color:var(--text-faint);letter-spacing:.03em}
+.wh-q{
+  font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);margin:12px 0 3px;
+}
+.wh-q:first-of-type{margin-top:0}
+#whatPanel p{margin:0 0 .7em;font-size:14.4px;line-height:1.75;color:var(--text-dim)}
+#whatPanel p:last-child{margin-bottom:0}
+#whatPanel strong{color:var(--text)}
+
+/* ═══════════ LEARNING PANEL ═══════════ */
+#learnPanel{margin-top:16px}
+.ln-h{
+  font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);margin:18px 0 7px;
+}
+.ln-h:first-child{margin-top:0}
+.ln-list{margin:0;padding-left:1.25em;color:var(--text-dim);font-size:14px}
+.ln-list li{margin:.3em 0}
+.ln-list li::marker{color:var(--accent)}
+.ln-myth{border:1px solid var(--border);border-radius:11px;overflow:hidden;margin-bottom:9px}
+.ln-myth .mm,.ln-myth .mr{padding:10px 14px;font-size:13.8px;line-height:1.65}
+.ln-myth .mm{background:var(--danger-soft);border-bottom:1px dashed color-mix(in srgb,var(--danger) 40%,transparent);color:var(--text-dim)}
+.ln-myth .mr{background:var(--ok-soft);color:var(--text-dim)}
+.ln-myth .lbl{display:block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.12em;margin-bottom:3px}
+.ln-myth .mm .lbl{color:var(--danger)}
+.ln-myth .mr .lbl{color:var(--ok)}
+.ln-book{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;
+  padding:12px 16px;border:1px solid var(--border);border-radius:11px;background:var(--panel);
+  color:var(--accent);text-decoration:none;font-size:14px;font-weight:650;transition:.15s;
+}
+.ln-book:hover{border-color:var(--accent);background:var(--panel-2)}
+.ln-book span{color:var(--text-faint);font-size:11.5px;font-weight:500;font-family:var(--mono)}
+
+/* ═══════════ INSPECTOR ═══════════ */
+#insTabs{display:flex;border-bottom:1px solid var(--border);background:var(--panel-2);position:sticky;top:0;z-index:2}
+#insTabs button{
+  flex:1;background:none;border:0;border-bottom:2px solid transparent;padding:10px 0;
+  font-family:inherit;font-size:13px;font-weight:650;color:var(--text-faint);cursor:pointer;transition:.13s;
+}
+#insTabs button:hover{color:var(--text)}
+#insTabs button.on{color:var(--accent);border-bottom-color:var(--accent);background:var(--bg-alt)}
+#insBody{padding:12px;flex:1}
+.ins-empty{color:var(--text-faint);font-size:13.2px;text-align:center;padding:34px 16px;line-height:1.7}
+.ins-empty span{font-size:12px;opacity:.8}
+.ins-h{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-weight:700;font-size:13.5px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);
+}
+.ins-h .sz{font-family:var(--mono);font-size:11px;color:var(--text-faint);font-weight:500}
+.ins-layer{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;background:var(--panel)}
+.ins-lh{display:flex;align-items:center;gap:7px;padding:8px 11px;background:var(--panel-2);border-bottom:1px solid var(--border)}
+.ins-lh .tag{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:var(--bg-sunken);color:var(--text-dim);border:1px solid var(--border)}
+.ins-lh .nm{flex:1;font-size:12.6px;font-weight:650}
+.ins-lh .sz{font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
+.ins-ld{padding:6px 11px;font-size:11.6px;color:var(--text-faint);line-height:1.55;border-bottom:1px solid var(--border)}
+.ins-layer.c-teal   .ins-lh{background:var(--teal-soft)}
+.ins-layer.c-accent .ins-lh{background:var(--accent-soft)}
+.ins-layer.c-purple .ins-lh{background:var(--purple-soft)}
+.ins-layer.c-warn   .ins-lh{background:var(--warn-soft)}
+.ins-f{
+  display:flex;width:100%;gap:8px;align-items:baseline;padding:6px 11px;background:none;
+  border:0;border-bottom:1px solid var(--border);cursor:pointer;font-family:var(--mono);
+  font-size:11.8px;text-align:left;transition:.12s;
+}
+.ins-f:hover{background:var(--panel-2)}
+.ins-f .k{color:var(--text-faint);flex:0 0 74px}
+.ins-f .v{color:var(--text);font-weight:600;word-break:break-all;flex:1}
+.ins-f.open{background:var(--accent-soft)}
+.ins-f.open .v{color:var(--accent-text)}
+.ins-fh{display:none;padding:8px 11px 10px;font-size:12.2px;color:var(--text-dim);background:var(--bg-alt);border-bottom:1px solid var(--border);line-height:1.6}
+.ins-fh.on{display:block}
+.ins-layer .ins-f:last-of-type{border-bottom:0}
+/* Device inspector */
+.dv-sec{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:4px 0;margin-bottom:12px}
+.dv-row{display:flex;gap:8px;padding:5px 12px;font-family:var(--mono);font-size:11.8px}
+.dv-row .k{color:var(--text-faint);flex:0 0 108px}
+.dv-row .v{color:var(--text);font-weight:600;word-break:break-all}
+.dv-t-h{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);margin:14px 0 6px}
+.dv-t{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.4px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.dv-t th{background:var(--panel-2);text-align:left;padding:6px 9px;font-size:9.8px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-faint);border-bottom:1px solid var(--border)}
+.dv-t td{padding:6px 9px;border-bottom:1px solid var(--border);color:var(--text-dim);word-break:break-all}
+.dv-t tr:last-child td{border-bottom:0}
+.dv-empty{font-size:12.2px;color:var(--text-faint);padding:11px 13px;border:1px dashed var(--border-strong);border-radius:9px;line-height:1.6}
+.dv-note{margin-top:12px;font-size:12px;color:var(--text-faint);line-height:1.6;padding:10px 12px;background:var(--panel-2);border-radius:9px}
+
+/* ═══════════ TIMELINE ═══════════ */
+#tlWrap{
+  position:fixed;left:0;right:0;bottom:0;height:var(--tlh);z-index:120;
+  background:var(--bg);border-top:1px solid var(--border);display:flex;flex-direction:column;
+}
+.tl-h{
+  font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text-faint);padding:9px 16px 7px;
+}
+.tl-h span{font-weight:500;letter-spacing:0;text-transform:none;font-size:11px;opacity:.8}
+#timeline{flex:1;display:flex;gap:8px;overflow-x:auto;padding:0 16px 12px;align-items:stretch}
+#timeline::-webkit-scrollbar{height:8px}
+#timeline::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
+.tl-empty{color:var(--text-faint);font-size:13px;padding:0 16px}
+.tl-item{
+  flex:0 0 auto;width:184px;text-align:left;background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;padding:8px 11px;cursor:pointer;
+  font-family:inherit;display:flex;flex-direction:column;gap:1px;transition:.13s;position:relative;
+}
+.tl-item:hover{border-color:var(--border-strong)}
+.tl-item .tl-t{font-family:var(--mono);font-size:9.8px;color:var(--text-faint)}
+.tl-item .tl-actor{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent)}
+.tl-item .tl-title{font-size:12.4px;font-weight:600;color:var(--text);line-height:1.4}
+.tl-item .tl-layer{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);margin-top:1px}
+.tl-item.future{opacity:.42}
+.tl-item.past{opacity:.72}
+.tl-item.now{
+  border-color:var(--accent);background:var(--accent-soft);opacity:1;
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent);
+}
+.tl-item.k-warn .tl-actor {color:var(--warn)}
+.tl-item.k-error .tl-actor{color:var(--danger)}
+.tl-item.k-ok .tl-actor   {color:var(--ok)}
+.tl-item.k-error.now{border-color:var(--danger);background:var(--danger-soft);box-shadow:0 0 0 2px color-mix(in srgb,var(--danger) 20%,transparent)}
+
+/* ═══════════ RESPONSIVE ═══════════ */
+#backdrop{display:none;position:fixed;inset:52px 0 0;background:rgba(0,0,0,.45);z-index:99}
+#backdrop.on{display:block}
+@media (max-width:1180px){
+  :root{--insw:290px}
+  #inspector{display:none}
+}
+@media (max-width:1080px){
+  #menuBtn{display:inline-flex}
+  #sidebar{position:fixed;left:0;top:52px;bottom:var(--tlh);z-index:100;transform:translateX(-100%);transition:transform .22s ease;box-shadow:var(--shadow-lg)}
+  #sidebar.open{transform:translateX(0)}
+}
+@media (max-width:640px){
+  :root{--tlh:120px}
+  body{font-size:14.5px}
+  #stage{padding:14px 14px 30px}
+  #canvasWrap{height:262px}
+  .nc-node{min-width:78px;padding:6px 9px}
+  .nc-node .nm{font-size:11.4px}
+  #topbar .brand span{display:none}
+}
+</style>
+</head>
+<body>
+<header id="topbar">
+  <button class="iconbtn" id="menuBtn" aria-label="Menu">☰</button>
+  <div class="brand">Network Core Lab <span>— দেখে বোঝার simulator</span></div>
+  <div class="tb-spacer"></div>
+  <a class="iconbtn" href="index.html">📖 বই</a>
+  <button class="iconbtn" id="themeBtn" aria-label="Theme">🌙</button>
+</header>
+<div id="backdrop"></div>
+
+<div id="shell">
+  <!-- ══ বামপাশ: Lab তালিকা + Control ══ -->
+  <nav id="sidebar">
+    <div id="labList"></div>
+    <div class="side-sec">
+      <div class="side-h">এই Lab-এর Setting</div>
+      <div id="labControls"></div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- ══ মাঝখান: Canvas ══ -->
+    <section id="stage">
+      <div id="stageHead">
+        <div>
+          <h1 id="labTitle">—</h1>
+          <p id="labBlurb"></p>
+        </div>
+        <div id="controls">
+          <button class="pbtn primary" id="btnPlay">▶ চালু</button>
+          <button class="pbtn" id="btnBack" title="আগের ধাপ (←)">◀</button>
+          <button class="pbtn" id="btnStep" title="এক ধাপ এগিয়ে যান (→)">এক ধাপ ▶</button>
+          <button class="pbtn" id="btnReset" title="আবার শুরু করুন (r)">⟳ Reset</button>
+          <span class="sp-wrap">
+            <input type="range" id="speed" min="200" max="2200" step="200" value="1200">
+            <span id="speedLbl">1.2s</span>
+          </span>
+          <span class="step-n" id="stepNow">0 / 0</span>
+        </div>
+      </div>
+
+      <div id="canvasWrap">
+        <div id="canvas"></div>
+        <div id="banner"></div>
+      </div>
+
+      <div id="whatPanel"></div>
+      <div id="learnPanel"></div>
+    </section>
+
+    <!-- ══ ডানপাশ: Inspector ══ -->
+    <aside id="inspector">
+      <div id="insTabs">
+        <button data-ins="packet" class="on">Packet</button>
+        <button data-ins="device">Device</button>
+      </div>
+      <div id="insBody"></div>
+    </aside>
+  </main>
+</div>
+
+<!-- ══ নিচে: Event Timeline ══ -->
+<footer id="tlWrap">
+  <div class="tl-h">Event Timeline <span>— যেকোনো ধাপে click করে সেখানে ফিরে যান</span></div>
+  <div id="timeline"></div>
+</footer>
+
+<script>
+/* ─── core/engine.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   SIMULATION ENGINE
+   ───────────────────────────────────────────────────────────────────
+   এই file-এ কোনো DOM নেই, কোনো UI নেই। শুধু simulation-এর logic।
+
+   একটি Lab একটি script() function দেয় যা step-এর array return করে।
+   Engine সেই step গুলো একটার পর একটা চালায় এবং প্রতিটি step-এ
+   একটি নতুন immutable state তৈরি করে।
+
+   Deterministic: একই lab + একই config = সবসময় একই step sequence.
+   কোনো Math.random() নেই — এলোমেলো লাগলে seeded RNG ব্যবহার হয়।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+
+/* ───────── Seeded RNG — determinism রক্ষার জন্য ───────── */
+/* Math.random() ব্যবহার করলে একই input-এ ভিন্ন result আসত, তাই
+   mulberry32 — ছোট, দ্রুত, এবং seed দিলে সবসময় একই sequence। */
+function rng(seed){
+  var s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    var t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ───────── deep clone — structuredClone সব browser-এ নেই ───────── */
+function clone(v){
+  if(v === null || typeof v !== 'object') return v;
+  if(Array.isArray(v)){
+    var a = new Array(v.length);
+    for(var i = 0; i < v.length; i++) a[i] = clone(v[i]);
+    return a;
+  }
+  var o = {};
+  for(var k in v) if(Object.prototype.hasOwnProperty.call(v, k)) o[k] = clone(v[k]);
+  return o;
+}
+
+/* ═══════════════ Engine ═══════════════ */
+/*  lab = {
+        id, title, blurb,
+        chapter,                  ← book-এর কোন chapter-এ এই concept
+        learn:[…], mistakes:[…],  ← Learning System-এর অংশ
+        controls:[…],             ← user যা যা বদলাতে পারে
+        build(cfg) → state        ← শুরুর state
+        script(state, cfg, rand) → [step…]
+    }
+
+    step = {
+        t,                        ← simulated clock (ms)
+        actor,                    ← কোন device কাজ করছে
+        title,                    ← timeline-এ এক লাইন (Bangla)
+        layer,                    ← 'L1'|'L2'|'L3'|'L4'|'L7'
+        what, why,                ← "এখন কী হলো?" / "কেন?"  (Bangla)
+        kind,                     ← 'ok'|'warn'|'error'|'info'
+        packet,                   ← inspect করার মতো packet (optional)
+        apply(state)              ← state mutate করে (engine clone দেয়)
+    }                                                                  */
+function Engine(lab, cfg){
+  this.lab     = lab;
+  this.cfg     = cfg || {};
+  this.rand    = rng(this.cfg.seed == null ? 1 : this.cfg.seed);
+  this.subs    = [];
+  this.reset();
+}
+
+Engine.prototype.reset = function(){
+  this.rand    = rng(this.cfg.seed == null ? 1 : this.cfg.seed);
+  this.initial = this.lab.build(this.cfg);
+  this.steps   = this.lab.script(clone(this.initial), this.cfg, this.rand) || [];
+  this.i       = -1;                     // -1 = কিছুই চলেনি
+  this.state   = clone(this.initial);
+  this.history = [clone(this.initial)];  // history[n] = n ধাপের পরের state
+  this.playing = false;
+  this.emit();
+};
+
+/* এক ধাপ এগোনো */
+Engine.prototype.step = function(){
+  if(this.i >= this.steps.length - 1) return false;
+  this.i++;
+  var st = clone(this.state);
+  var s  = this.steps[this.i];
+  if(s.apply) s.apply(st);
+  this.state = st;
+  this.history[this.i + 1] = clone(st);
+  this.emit();
+  return true;
+};
+
+/* এক ধাপ পিছনে — history থেকে, তাই কোনো "undo" logic লাগে না */
+Engine.prototype.back = function(){
+  if(this.i < 0) return false;
+  this.i--;
+  this.state = clone(this.history[this.i + 1]);
+  this.emit();
+  return true;
+};
+
+/* নির্দিষ্ট step-এ লাফ */
+Engine.prototype.seek = function(n){
+  n = Math.max(-1, Math.min(n, this.steps.length - 1));
+  if(n === this.i) return;
+  if(n < this.i){
+    this.i = n;
+    this.state = clone(this.history[n + 1]);
+  } else {
+    while(this.i < n) this.step();
+  }
+  this.emit();
+};
+
+Engine.prototype.done    = function(){ return this.i >= this.steps.length - 1; };
+Engine.prototype.current = function(){ return this.i < 0 ? null : this.steps[this.i]; };
+
+/* ───────── subscription — UI এখানে হুক করে ───────── */
+Engine.prototype.on   = function(fn){ this.subs.push(fn); return this; };
+Engine.prototype.emit = function(){
+  for(var i = 0; i < this.subs.length; i++) this.subs[i](this);
+};
+
+NS.Engine = Engine;
+NS.rng    = rng;
+NS.clone  = clone;
+
+})(window.NetLab = window.NetLab || {});
+
+/* ─── core/packet.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   PACKET MODEL
+   ───────────────────────────────────────────────────────────────────
+   Packet/Frame-এর গঠন এবং প্রতিটি field-এর Bangla ব্যাখ্যা এক জায়গায়।
+
+   Inspector এখান থেকেই field-এর explanation নেয়, তাই একই field-এর
+   ব্যাখ্যা প্রতিটি lab-এ হুবহু একই থাকে।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+
+/* প্রতিটি field-এর পাশে যে ছোট Bangla ব্যাখ্যা দেখানো হয় */
+var FIELD_HELP = {
+  /* Layer 2 — Ethernet */
+  'dstMAC'   : 'এই local link-এ Frame-টি কোন NIC গ্রহণ করবে। প্রতিটি hop-এ এটি বদলায়।',
+  'srcMAC'   : 'যে NIC থেকে Frame-টি বের হলো। এটিও প্রতিটি hop-এ বদলায়।',
+  'ethertype': 'Payload-এ কোন protocol আছে তা বলে — 0x0800 মানে IPv4, 0x0806 মানে ARP।',
+  'fcs'      : 'Frame Check Sequence — transmission-এ Frame নষ্ট হয়েছে কিনা receiver এটি দিয়ে যাচাই করে।',
+
+  /* Layer 3 — IP */
+  'srcIP'    : 'Packet-টি মূলত কোন host থেকে এসেছে। সাধারণত পুরো journey-তে একই থাকে।',
+  'dstIP'    : 'Packet-টি শেষ পর্যন্ত কোথায় যাবে। Routing decision এই field দেখেই নেওয়া হয়।',
+  'ttl'      : 'Time To Live — প্রতিটি Router এটি ১ কমায়। 0 হলে Packet drop হয়, যাতে loop-এ অসীমকাল ঘুরতে না পারে।',
+  'proto'    : 'IP-এর উপরে কোন protocol আছে — 6 মানে TCP, 17 মানে UDP, 1 মানে ICMP।',
+  'ipLen'    : 'Header সহ পুরো IP Packet-এর দৈর্ঘ্য (byte)।',
+
+  /* Layer 4 — TCP/UDP */
+  'srcPort'  : 'পাঠানো host-এর কোন application এই data পাঠাচ্ছে। সাধারণত OS একটি ephemeral port দেয়।',
+  'dstPort'  : 'গন্তব্য host-এর কোন service-এর জন্য data — যেমন 80 মানে HTTP, 443 মানে HTTPS।',
+  'seq'      : 'Sequence Number — এই segment-এর প্রথম byte পুরো stream-এর কত নম্বর byte।',
+  'ack'      : 'ACK Number — receiver এর আগ পর্যন্ত সব byte পেয়েছে, এখন এটি আশা করছে।',
+  'flags'    : 'TCP-র control bit — SYN connection শুরু করে, ACK স্বীকৃতি দেয়, FIN শেষ করে।',
+  'window'   : 'Receive Window — receiver আর কত byte নিতে পারবে। Flow control এটি দিয়েই হয়।',
+
+  /* ARP */
+  'op'       : 'ARP operation — 1 মানে Request (কে আছে?), 2 মানে Reply (আমি আছি)।',
+  'spa'      : 'Sender Protocol Address — যে জিজ্ঞেস করছে তার IP Address।',
+  'sha'      : 'Sender Hardware Address — যে জিজ্ঞেস করছে তার MAC Address।',
+  'tpa'      : 'Target Protocol Address — যার MAC Address খোঁজা হচ্ছে সেই IP।',
+  'tha'      : 'Target Hardware Address — উত্তর আসার আগে এটি অজানা (00:00:00:00:00:00)।',
+
+  /* Payload */
+  'payload'  : 'Application-এর আসল data। নিচের প্রতিটি layer এই data-কেই বহন করছে।'
+};
+
+/* Layer-এর নাম ও রঙের mapping — সব UI একই vocabulary ব্যবহার করে */
+var LAYERS = {
+  L1: { n:'Layer 1 · Physical',    c:'faint',  d:'Bit আকারে cable/radio-তে signal।' },
+  L2: { n:'Layer 2 · Data Link',   c:'teal',   d:'একই local network-এ MAC Address দিয়ে Frame delivery।' },
+  L3: { n:'Layer 3 · Network',     c:'accent', d:'ভিন্ন network-এর মধ্যে IP Address দিয়ে routing।' },
+  L4: { n:'Layer 4 · Transport',   c:'purple', d:'Port দিয়ে application চেনা, TCP হলে reliability।' },
+  L7: { n:'Layer 7 · Application', c:'warn',   d:'HTTP, DNS-এর মতো protocol — আসল data।' }
+};
+
+/* ───────── Packet তৈরির helper ─────────
+   প্রতিটি layer একটি {name, layer, fields} object.
+   সবচেয়ে বাইরের layer array-র প্রথমে (Encapsulation-এর ক্রম অনুযায়ী)। */
+function ethernet(src, dst, type){
+  return {
+    name  : 'Ethernet Header',
+    layer : 'L2',
+    size  : 14,
+    fields: [
+      ['dstMAC', dst],
+      ['srcMAC', src],
+      ['ethertype', type === 'arp' ? '0x0806 (ARP)' : '0x0800 (IPv4)']
+    ]
+  };
+}
+
+function arp(op, sha, spa, tha, tpa){
+  return {
+    name  : 'ARP ' + (op === 1 ? 'Request' : 'Reply'),
+    layer : 'L2',
+    size  : 28,
+    fields: [
+      ['op',  op === 1 ? '1 (Request)' : '2 (Reply)'],
+      ['sha', sha],
+      ['spa', spa],
+      ['tha', tha],
+      ['tpa', tpa]
+    ]
+  };
+}
+
+function ip(src, dst, ttl, proto, len){
+  return {
+    name  : 'IP Header',
+    layer : 'L3',
+    size  : 20,
+    fields: [
+      ['srcIP', src],
+      ['dstIP', dst],
+      ['ttl',   String(ttl)],
+      ['proto', proto === 'tcp' ? '6 (TCP)' : proto === 'udp' ? '17 (UDP)' : '1 (ICMP)'],
+      ['ipLen', String(len || 0) + ' bytes']
+    ]
+  };
+}
+
+function tcp(sp, dp, seq, ack, flags, win){
+  return {
+    name  : 'TCP Header',
+    layer : 'L4',
+    size  : 20,
+    fields: [
+      ['srcPort', String(sp)],
+      ['dstPort', String(dp)],
+      ['seq',     String(seq)],
+      ['ack',     String(ack)],
+      ['flags',   flags],
+      ['window',  String(win) + ' bytes']
+    ]
+  };
+}
+
+function data(text){
+  return {
+    name  : 'Application Payload',
+    layer : 'L7',
+    size  : text.length,
+    fields: [ ['payload', text] ]
+  };
+}
+
+/* একটি packet = কয়েকটি layer + কিছু metadata */
+var pktId = 0;
+function make(layers, meta){
+  var m = meta || {};
+  var total = 0;
+  for(var i = 0; i < layers.length; i++) total += layers[i].size || 0;
+  return {
+    id     : ++pktId,
+    layers : layers,
+    size   : total,
+    label  : m.label  || '',      // canvas-এ packet-এর গায়ে যা লেখা থাকবে
+    kind   : m.kind   || 'data',  // 'arp' | 'data' | 'ack' — রঙ ঠিক করে
+    from   : m.from   || '',
+    to     : m.to     || ''
+  };
+}
+function resetIds(){ pktId = 0; }
+
+/* একটি packet-এর ভেতর থেকে নির্দিষ্ট field খোঁজা */
+function field(pkt, key){
+  for(var i = 0; i < pkt.layers.length; i++){
+    var f = pkt.layers[i].fields;
+    for(var j = 0; j < f.length; j++) if(f[j][0] === key) return f[j][1];
+  }
+  return null;
+}
+
+NS.pkt = {
+  FIELD_HELP: FIELD_HELP,
+  LAYERS    : LAYERS,
+  ethernet  : ethernet,
+  arp       : arp,
+  ip        : ip,
+  tcp       : tcp,
+  data      : data,
+  make      : make,
+  field     : field,
+  resetIds  : resetIds
+};
+
+})(window.NetLab = window.NetLab || {});
+
+/* ─── core/net.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   NETWORK MODEL
+   ───────────────────────────────────────────────────────────────────
+   Device, Link এবং topology-র গঠন। Lab গুলো এখান থেকে device বানায়,
+   তাই Device Inspector সব lab-এ একই ভাবে কাজ করে।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+
+/* কোন device-এ কোন কোন তথ্য থাকে তা এখানেই ঠিক হয় */
+function pc(id, o){
+  return {
+    id: id, type:'pc', name: o.name || id,
+    x: o.x, y: o.y,
+    mac: o.mac, ip: o.ip,
+    mask: o.mask || '255.255.255.0',
+    gw: o.gw || '',
+    arp: {},            // ARP Cache: ip → {mac, age}
+    ports: o.ports || [],
+    note: o.note || ''
+  };
+}
+
+function sw(id, o){
+  return {
+    id: id, type:'switch', name: o.name || id,
+    x: o.x, y: o.y,
+    macTable: {},       // mac → {port, age}
+    portsOf: o.portsOf || {},   // deviceId → port নম্বর
+    queue: [],
+    note: o.note || ''
+  };
+}
+
+function router(id, o){
+  return {
+    id: id, type:'router', name: o.name || id,
+    x: o.x, y: o.y,
+    ifaces: o.ifaces || [],     // [{name, ip, mac, mask}]
+    routes: o.routes || [],     // [{dst, prefix, via, iface}]
+    arp: {},
+    queue: [],
+    note: o.note || ''
+  };
+}
+
+function server(id, o){
+  return {
+    id: id, type:'server', name: o.name || id,
+    x: o.x, y: o.y,
+    mac: o.mac, ip: o.ip,
+    mask: o.mask || '255.255.255.0',
+    gw: o.gw || '',
+    arp: {},
+    listening: o.listening || [],  // [{port, service, open}]
+    note: o.note || ''
+  };
+}
+
+function link(a, b, o){
+  o = o || {};
+  return { a:a, b:b, label:o.label || '', kind:o.kind || 'copper' };
+}
+
+/* ───────── IP helpers — Subnet lab এবং IP lab দুটোই ব্যবহার করে ───────── */
+function ip2int(s){
+  var p = String(s).split('.');
+  if(p.length !== 4) return null;
+  var n = 0;
+  for(var i = 0; i < 4; i++){
+    var v = parseInt(p[i], 10);
+    if(isNaN(v) || v < 0 || v > 255 || p[i] === '') return null;
+    n = (n * 256) + v;
+  }
+  return n;
+}
+function int2ip(n){
+  return [ Math.floor(n / 16777216) % 256, Math.floor(n / 65536) % 256,
+           Math.floor(n / 256) % 256, n % 256 ].join('.');
+}
+function maskInt(cidr){
+  return cidr === 0 ? 0 : (Math.pow(2, 32) - Math.pow(2, 32 - cidr));
+}
+function maskToCidr(m){
+  var n = ip2int(m); if(n === null) return null;
+  var c = 0, seen0 = false;
+  for(var b = 31; b >= 0; b--){
+    var bit = Math.floor(n / Math.pow(2, b)) % 2;
+    if(bit === 1){ if(seen0) return null; c++; } else seen0 = true;
+  }
+  return c;
+}
+/* দুটি IP একই subnet-এ আছে কিনা — IP lab-এর মূল প্রশ্ন */
+function sameSubnet(a, b, mask){
+  var m = ip2int(mask), x = ip2int(a), y = ip2int(b);
+  if(m === null || x === null || y === null) return false;
+  return netAddr(x, m) === netAddr(y, m);
+}
+function netAddr(ipn, maskn){
+  /* JS-এর bitwise 32-bit signed, তাই ভাগ-গুণ দিয়ে করা হচ্ছে */
+  var out = 0;
+  for(var b = 31; b >= 0; b--){
+    var p = Math.pow(2, b);
+    var ib = Math.floor(ipn / p) % 2, mb = Math.floor(maskn / p) % 2;
+    if(ib && mb) out += p;
+  }
+  return out;
+}
+
+NS.net = {
+  pc:pc, sw:sw, router:router, server:server, link:link,
+  ip2int:ip2int, int2ip:int2ip, maskInt:maskInt,
+  maskToCidr:maskToCidr, sameSubnet:sameSubnet, netAddr:netAddr
+};
+
+})(window.NetLab = window.NetLab || {});
+
+/* ─── core/registry.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB REGISTRY
+   ───────────────────────────────────────────────────────────────────
+   প্রতিটি lab নিজেকে NetLab.labs-এ যোগ করে। এই file সব lab file-এর
+   আগে load হতে হবে, তাই build order-এ এটি প্রথমে।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+NS.labs = NS.labs || {};
+
+/* Sidebar-এ lab গুলো এই ক্রমে দেখাবে */
+NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp'];
+
+NS.labList = function(){
+  var out = [];
+  for(var i = 0; i < NS.LAB_ORDER.length; i++){
+    var l = NS.labs[NS.LAB_ORDER[i]];
+    if(l) out.push(l);
+  }
+  return out;
+};
+
+})(window.NetLab = window.NetLab || {});
+
+/* ─── labs/packet.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Packet Visualizer — একটি Packet-এর ভেতরে ঠিক কী আছে
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+NS.labs.packet = {
+  id: 'packet',
+  title: 'Packet Visualizer',
+  group: 'Phase 1 · Foundation',
+  chapter: 'ch4',
+  blurb: 'একটি Frame-এর প্রতিটি স্তর খুলে দেখুন — কোন field কে ব্যবহার করে, আর কে করে না।',
+
+  learn: [
+    'একটি সাধারণ HTTPS request-এর Frame-এ কী কী থাকে',
+    'কোন device কোন header পড়ে — Switch, Router, Server',
+    'Header আর Payload-এর পার্থক্য',
+    'একটি field বদলালে কে সেটা খেয়াল করে'
+  ],
+
+  mistakes: [
+    { m:'সব device পুরো Packet-টি খুলে পড়ে।',
+      r:'প্রতিটি device শুধু নিজের প্রয়োজনীয় layer পর্যন্ত পড়ে। Switch শুধু Ethernet Header দেখে, Router সেই সাথে IP Header, আর Port-এর খবর রাখে কেবল গন্তব্য host। বাকিটা তার কাছে নিছক payload।' },
+    { m:'Header মানে বাড়তি ঝামেলা, data-ই আসল।',
+      r:'Header ছাড়া data-র কোনো মানে নেই — কোথায় যাবে, কে পাঠিয়েছে, কোন application-এর জন্য, কিছুই জানা যেত না। এই ৫৪ byte header-ই পুরো delivery ব্যবস্থাটা সম্ভব করে।' }
+  ],
+
+  controls: [
+    { key:'view', type:'choice', label:'কে দেখছে', def:'all',
+      options:[ ['all','সবকিছু (আমরা)'], ['switch','Switch যতটুকু দেখে'],
+                ['router','Router যতটুকু দেখে'], ['server','Server যতটুকু দেখে'] ],
+      help:'বদলে দেখুন প্রতিটি device আসলে কতটুকু পড়ে।' }
+  ],
+
+  build: function(){
+    return {
+      devices: [
+        N.pc('client', { name:'Client', x:16, y:50, mac:'AA:AA:AA:AA:AA:AA', ip:'192.168.1.10' }),
+        N.router('router', { name:'Router', x:50, y:50,
+          ifaces:[{ name:'eth0', ip:'192.168.1.1', mac:'RR:RR:RR:RR:RR:RR', mask:'255.255.255.0' }] }),
+        N.server('srv', { name:'Server', x:84, y:50, mac:'SS:SS:SS:SS:SS:SS', ip:'93.184.216.34',
+          listening:[{ port:443, service:'HTTPS', open:true }] })
+      ],
+      links: [ N.link('client','router'), N.link('router','srv') ],
+      hub: null,
+      wire: null,
+      banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var view = cfg.view || 'all';
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var body = P.data('GET /users HTTP/1.1');
+    var l4 = P.tcp(54321, 443, 1000, 0, 'PSH, ACK', 64240);
+    var l3 = P.ip('192.168.1.10', '93.184.216.34', 64, 'tcp', 20 + 20 + body.size);
+    var l2 = P.ethernet('AA:AA:AA:AA:AA:AA', 'RR:RR:RR:RR:RR:RR', 'ip');
+    var full = P.make([l2, l3, l4, body], { label:'Frame', kind:'data', from:'client', to:'srv' });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L2', kind:'info',
+      title:'সম্পূর্ণ Frame টি দেখুন', packet:full,
+      what:'এটি একটি সাধারণ HTTPS request-এর Frame। মোট চারটি স্তর — Ethernet, IP, TCP এবং Payload। ডানপাশের Packet Inspector-এ যেকোনো field-এ click করে তার ব্যাখ্যা দেখুন।',
+      why :'মোট header ৫৪ byte (14 + 20 + 20), আর আসল data ' + body.size + ' byte।\n\nছোট request-এ header-ই বেশি জায়গা নেয় — এজন্যই অনেক ছোট ছোট request পাঠানোর চেয়ে কম সংখ্যক বড় request পাঠানো efficient।',
+      apply: function(st){ st.banner = 'সম্পূর্ণ Frame'; }
+    });
+
+    if(view === 'all' || view === 'switch'){
+      steps.push({
+        t:at(), actor:'client', layer:'L2', kind:'ok',
+        title:'Switch শুধু এইটুকু পড়ে',
+        packet: P.make([l2], { label:'Ethernet Header', kind:'data' }),
+        what:'একটি Switch শুধু Ethernet Header পড়ে — Source MAC আর Destination MAC। ব্যস।',
+        why :'Switch একটি Layer 2 device। IP Address কী, Port কত, ভেতরে HTTP না DNS — এসবের কিছুই তার জানার দরকার নেই।\n\nএই সরলতার জন্যই Switch এত দ্রুত কাজ করতে পারে।',
+        apply: function(st){ st.banner = 'Switch এর দৃষ্টি — শুধু Layer 2'; }
+      });
+    }
+
+    if(view === 'all' || view === 'router'){
+      steps.push({
+        t:at(), actor:'router', layer:'L3', kind:'ok',
+        title:'Router এইটুকু পর্যন্ত পড়ে',
+        packet: P.make([l2, l3], { label:'Ethernet + IP', kind:'data' }),
+        what:'Router Ethernet Header খুলে ফেলে ভেতরের IP Header পড়ে — মূলত Destination IP আর TTL।',
+        why :'Destination IP দেখে সে Routing Table-এ খুঁজে বের করে Packet-টি কোন দিকে পাঠাতে হবে, আর TTL ১ কমিয়ে দেয়।\n\nএরপর সে **নতুন একটি Ethernet Header** বানিয়ে Packet-টি পরের hop-এ পাঠায়। অর্থাৎ MAC Address বদলে যায়, কিন্তু ভেতরের IP Header প্রায় অপরিবর্তিত থাকে।\n\nTCP Port কত — Router সেটি সাধারণত দেখেই না।',
+        apply: function(st){ st.banner = 'Router এর দৃষ্টি — Layer 3 পর্যন্ত'; }
+      });
+    }
+
+    if(view === 'all' || view === 'server'){
+      steps.push({
+        t:at(), actor:'srv', layer:'L4', kind:'ok',
+        title:'Server পুরোটাই পড়ে',
+        packet: full,
+        what:'গন্তব্য Server একে একে সব খুলে ফেলে — Ethernet, IP, TCP, এবং শেষে আসল HTTP data।',
+        why :'শুধু গন্তব্য host-ই Port 443 দেখে বুঝতে পারে এই data কোন application-এর জন্য, আর Sequence Number দেখে বুঝতে পারে data-টি stream-এর কোন জায়গায় বসবে।\n\nমাঝপথের কোনো device এতদূর পড়ে না — পড়ার দরকারও নেই।',
+        apply: function(st){ st.wire = null; st.banner = 'Server সম্পূর্ণ পড়ল'; }
+      });
+    }
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/encap.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Encapsulation — উপর থেকে নিচে নামার সময় কী যোগ হয়
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+NS.labs.encap = {
+  id: 'encap',
+  title: 'Encapsulation Lab',
+  group: 'Phase 1 · Foundation',
+  chapter: 'ch3',
+  blurb: 'Application-এর data নিচের দিকে নামার সময় প্রতিটি layer নিজের header যোগ করে। সেই স্তরে স্তরে মোড়ানোটাই Encapsulation।',
+
+  learn: [
+    'প্রতিটি layer ঠিক কী তথ্য যোগ করে এবং কেন',
+    'একই data-র নাম layer ভেদে বদলায় কেন (Segment → Packet → Frame)',
+    'নিচের layer উপরের layer-এর ভেতরে কী আছে তা জানে না — কেন সেটা ভালো',
+    'Receiver-এর দিকে ঠিক উল্টো ক্রমে খোলা হয় (Decapsulation)'
+  ],
+
+  mistakes: [
+    { m:'Packet, Frame আর Segment — তিনটি আলাদা জিনিস।',
+      r:'একই data ভিন্ন layer-এ ভিন্ন নামে ডাকা হয়। TCP header লাগালে Segment, তার উপর IP header লাগালে Packet, তার উপর Ethernet header লাগালে Frame। জিনিসটা একটাই, মোড়কটা বাড়ছে।' },
+    { m:'নিচের layer উপরের data পড়ে বুঝে সিদ্ধান্ত নেয়।',
+      r:'প্রতিটি layer শুধু নিজের header দেখে। Ethernet-এর কাছে পুরো IP Packet-টা নিছক payload — ভেতরে কী আছে তার জানার দরকারই নেই। এই স্বাধীনতার জন্যই একই IP অন্য যেকোনো Layer 2 প্রযুক্তির উপর চলতে পারে।' }
+  ],
+
+  controls: [
+    { key:'proto', type:'choice', label:'Transport protocol', def:'tcp',
+      options:[ ['tcp','TCP'], ['udp','UDP'] ],
+      help:'TCP হলে reliability-র জন্য বাড়তি field থাকে, UDP-র header অনেক ছোট।' }
+  ],
+
+  build: function(){
+    return {
+      devices: [
+        N.pc('client', { name:'Client', x:18, y:50, mac:'AA:AA:AA:AA:AA:AA', ip:'192.168.1.10' }),
+        N.server('srv', { name:'Server', x:82, y:50, mac:'SS:SS:SS:SS:SS:SS', ip:'93.184.216.34' })
+      ],
+      links: [ N.link('client','srv') ],
+      hub: null,
+      stack: [],     /* এখন পর্যন্ত কয়টি layer মোড়ানো হয়েছে */
+      wire: null,
+      banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var isTcp = cfg.proto !== 'udp';
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var body = P.data('GET /users HTTP/1.1');
+    var l4   = isTcp
+      ? P.tcp(54321, 443, 1000, 0, 'PSH, ACK', 64240)
+      : { name:'UDP Header', layer:'L4', size:8, fields:[
+          ['srcPort','54321'], ['dstPort','443'] ] };
+    var l3 = P.ip('192.168.1.10', '93.184.216.34', 64, isTcp ? 'tcp' : 'udp',
+                  20 + l4.size + body.size);
+    var l2 = P.ethernet('AA:AA:AA:AA:AA:AA', 'RR:RR:RR:RR:RR:RR', 'ip');
+
+    steps.push({
+      t:at(), actor:'client', layer:'L7', kind:'info',
+      title:'Application data তৈরি হলো',
+      packet: P.make([body], { label:'Data', kind:'data' }),
+      what:'Browser একটি HTTP request বানাল — `GET /users HTTP/1.1`। এই মুহূর্তে এটি নিছক কিছু byte, কোনো header নেই।',
+      why :'Application layer জানে **কী** পাঠাতে হবে, কিন্তু সেটি কীভাবে গন্তব্যে পৌঁছাবে তা নিয়ে সে ভাবে না। সেই দায়িত্ব নিচের layer গুলোর।',
+      apply: function(st){ st.stack = ['L7']; st.banner = 'Payload তৈরি'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L4', kind:'ok',
+      title: (isTcp ? 'TCP' : 'UDP') + ' Header যোগ হলো',
+      packet: P.make([l4, body], { label: isTcp ? 'TCP Segment' : 'UDP Datagram', kind:'data' }),
+      what:'data-র সামনে ' + (isTcp ? 'TCP' : 'UDP') + ' Header বসল। এখন এর নাম **' +
+           (isTcp ? 'Segment' : 'Datagram') + '**।',
+      why : isTcp
+        ? 'Port দিয়ে বোঝা যাবে কোন application-এর data। আর Sequence Number ও ACK Number-এর জন্যই TCP হারানো data আবার পাঠাতে এবং ঠিক ক্রমে সাজাতে পারে।\n\nHeader-এর আকার ২০ byte — এই বাড়তি খরচেই reliability কেনা হচ্ছে।'
+        : 'UDP-র header মাত্র ৮ byte — শুধু Port আর length। কোনো Sequence Number নেই, কোনো ACK নেই।\n\nতাই UDP হালকা ও দ্রুত, কিন্তু data হারিয়ে গেলে UDP নিজে কিছুই করবে না।',
+      apply: function(st){ st.stack = ['L7','L4']; st.banner = (isTcp?'TCP':'UDP') + ' Header যোগ'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L3', kind:'ok',
+      title:'IP Header যোগ হলো',
+      packet: P.make([l3, l4, body], { label:'IP Packet', kind:'data' }),
+      what:'পুরো Segment-টির সামনে IP Header বসল — Source IP `192.168.1.10`, Destination IP `93.184.216.34`। এখন এর নাম **Packet**।',
+      why :'IP-র কাজ হলো ভিন্ন ভিন্ন network পেরিয়ে গন্তব্যে পৌঁছানো। পথের প্রতিটি Router এই Destination IP দেখেই সিদ্ধান্ত নেবে Packet-টি কোন দিকে পাঠাতে হবে।\n\nলক্ষণীয় — IP-র কাছে পুরো TCP Segment-টি নিছক payload। ভেতরে Port কত, Sequence কত — IP এসব দেখেই না।',
+      apply: function(st){ st.stack = ['L7','L4','L3']; st.banner = 'IP Header যোগ'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L2', kind:'ok',
+      title:'Ethernet Header যোগ হলো',
+      packet: P.make([l2, l3, l4, body], { label:'Ethernet Frame', kind:'data' }),
+      what:'সবার বাইরে Ethernet Header বসল — Destination MAC হলো Router-এর। এখন এর নাম **Frame**।',
+      why :'IP গন্তব্য ঠিক করে, কিন্তু এই মুহূর্তে Frame-টিকে শুধু পাশের device পর্যন্ত পৌঁছাতে হবে। সেই "পাশের device" চেনার কাজটাই MAC Address-এর।\n\nএজন্যই destination MAC হলো Router-এর, অথচ destination IP হলো দূরের Server-এর। প্রতিটি hop-এ Frame-এর MAC বদলাবে, কিন্তু ভেতরের IP একই থাকবে।',
+      apply: function(st){ st.stack = ['L7','L4','L3','L2']; st.banner = 'Ethernet Frame প্রস্তুত'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L1', kind:'info',
+      title:'Bit হিসেবে তারে চলে গেল',
+      packet: P.make([l2, l3, l4, body], { label:'Bits', kind:'data' }),
+      what:'পুরো Frame-টি এখন 0 আর 1-এর একটি ধারা হিসেবে cable-এ electrical signal আকারে যাচ্ছে।',
+      why :'এখানেই নামার পথ শেষ। মজার ব্যাপার — তারের ভেতরে "Header" বলে আলাদা কিছু নেই, সবটাই একটানা bit। কোন bit কোন header তা receiver জানে কারণ প্রতিটি protocol-এর header-এর গঠন আগে থেকেই নির্ধারিত।',
+      apply: function(st){
+        st.stack = ['L7','L4','L3','L2','L1'];
+        st.wire = { pkt: P.make([l2,l3,l4,body], {label:'Frame', kind:'data'}), from:'client', to:'srv' };
+        st.banner = 'তারে পাঠানো হলো';
+      }
+    });
+
+    steps.push({
+      t:at(), actor:'srv', layer:'L2', kind:'ok',
+      title:'Server উল্টো ক্রমে খুলতে শুরু করল',
+      packet: P.make([l3, l4, body], { label:'Decapsulation', kind:'data' }),
+      what:'Server Frame-টি পেয়ে Ethernet Header খুলে ফেলল, তারপর IP Header, তারপর ' +
+           (isTcp ? 'TCP' : 'UDP') + ' Header — একে একে।',
+      why :'এটাই **Decapsulation** — Encapsulation-এর ঠিক উল্টো। প্রতিটি layer নিজের header খুলে ভেতরের অংশটুকু উপরের layer-এ পাঠিয়ে দেয়।\n\nশেষে Application যা পায়, তা হুবহু সেই `GET /users HTTP/1.1` — মাঝখানে কী কী মোড়ক লেগেছিল সে তার কিছুই জানে না। এই না-জানাটাই layered design-এর সৌন্দর্য।',
+      apply: function(st){ st.stack = ['L7']; st.wire = null; st.banner = 'Decapsulation সম্পন্ন'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/ethernet.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Ethernet & MAC — MAC Address আসলে কী করে
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+NS.labs.ethernet = {
+  id: 'ethernet',
+  title: 'Ethernet & MAC Lab',
+  group: 'Phase 1 · Layer 2',
+  chapter: 'ch6',
+  blurb: 'একটি Frame-এ Source আর Destination MAC — এই দুটি মাত্র field দিয়েই local network-এর পুরো delivery ব্যবস্থা চলে।',
+
+  learn: [
+    'MAC Address কে দেখে আর কে দেখে না',
+    'Destination MAC না মিললে NIC ঠিক কী করে',
+    'Broadcast MAC (`FF:FF:FF:FF:FF:FF`) কেন আলাদা',
+    'MAC Address বদলে দিলে যোগাযোগ কেন ভেঙে যায়'
+  ],
+
+  mistakes: [
+    { m:'MAC Address পুরো Internet জুড়ে device-টিকে চিনিয়ে দেয়।',
+      r:'MAC Address শুধু একটি local network-এর ভেতরে অর্থবহ। Router পার হওয়ার সাথে সাথেই পুরোনো MAC মুছে গিয়ে নতুন MAC বসে। দূরের কোনো Server আপনার MAC Address কখনো দেখেই না।' },
+    { m:'ভুল destination MAC-এর Frame ঠিক device-এ পৌঁছে যায়, কারণ IP তো ঠিক আছে।',
+      r:'NIC প্রথমেই destination MAC মেলায়। না মিললে Frame সেখানেই বাদ পড়ে — ভেতরের IP Header পড়াই হয় না। Layer 2-তে আটকে গেলে Layer 3 কখনো কাজে আসে না।' }
+  ],
+
+  controls: [
+    { key:'dst', type:'choice', label:'Destination MAC', def:'ok',
+      options:[ ['ok','সঠিক — PC-B এর MAC'],
+                ['wrong','ভুল MAC (কারো সাথেই মেলে না)'],
+                ['bcast','Broadcast — FF:FF:FF:FF:FF:FF'] ],
+      help:'তিনটি ক্ষেত্রেই NIC-এর আচরণ আলাদা। বদলে দেখুন।' }
+  ],
+
+  build: function(){
+    return {
+      devices: [
+        N.pc('pcA', { name:'PC-A', x:14, y:50, mac:'AA:AA:AA:AA:AA:AA', ip:'192.168.1.10' }),
+        N.pc('pcB', { name:'PC-B', x:86, y:28, mac:'BB:BB:BB:BB:BB:BB', ip:'192.168.1.20' }),
+        N.pc('pcC', { name:'PC-C', x:86, y:72, mac:'CC:CC:CC:CC:CC:CC', ip:'192.168.1.30' })
+      ],
+      links: [ N.link('pcA','sw1'), N.link('sw1','pcB'), N.link('sw1','pcC') ],
+      hub: N.sw('sw1', { name:'Switch', x:50, y:50 }),
+      wire: null,
+      banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var mode = cfg.dst || 'ok';
+    var dstMac = mode === 'ok' ? 'BB:BB:BB:BB:BB:BB'
+               : mode === 'bcast' ? 'FF:FF:FF:FF:FF:FF'
+               : 'DE:AD:BE:EF:00:99';
+
+    var f = P.make([
+      P.ethernet('AA:AA:AA:AA:AA:AA', dstMac, 'ip'),
+      P.ip('192.168.1.10', '192.168.1.20', 64, 'tcp', 60),
+      P.tcp(51000, 80, 1, 0, 'SYN', 64240)
+    ], { label:'Frame', kind: mode === 'bcast' ? 'arp' : 'data', from:'pcA', to:'pcB' });
+
+    steps.push({
+      t:at(), actor:'pcA', layer:'L2', kind:'info',
+      title:'PC-A Frame তৈরি করল', packet:f,
+      what:'Frame-এর Source MAC `AA:AA:AA:AA:AA:AA` (PC-A এর নিজের NIC), Destination MAC `' + dstMac + '`।',
+      why :'Source MAC সবসময় নিজের NIC-এর — এটি NIC নিজেই বসিয়ে দেয়। Destination MAC ঠিক করে দেয় Frame-টি এই local network-এ কে তুলে নেবে।',
+      apply: function(st){ st.wire = { pkt:f, from:'pcA', to:'sw1' }; st.banner = 'Frame পাঠানো হলো'; }
+    });
+
+    if(mode === 'bcast'){
+      steps.push({
+        t:at(), actor:'sw1', layer:'L2', kind:'warn',
+        title:'Broadcast — Switch সবাইকে পাঠাল', packet:f,
+        what:'Destination MAC `FF:FF:FF:FF:FF:FF` দেখে Switch কোনো lookup-ই করল না, সোজা সব port-এ পাঠিয়ে দিল।',
+        why :'`FF:FF:FF:FF:FF:FF` একটি বিশেষ সংরক্ষিত address — এর মানেই "এই network-এর সবাই"। ARP ঠিক এভাবেই কাজ করে।',
+        apply: function(st){ st.wire = { pkt:f, from:'sw1', to:'flood' }; st.banner = 'সবাইকে পাঠানো হলো'; }
+      });
+      steps.push({
+        t:at(), actor:'pcB', layer:'L3', kind:'ok',
+        title:'PC-B এবং PC-C দুজনেই গ্রহণ করল', packet:f,
+        what:'দুটি PC-ই Frame-টি গ্রহণ করে ভেতরের IP Packet উপরের layer-এ পাঠিয়ে দিল।',
+        why :'Broadcast MAC-এর সাথে প্রতিটি NIC-ই "মেলে"। তাই সবাই Frame-টি তুলে নেয়।\n\nএর একটি খরচ আছে — অপ্রয়োজনীয় device-এরও CPU খরচ হয়। এজন্যই বড় network-এ অতিরিক্ত broadcast একটি সমস্যা।',
+        apply: function(st){ st.wire = null; st.banner = 'সবাই গ্রহণ করল'; }
+      });
+      return steps;
+    }
+
+    steps.push({
+      t:at(), actor:'sw1', layer:'L2', kind:'info',
+      title:'Switch Frame টি forward করল', packet:f,
+      what: mode === 'ok'
+        ? 'Switch Destination MAC তার Table-এ পেয়ে Frame-টি PC-B এর port-এ পাঠাল।'
+        : 'Destination MAC `' + dstMac + '` Switch-এর Table-এ নেই, তাই সে Frame-টি সব port-এ flood করল।',
+      why : mode === 'ok'
+        ? 'Switch শুধু MAC দেখে সিদ্ধান্ত নেয় — ভেতরের IP Address সে খুলেও দেখে না। এটি বিশুদ্ধ Layer 2 device।'
+        : 'অজানা destination হলে Switch flood করে, এই আশায় যে কেউ না কেউ Frame-টি নেবে। কিন্তু এই MAC-টি কারোরই নয়…',
+      apply: function(st){
+        st.wire = { pkt:f, from:'sw1', to: mode === 'ok' ? 'pcB' : 'flood' };
+        st.banner = mode === 'ok' ? 'PC-B এর দিকে' : 'অজানা MAC — flood';
+      }
+    });
+
+    if(mode === 'ok'){
+      steps.push({
+        t:at(), actor:'pcB', layer:'L2', kind:'ok',
+        title:'PC-B এর NIC মিলিয়ে দেখল — মিলেছে', packet:f,
+        what:'PC-B এর NIC destination MAC-এর সাথে নিজের MAC মেলাল। মিলে যাওয়ায় Frame-টি গ্রহণ করল।',
+        why :'এই মিলিয়ে দেখার কাজটি NIC hardware-এই হয়, OS পর্যন্ত পৌঁছানোর আগেই। মিললে তবেই Frame উপরে ওঠে।',
+        apply: function(st){ st.wire = null; st.banner = 'PC-B গ্রহণ করল'; }
+      });
+      steps.push({
+        t:at(), actor:'pcB', layer:'L3', kind:'ok',
+        title:'Ethernet Header খুলে IP Packet বের হলো', packet:f,
+        what:'PC-B Ethernet Header ফেলে দিয়ে ভেতরের IP Packet-টি Layer 3-এ পাঠিয়ে দিল।',
+        why :'Layer 2-এর কাজ এখানেই শেষ — সে Frame-টিকে এই local link পার করিয়ে দিয়েছে। এর পরের সিদ্ধান্ত IP-র।',
+        apply: function(st){ st.banner = 'Layer 3-এ হস্তান্তর'; }
+      });
+    } else {
+      steps.push({
+        t:at(), actor:'pcB', layer:'L2', kind:'error',
+        title:'কেউই MAC মেলাতে পারল না', packet:f,
+        what:'PC-B আর PC-C দুজনেই Frame-টি পেল, কিন্তু `' + dstMac + '` কারো MAC-এর সাথেই মিলল না। দুজনেই Frame-টি ফেলে দিল।',
+        why :'Frame-টি ভেতরে সঠিক destination IP `192.168.1.20` বহন করছিল, কিন্তু সেটি কেউ পড়েই দেখল না।\n\nকারণ NIC আগে MAC মেলায়, তারপর IP-র কথা ভাবে। MAC না মিললে Frame সেখানেই শেষ — এটাই প্রমাণ করে যে Layer 3 ঠিক থাকলেও Layer 2 ভুল হলে কিছুই কাজ করে না।',
+        apply: function(st){ st.wire = null; st.banner = 'Frame drop — কারো MAC মেলেনি'; }
+      });
+    }
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/switching.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · Switching — Switch কীভাবে শেখে
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+var A = 'AA:AA:AA:AA:AA:AA', B = 'BB:BB:BB:BB:BB:BB', C = 'CC:CC:CC:CC:CC:CC';
+
+NS.labs.switching = {
+  id: 'switching',
+  title: 'Switching Lab',
+  group: 'Phase 1 · Layer 2',
+  chapter: 'ch7',
+  blurb: 'Switch জন্ম থেকে কিছুই জানে না। প্রতিটি Frame দেখে সে ধীরে ধীরে শিখে নেয় কে কোন port-এ আছে।',
+
+  learn: [
+    'Switch তার MAC Address Table কীভাবে নিজে নিজে তৈরি করে',
+    'Source MAC থেকে শেখা আর Destination MAC খোঁজা — দুটি আলাদা কাজ',
+    'অজানা destination-এ Switch কেন flood করে',
+    'দ্বিতীয়বার একই পথে Frame গেলে কেন আর flood হয় না'
+  ],
+
+  mistakes: [
+    { m:'Switch আগে থেকেই জানে কোন device কোন port-এ আছে।',
+      r:'Switch-এর MAC Table শুরুতে সম্পূর্ণ খালি থাকে। সে শুধু Frame-এর **Source MAC** দেখে শেখে — অর্থাৎ একটি device কথা না বলা পর্যন্ত Switch তার অস্তিত্বই জানে না।' },
+    { m:'Flood করা মানে Switch-টি নষ্ট বা ভুল করছে।',
+      r:'Flood হলো স্বাভাবিক এবং সঠিক আচরণ। Destination কোথায় জানা না থাকলে Frame ফেলে দেওয়ার চেয়ে সব port-এ পাঠানো ভালো — ঠিক device-টি উত্তর দিলে Switch তখন তাকেও শিখে ফেলে।' }
+  ],
+
+  controls: [
+    { key:'learned', type:'toggle', label:'MAC Table-এ আগে থেকেই সব entry আছে', def:false,
+      help:'চালু করলে Switch আর flood করবে না — সরাসরি ঠিক port-এ পাঠাবে।' },
+    { key:'reply', type:'toggle', label:'PC-B উত্তর পাঠাবে', def:true,
+      help:'উত্তর এলে Switch PC-B-কেও শিখে ফেলে। তখন পরের Frame আর flood হয় না।' }
+  ],
+
+  build: function(cfg){
+    var pcA = N.pc('pcA', { name:'PC-A', x:12, y:24, mac:A, ip:'192.168.1.10' });
+    var pcB = N.pc('pcB', { name:'PC-B', x:12, y:76, mac:B, ip:'192.168.1.20' });
+    var pcC = N.pc('pcC', { name:'PC-C', x:88, y:50, mac:C, ip:'192.168.1.30' });
+
+    var s = N.sw('sw1', { name:'Switch', x:50, y:50 });
+    s.portsOf = { pcA:1, pcB:2, pcC:3 };
+    if(cfg.learned){
+      s.macTable[A] = { port:1, age:0 };
+      s.macTable[B] = { port:2, age:0 };
+      s.macTable[C] = { port:3, age:0 };
+    }
+
+    return {
+      devices: [pcA, pcB, pcC],
+      links: [ N.link('pcA','sw1'), N.link('pcB','sw1'), N.link('pcC','sw1') ],
+      hub: s,
+      wire: null,
+      banner: null
+    };
+  },
+
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [], t = 0;
+    function at(){ return ++t; }
+
+    var f1 = P.make([
+      P.ethernet(A, B, 'ip'),
+      P.ip('192.168.1.10', '192.168.1.20', 64, 'tcp', 60),
+      P.tcp(51000, 80, 1, 0, 'SYN', 64240)
+    ], { label:'Frame A→B', kind:'data', from:'pcA', to:'pcB' });
+
+    steps.push({
+      t:at(), actor:'pcA', layer:'L2', kind:'info',
+      title:'PC-A একটি Frame পাঠাল', packet:f1,
+      what:'PC-A একটি Ethernet Frame পাঠাচ্ছে — Source MAC `' + A + '`, Destination MAC `' + B + '`।',
+      why :'PC-A ইতিমধ্যে PC-B-এর MAC Address জানে (ARP আগেই হয়ে গেছে)। এখন Frame-টি Switch-এ পৌঁছাবে এবং Switch সিদ্ধান্ত নেবে সেটি কোথায় পাঠাতে হবে।',
+      apply: function(st){ st.wire = { pkt:f1, from:'pcA', to:'sw1' }; st.banner = 'Frame Switch-এ ঢুকছে'; }
+    });
+
+    /* ── ধাপ ১: Source থেকে শেখা ── */
+    steps.push({
+      t:at(), actor:'sw1', layer:'L2', kind:cfg.learned ? 'info' : 'ok',
+      title: cfg.learned ? 'Source MAC আগেই জানা ছিল' : 'Source MAC শিখল',
+      packet:f1,
+      what: cfg.learned
+        ? 'Switch Source MAC `' + A + '` দেখল — এটি ইতিমধ্যে Table-এ Port 1-এ আছে, তাই শুধু entry-টির সময় নতুন করে লেখা হলো।'
+        : 'Switch Frame-টির **Source MAC** `' + A + '` দেখল এবং মনে রাখল যে এই MAC Address **Port 1**-এ আছে।',
+      why :'এটাই Switch-এর শেখার একমাত্র উপায়। Frame যে port দিয়ে ঢুকেছে, তার Source MAC নিশ্চয়ই সেই port-এর ওপাশে আছে।\n\nলক্ষ্য করুন — শেখা হচ্ছে **Source** MAC থেকে, কিন্তু পাঠানোর সিদ্ধান্ত হবে **Destination** MAC দেখে। এই দুটি সম্পূর্ণ আলাদা কাজ।',
+      apply: function(st){ st.hub.macTable[A] = { port:1, age:0 }; st.banner = 'শিখল: ' + A + ' → Port 1'; }
+    });
+
+    /* ── ধাপ ২: Destination খোঁজা ── */
+    if(cfg.learned){
+      steps.push({
+        t:at(), actor:'sw1', layer:'L2', kind:'ok',
+        title:'Table-এ পাওয়া গেল — নির্দিষ্ট port-এ forward', packet:f1,
+        what:'Switch Destination MAC `' + B + '` তার Table-এ খুঁজল এবং পেয়ে গেল — Port 2।',
+        why :'জানা থাকলে Switch শুধু সেই একটি port-এ Frame পাঠায়। PC-C এই Frame-টি কখনো দেখবেই না।\n\nএখানেই Switch আর পুরোনো Hub-এর পার্থক্য — Hub সবসময় সবাইকে পাঠাত, Switch শুধু যাকে দরকার তাকেই পাঠায়।',
+        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'pcB' }; st.banner = 'Port 2-এ forward'; }
+      });
+    } else {
+      steps.push({
+        t:at(), actor:'sw1', layer:'L2', kind:'warn',
+        title:'Destination অজানা — flood করল', packet:f1,
+        what:'Switch Destination MAC `' + B + '` তার Table-এ খুঁজল, কিন্তু পেল না। তাই সে Frame-টি **Port 1 বাদে সব port-এ** পাঠিয়ে দিল।',
+        why :'PC-B এখনো একটিও Frame পাঠায়নি, তাই Switch তার অস্তিত্বই জানে না। এই অবস্থায় Frame ফেলে দিলে যোগাযোগ কখনোই শুরু হতো না।\n\nতাই Switch নিরাপদ পথ নেয় — সবাইকে পাঠাও, ঠিক device-টি নিজেই নিয়ে নেবে। একে বলে **Unknown Unicast Flooding**।',
+        apply: function(st){ st.wire = { pkt:f1, from:'sw1', to:'flood' }; st.banner = 'অজানা destination — flood'; }
+      });
+
+      steps.push({
+        t:at(), actor:'pcC', layer:'L2', kind:'warn',
+        title:'PC-C Frame টি ফেলে দিল', packet:f1,
+        what:'PC-C Frame-টি পেল, Destination MAC `' + B + '` দেখল, নিজের MAC `' + C + '`-এর সাথে মেলাল — মিলল না। তাই সে Frame-টি ফেলে দিল।',
+        why :'প্রতিটি NIC নিজের MAC Address-এর সাথে destination মিলিয়ে দেখে। না মিললে Frame-টি উপরের layer-এ পাঠানোই হয় না।\n\nএজন্যই flood হলেও ভুল device-এ data "পৌঁছে যায়" না — কিন্তু bandwidth খরচ ঠিকই হয়।',
+        apply: function(st){ st.banner = 'PC-C: আমার MAC নয়, drop'; }
+      });
+    }
+
+    steps.push({
+      t:at(), actor:'pcB', layer:'L2', kind:'ok',
+      title:'PC-B Frame টি গ্রহণ করল', packet:f1,
+      what:'PC-B দেখল Destination MAC তারই। তাই সে Frame-টি গ্রহণ করে ভেতরের IP Packet উপরের layer-এ পাঠিয়ে দিল।',
+      why :'MAC Address মিলে গেছে, তাই এই Frame-টি তার জন্যই। এখন Layer 2-এর কাজ শেষ, Layer 3 শুরু।',
+      apply: function(st){ st.wire = null; st.banner = 'PC-B গ্রহণ করল'; }
+    });
+
+    if(!cfg.reply) return steps;
+
+    /* ── ধাপ ৩: উত্তর এলে Switch দ্বিতীয় device-কেও শেখে ── */
+    var f2 = P.make([
+      P.ethernet(B, A, 'ip'),
+      P.ip('192.168.1.20', '192.168.1.10', 64, 'tcp', 60),
+      P.tcp(80, 51000, 1, 2, 'SYN-ACK', 64240)
+    ], { label:'Frame B→A', kind:'ack', from:'pcB', to:'pcA' });
+
+    steps.push({
+      t:at(), actor:'pcB', layer:'L2', kind:'info',
+      title:'PC-B উত্তর পাঠাল', packet:f2,
+      what:'PC-B এবার নিজে একটি Frame পাঠাচ্ছে — Source MAC `' + B + '`, Destination MAC `' + A + '`।',
+      why :'এই Frame-টিই Switch-কে PC-B সম্পর্কে শেখাবে। এখানেই বোঝা যায় Switch শেখে কেবল তখনই যখন কোনো device **নিজে কথা বলে**।',
+      apply: function(st){ st.wire = { pkt:f2, from:'pcB', to:'sw1' }; st.banner = 'উত্তর আসছে'; }
+    });
+
+    steps.push({
+      t:at(), actor:'sw1', layer:'L2', kind:'ok',
+      title:'PC-B কেও শিখে ফেলল', packet:f2,
+      what:'Switch Source MAC `' + B + '` দেখে Table-এ লিখল — **Port 2**। এখন Table-এ দুটি entry।',
+      why :'এখন Switch দুই দিকই জানে। এরপর A→B বা B→A যেকোনো Frame সরাসরি ঠিক port-এ যাবে, আর কখনো flood হবে না।\n\nএভাবেই একটি Switch কয়েক সেকেন্ডের মধ্যেই পুরো network-টা "শিখে" ফেলে।',
+      apply: function(st){ st.hub.macTable[B] = { port:2, age:0 }; st.banner = 'শিখল: ' + B + ' → Port 2'; }
+    });
+
+    steps.push({
+      t:at(), actor:'sw1', layer:'L2', kind:'ok',
+      title:'এবার সরাসরি Port 1-এ পাঠাল', packet:f2,
+      what:'Destination MAC `' + A + '` Table-এ আছে (Port 1), তাই Frame-টি শুধু সেখানেই গেল। PC-C কিছুই দেখল না।',
+      why :'প্রথম Frame-টি flood হয়েছিল, কিন্তু এটি হলো না — কারণ ইতিমধ্যে শেখা হয়ে গেছে। এটাই Switch-এর মূল সুবিধা: যত বেশি traffic, তত ভালো সে জানে, তত কম অপ্রয়োজনীয় Frame।',
+      apply: function(st){ st.wire = { pkt:f2, from:'sw1', to:'pcA' }; st.banner = 'Port 1-এ forward'; }
+    });
+
+    return steps;
+  }
+};
+
+})(window.NetLab);
+
+/* ─── labs/arp.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   LAB · ARP — IP জানি, কিন্তু MAC জানি না
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var N = NS.net, P = NS.pkt;
+
+var CLIENT_MAC = 'AA:AA:AA:AA:AA:AA';
+var ROUTER_MAC = 'RR:RR:RR:RR:RR:RR';
+var OTHER_MAC  = 'CC:CC:CC:CC:CC:CC';
+var BROADCAST  = 'FF:FF:FF:FF:FF:FF';
+
+NS.labs.arp = {
+  id: 'arp',
+  title: 'ARP Lab',
+  group: 'Phase 1 · Layer 2',
+  chapter: 'ch8',
+  blurb: 'IP Address জানা থাকলেও Frame পাঠাতে MAC Address লাগে। ARP সেই ফাঁকটা পূরণ করে।',
+
+  learn: [
+    'ARP ঠিক কোন সমস্যাটা সমাধান করে',
+    'ARP Request কেন broadcast, কিন্তু ARP Reply কেন unicast',
+    'ARP Cache কী কাজে লাগে এবং cache থাকলে কী বদলায়',
+    'যার IP জিজ্ঞেস করা হয়নি সেই device কেন Frame-টা ফেলে দেয়'
+  ],
+
+  mistakes: [
+    { m:'ARP Internet-এর যেকোনো IP-র MAC Address বের করতে পারে।',
+      r:'ARP শুধু নিজের local network-এ কাজ করে। বাইরের কোনো IP-তে যেতে হলে Client নিজের Default Gateway-এর MAC Address খোঁজে, destination-এর নয়।' },
+    { m:'ARP Request সরাসরি Router-এর কাছে যায়।',
+      r:'ARP Request broadcast — local network-এর প্রতিটি device Frame-টি পায়। কিন্তু শুধু যার IP মিলেছে সে-ই Reply দেয়, বাকিরা চুপচাপ Frame-টি ফেলে দেয়।' }
+  ],
+
+  controls: [
+    { key:'cached', type:'toggle', label:'ARP Cache-এ আগে থেকেই entry আছে', def:false,
+      help:'চালু করলে Client-কে আর জিজ্ঞেস করতে হবে না — সরাসরি Frame পাঠাবে।' },
+    { key:'gone', type:'toggle', label:'Router টি বন্ধ (কেউ উত্তর দেবে না)', def:false,
+      help:'কেউ ARP Reply না দিলে কী হয় দেখুন — Break-It Mode।' }
+  ],
+
+  /* ───────── শুরুর অবস্থা ───────── */
+  build: function(cfg){
+    var client = N.pc('client', {
+      name:'Client', x:14, y:50, mac:CLIENT_MAC,
+      ip:'192.168.1.10', gw:'192.168.1.1'
+    });
+    if(cfg.cached) client.arp['192.168.1.1'] = { mac:ROUTER_MAC, age:0 };
+
+    var other = N.pc('other', {
+      name:'PC-B', x:50, y:14, mac:OTHER_MAC, ip:'192.168.1.20', gw:'192.168.1.1'
+    });
+    var rtr = N.router('router', {
+      name:'Router', x:86, y:50,
+      ifaces:[{ name:'eth0', ip:'192.168.1.1', mac:ROUTER_MAC, mask:'255.255.255.0' }]
+    });
+    if(cfg.gone) rtr.note = 'বন্ধ';
+
+    return {
+      devices: [client, other, rtr],
+      links: [
+        N.link('client','sw1'), N.link('other','sw1'), N.link('sw1','router')
+      ],
+      hub: N.sw('sw1', { name:'Switch', x:50, y:50 }),
+      wire: null,       // এই মুহূর্তে তারে যে packet আছে
+      banner: null
+    };
+  },
+
+  /* ───────── ধাপে ধাপে কী ঘটবে ───────── */
+  script: function(s0, cfg){
+    P.resetIds();
+    var steps = [];
+    var t = 0;
+    function at(){ t += 1; return t; }
+
+    /* Frame পাঠানোর জন্য যে MAC দরকার সেটি Client-এর জানা আছে কি? */
+    if(cfg.cached){
+      steps.push({
+        t:at(), actor:'client', layer:'L3', kind:'info',
+        title:'Packet তৈরি করল',
+        what:'Client `192.168.1.1`-এ একটি Packet পাঠাতে চায়। সে প্রথমেই নিজের ARP Cache দেখল।',
+        why :'প্রতিবার জিজ্ঞেস করা অপচয়। তাই Client আগে নিজের ARP Cache-এ খোঁজে — উত্তর পেলে ARP Request পাঠানোরই দরকার নেই।',
+        apply: function(st){ st.banner = 'ARP Cache দেখা হচ্ছে…'; }
+      });
+      steps.push({
+        t:at(), actor:'client', layer:'L2', kind:'ok',
+        title:'Cache HIT — MAC Address জানা আছে',
+        what:'ARP Cache-এ `192.168.1.1 → ' + ROUTER_MAC + '` entry-টি পাওয়া গেল।',
+        why :'আগে একবার ARP হয়েছিল বলে উত্তরটি জমা ছিল। তাই এবার কোনো ARP Request লাগল না — এটাই ARP Cache-এর মূল লাভ।',
+        apply: function(st){ st.banner = 'Cache HIT'; }
+      });
+      steps.push(sendData(at()));
+      return steps;
+    }
+
+    /* ── Cache খালি: পুরো ARP প্রক্রিয়া ── */
+    steps.push({
+      t:at(), actor:'client', layer:'L3', kind:'info',
+      title:'Packet তৈরি করল',
+      what:'Client `192.168.1.1`-এ Packet পাঠাতে চায়। কিন্তু Ethernet Frame বানাতে গিয়ে সে আটকে গেল।',
+      why :'Frame-এর destination MAC Address-এর ঘরটি ফাঁকা। IP Address জানা আছে, কিন্তু এই local network-এ Frame পৌঁছাতে হলে MAC Address লাগে।',
+      apply: function(st){ st.banner = 'destination MAC অজানা'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L2', kind:'warn',
+      title:'ARP Cache খালি',
+      what:'Client নিজের ARP Cache দেখল — `192.168.1.1`-এর কোনো entry নেই।',
+      why :'এর আগে এই IP-র সাথে কথা হয়নি, তাই cache-এ কিছু জমা নেই। এখন জিজ্ঞেস করা ছাড়া উপায় নেই।',
+      apply: function(st){ st.banner = 'Cache MISS'; }
+    });
+
+    var req = P.make([
+      P.ethernet(CLIENT_MAC, BROADCAST, 'arp'),
+      P.arp(1, CLIENT_MAC, '192.168.1.10', '00:00:00:00:00:00', '192.168.1.1')
+    ], { label:'ARP Request', kind:'arp', from:'client', to:'সবাই' });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L2', kind:'info',
+      title:'ARP Request broadcast করল', packet:req,
+      what:'Client একটি ARP Request পাঠাল: **"`192.168.1.1` কার? তোমার MAC Address কী?"** Frame-টির destination MAC হলো `' + BROADCAST + '` — অর্থাৎ broadcast।',
+      why :'কার MAC Address লাগবে সেটাই তো জানা নেই, তাই কাকে জিজ্ঞেস করবে তাও জানা নেই। তাই প্রশ্নটি সবাইকে শোনানো হচ্ছে। `FF:FF:FF:FF:FF:FF` মানে "এই network-এর সবাই"।',
+      apply: function(st){ st.wire = { pkt:req, from:'client', to:'sw1' }; st.banner = 'ARP Request পথে'; }
+    });
+
+    steps.push({
+      t:at(), actor:'sw1', layer:'L2', kind:'info',
+      title:'Switch সব port-এ flood করল', packet:req,
+      what:'Switch broadcast Frame-টি পেয়ে সেটি সব port-এ পাঠিয়ে দিল (যে port দিয়ে এসেছে সেটি বাদে)।',
+      why :'Destination MAC broadcast হলে Switch কোনো lookup করে না — broadcast-এর সংজ্ঞাই হলো সবার কাছে পৌঁছানো।',
+      apply: function(st){
+        st.wire = { pkt:req, from:'sw1', to:'both' };
+        st.hub.macTable[CLIENT_MAC] = { port:1, age:0 };
+        st.banner = 'সব port-এ flood';
+      }
+    });
+
+    steps.push({
+      t:at(), actor:'other', layer:'L2', kind:'warn',
+      title:'PC-B Frame টি ফেলে দিল', packet:req,
+      what:'PC-B ARP Request-টি পেল, ভেতরের Target IP `192.168.1.1` দেখল, নিজের IP `192.168.1.20`-এর সাথে মেলাল — মিলল না। তাই সে চুপচাপ Frame-টি ফেলে দিল।',
+      why :'Broadcast মানে সবাই Frame-টি **পায়**, কিন্তু সবাই **উত্তর দেয় না**। শুধু যার IP মিলেছে সে-ই Reply দেবে।',
+      apply: function(st){ st.banner = 'PC-B: আমার IP নয়, drop'; }
+    });
+
+    /* ── Break-It: কেউ উত্তর না দিলে ── */
+    if(cfg.gone){
+      steps.push({
+        t:at(), actor:'router', layer:'L2', kind:'error',
+        title:'Router বন্ধ — কোনো Reply নেই',
+        what:'Router-টি বন্ধ, তাই ARP Request-এর কোনো উত্তর এল না।',
+        why :'ARP-তে কোনো "উত্তর পাইনি" বলে error message আসে না। শুধু নীরবতা — Client অপেক্ষা করতে থাকে।',
+        apply: function(st){ st.wire = null; st.banner = 'কোনো Reply নেই'; }
+      });
+      steps.push({
+        t:at() + 2, actor:'client', layer:'L3', kind:'error',
+        title:'Timeout — Packet পাঠানো গেল না',
+        what:'কয়েকবার চেষ্টা করেও কোনো ARP Reply না পাওয়ায় Client হাল ছেড়ে দিল। মূল Packet-টি আর কখনোই পাঠানো হলো না।',
+        why :'destination MAC Address ছাড়া Ethernet Frame তৈরিই করা যায় না। তাই Layer 2-তে আটকে গেলে উপরের Layer 3 বা 4 কিছুই করতে পারে না।\n\nএকেই বলে **ARP Failure** — application-এ এটি সাধারণত "Host unreachable" হিসেবে দেখা যায়।',
+        apply: function(st){ st.banner = 'ARP Failure'; }
+      });
+      return steps;
+    }
+
+    var rep = P.make([
+      P.ethernet(ROUTER_MAC, CLIENT_MAC, 'arp'),
+      P.arp(2, ROUTER_MAC, '192.168.1.1', CLIENT_MAC, '192.168.1.10')
+    ], { label:'ARP Reply', kind:'arp', from:'router', to:'client' });
+
+    steps.push({
+      t:at(), actor:'router', layer:'L2', kind:'ok',
+      title:'Router ARP Reply দিল', packet:rep,
+      what:'Router দেখল Target IP `192.168.1.1` তারই। তাই সে উত্তর পাঠাল: **"`192.168.1.1` আমি, আমার MAC হলো `' + ROUTER_MAC + '`"**।',
+      why :'লক্ষ্য করুন — Reply-টি broadcast নয়, **unicast**। কে জিজ্ঞেস করেছিল তা Request-এর ভেতরেই ছিল (Sender MAC), তাই উত্তরটি শুধু তাকেই পাঠানো হচ্ছে। অন্যদের বিরক্ত করার দরকার নেই।',
+      apply: function(st){ st.wire = { pkt:rep, from:'router', to:'client' }; st.banner = 'ARP Reply আসছে'; }
+    });
+
+    steps.push({
+      t:at(), actor:'client', layer:'L2', kind:'ok',
+      title:'ARP Cache-এ জমা করল', packet:rep,
+      what:'Client উত্তরটি পেয়ে নিজের ARP Cache-এ লিখে রাখল: `192.168.1.1 → ' + ROUTER_MAC + '`।',
+      why :'এখন থেকে কিছুক্ষণ (সাধারণত কয়েক মিনিট) এই IP-তে পাঠাতে হলে আর জিজ্ঞেস করতে হবে না। এতে network-এ অপ্রয়োজনীয় broadcast কমে।',
+      apply: function(st){
+        st.devices[0].arp['192.168.1.1'] = { mac:ROUTER_MAC, age:0 };
+        st.wire = null;
+        st.banner = 'ARP Cache updated';
+      }
+    });
+
+    steps.push(sendData(at()));
+    return steps;
+
+    /* আসল data Frame — cache আর non-cache দুই পথেই শেষ ধাপ একই */
+    function sendData(tt){
+      var d = P.make([
+        P.ethernet(CLIENT_MAC, ROUTER_MAC, 'ip'),
+        P.ip('192.168.1.10', '8.8.8.8', 64, 'tcp', 60),
+        P.tcp(54321, 443, 1000, 0, 'SYN', 64240)
+      ], { label:'Data Frame', kind:'data', from:'client', to:'router' });
+
+      return {
+        t:tt, actor:'client', layer:'L2', kind:'ok',
+        title:'এবার আসল Frame পাঠাল', packet:d,
+        what:'destination MAC জানা হয়ে গেছে, তাই Client এবার সম্পূর্ণ Ethernet Frame তৈরি করে পাঠাল।',
+        why :'এখানে একটি গুরুত্বপূর্ণ ব্যাপার আছে — Frame-এর destination MAC হলো **Router-এর**, কিন্তু Packet-এর destination IP হলো **`8.8.8.8`**।\n\nকারণ MAC Address শুধু এই local link পর্যন্ত কাজ করে, আর IP Address পুরো journey-র গন্তব্য বলে। Router এই Frame খুলে ভেতরের Packet-টি পরের hop-এ নতুন Frame-এ ভরে পাঠাবে।',
+        apply: function(st){ st.wire = { pkt:d, from:'client', to:'router' }; st.banner = 'Data Frame পাঠানো হলো'; }
+      };
+    }
+  }
+};
+
+})(window.NetLab);
+
+/* ─── ui/canvas.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   UI · NETWORK CANVAS
+   ───────────────────────────────────────────────────────────────────
+   State থেকে SVG এঁকে দেয়। এই file কোনো simulation সিদ্ধান্ত নেয় না —
+   শুধু যা state-এ আছে তা-ই দেখায়।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+
+var ICON = { pc:'🖥', switch:'🔀', router:'🧭', server:'🗄' };
+
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* সব device (hub সহ) এক তালিকায় — অবস্থান খোঁজার জন্য */
+function allNodes(st){
+  var a = st.devices.slice();
+  if(st.hub) a.push(st.hub);
+  return a;
+}
+function findNode(st, id){
+  var a = allNodes(st);
+  for(var i = 0; i < a.length; i++) if(a[i].id === id) return a[i];
+  return null;
+}
+
+function render(el, st, opts){
+  opts = opts || {};
+  var active = opts.active || null;     // এই মুহূর্তে যে device কাজ করছে
+  var sel    = opts.selected || null;   // user যাকে click করেছে
+  var nodes  = allNodes(st);
+  var out    = [];
+
+  out.push('<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="nc-wires">');
+  /* ── তার ── */
+  for(var i = 0; i < st.links.length; i++){
+    var L = st.links[i];
+    var a = findNode(st, L.a), b = findNode(st, L.b);
+    if(!a || !b) continue;
+    out.push('<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" class="nc-wire"/>');
+  }
+  out.push('</svg>');
+
+  /* ── device ── */
+  for(var j = 0; j < nodes.length; j++){
+    var d = nodes[j];
+    var cls = 'nc-node t-' + d.type;
+    if(d.id === active) cls += ' active';
+    if(d.id === sel)    cls += ' sel';
+    var sub = d.ip ? d.ip
+            : d.type === 'router' && d.ifaces && d.ifaces[0] ? d.ifaces[0].ip
+            : d.type === 'switch' ? 'Layer 2' : '';
+    out.push(
+      '<button class="' + cls + '" style="left:' + d.x + '%;top:' + d.y + '%" ' +
+        'data-dev="' + esc(d.id) + '" title="Inspect করতে click করুন">' +
+        '<span class="ic">' + ICON[d.type] + '</span>' +
+        '<span class="nm">' + esc(d.name) + '</span>' +
+        (sub ? '<span class="ip">' + esc(sub) + '</span>' : '') +
+        (d.note ? '<span class="badge">' + esc(d.note) + '</span>' : '') +
+      '</button>'
+    );
+  }
+
+  /* ── তারের উপরে চলমান packet ── */
+  if(st.wire && st.wire.pkt){
+    var w = st.wire;
+    var from = findNode(st, w.from);
+    var targets = [];
+    if(w.to === 'flood' || w.to === 'both'){
+      /* broadcast — from ছাড়া বাকি সবার দিকে */
+      for(var k = 0; k < nodes.length; k++){
+        var n = nodes[k];
+        if(n.id !== w.from && n.type !== 'switch') targets.push(n);
+      }
+    } else {
+      var tnode = findNode(st, w.to);
+      if(tnode) targets.push(tnode);
+    }
+    if(from){
+      for(var m = 0; m < targets.length; m++){
+        var tg = targets[m];
+        var mx = (from.x + tg.x) / 2, my = (from.y + tg.y) / 2;
+        out.push(
+          '<button class="nc-pkt k-' + esc(st.wire.pkt.kind) + '" ' +
+            'style="left:' + mx + '%;top:' + my + '%" data-pkt="1" ' +
+            'title="Packet Inspector-এ দেখুন">' +
+            esc(st.wire.pkt.label || 'Packet') +
+          '</button>'
+        );
+      }
+    }
+  }
+
+  el.innerHTML = out.join('');
+}
+
+NS.ui = NS.ui || {};
+NS.ui.canvas = { render: render, esc: esc };
+
+})(window.NetLab);
+
+/* ─── ui/inspector.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   UI · INSPECTOR
+   ───────────────────────────────────────────────────────────────────
+   ডানপাশের panel — Packet-এর প্রতিটি field, অথবা Device-এর ভেতরের অবস্থা।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var esc = NS.ui.canvas.esc;
+var P   = NS.pkt;
+
+/* ───────── Packet Inspector ───────── */
+function packetHTML(pkt){
+  if(!pkt) return '<div class="ins-empty">কোনো Packet select করা নেই।<br><span>Canvas-এ চলন্ত Packet-এ বা Timeline-এর কোনো ধাপে click করুন।</span></div>';
+
+  var o = ['<div class="ins-h">Packet #' + pkt.id +
+           '<span class="sz">' + pkt.size + ' bytes</span></div>'];
+
+  for(var i = 0; i < pkt.layers.length; i++){
+    var L  = pkt.layers[i];
+    var LI = P.LAYERS[L.layer] || { n:L.layer, c:'faint' };
+    o.push('<div class="ins-layer c-' + LI.c + '">');
+    o.push('<div class="ins-lh"><span class="tag">' + esc(L.layer) + '</span>' +
+           '<span class="nm">' + esc(L.name) + '</span>' +
+           '<span class="sz">' + (L.size || 0) + 'B</span></div>');
+    o.push('<div class="ins-ld">' + esc(LI.d || '') + '</div>');
+
+    for(var j = 0; j < L.fields.length; j++){
+      var k = L.fields[j][0], v = L.fields[j][1];
+      var help = P.FIELD_HELP[k] || '';
+      o.push('<button class="ins-f" data-help="' + esc(help) + '">' +
+               '<span class="k">' + esc(k) + '</span>' +
+               '<span class="v">' + esc(v) + '</span>' +
+             '</button>');
+      if(help) o.push('<div class="ins-fh">' + esc(help) + '</div>');
+    }
+    o.push('</div>');
+  }
+  return o.join('');
+}
+
+/* ───────── Device Inspector ───────── */
+function kv(k, v){
+  return '<div class="dv-row"><span class="k">' + esc(k) + '</span>' +
+         '<span class="v">' + esc(v) + '</span></div>';
+}
+
+function tableOrEmpty(rows, head, emptyMsg){
+  if(!rows.length) return '<div class="dv-empty">' + esc(emptyMsg) + '</div>';
+  var o = ['<table class="dv-t"><thead><tr>'];
+  for(var i = 0; i < head.length; i++) o.push('<th>' + esc(head[i]) + '</th>');
+  o.push('</tr></thead><tbody>');
+  for(var r = 0; r < rows.length; r++){
+    o.push('<tr>');
+    for(var c = 0; c < rows[r].length; c++) o.push('<td>' + esc(rows[r][c]) + '</td>');
+    o.push('</tr>');
+  }
+  o.push('</tbody></table>');
+  return o.join('');
+}
+
+function deviceHTML(d){
+  if(!d) return '<div class="ins-empty">কোনো Device select করা নেই।<br><span>Canvas-এ যেকোনো device-এ click করুন।</span></div>';
+
+  var o = ['<div class="ins-h">' + esc(d.name) +
+           '<span class="sz">' + esc(d.type) + '</span></div>'];
+
+  if(d.type === 'pc' || d.type === 'server'){
+    o.push('<div class="dv-sec">');
+    o.push(kv('MAC Address', d.mac));
+    o.push(kv('IP Address', d.ip));
+    o.push(kv('Subnet Mask', d.mask));
+    if(d.gw) o.push(kv('Default Gateway', d.gw));
+    o.push('</div>');
+
+    var arpRows = [];
+    for(var ip in d.arp) if(d.arp.hasOwnProperty(ip)) arpRows.push([ip, d.arp[ip].mac]);
+    o.push('<div class="dv-t-h">ARP Cache</div>');
+    o.push(tableOrEmpty(arpRows, ['IP Address','MAC Address'],
+      'খালি — এই device এখনো কারো MAC Address জানে না।'));
+
+    if(d.listening && d.listening.length){
+      var pr = [];
+      for(var i = 0; i < d.listening.length; i++){
+        var p = d.listening[i];
+        pr.push([String(p.port), p.service, p.open ? 'খোলা' : 'বন্ধ']);
+      }
+      o.push('<div class="dv-t-h">Listening Ports</div>');
+      o.push(tableOrEmpty(pr, ['Port','Service','অবস্থা'], ''));
+    }
+  }
+
+  if(d.type === 'switch'){
+    var mr = [];
+    for(var mac in d.macTable) if(d.macTable.hasOwnProperty(mac))
+      mr.push([mac, 'Port ' + d.macTable[mac].port]);
+    o.push('<div class="dv-t-h">MAC Address Table</div>');
+    o.push(tableOrEmpty(mr, ['MAC Address','Port'],
+      'খালি — Switch এখনো কিছু শেখেনি। Frame এলে Source MAC দেখে শিখবে।'));
+    o.push('<div class="dv-note">Switch একটি Layer 2 device — সে IP Address দেখে না, শুধু MAC Address দেখে সিদ্ধান্ত নেয়।</div>');
+  }
+
+  if(d.type === 'router'){
+    o.push('<div class="dv-t-h">Interfaces</div>');
+    var ir = [];
+    for(var k = 0; k < (d.ifaces || []).length; k++){
+      var f = d.ifaces[k];
+      ir.push([f.name, f.ip, f.mac]);
+    }
+    o.push(tableOrEmpty(ir, ['Interface','IP','MAC'], ''));
+
+    if(d.routes && d.routes.length){
+      var rr = [];
+      for(var q = 0; q < d.routes.length; q++){
+        var rt = d.routes[q];
+        rr.push([rt.dst + '/' + rt.prefix, rt.via || 'directly', rt.iface]);
+      }
+      o.push('<div class="dv-t-h">Routing Table</div>');
+      o.push(tableOrEmpty(rr, ['Destination','Next Hop','Interface'], ''));
+    }
+
+    var ar = [];
+    for(var aip in d.arp) if(d.arp.hasOwnProperty(aip)) ar.push([aip, d.arp[aip].mac]);
+    o.push('<div class="dv-t-h">ARP Cache</div>');
+    o.push(tableOrEmpty(ar, ['IP Address','MAC Address'], 'খালি।'));
+  }
+
+  return o.join('');
+}
+
+NS.ui.inspector = { packetHTML: packetHTML, deviceHTML: deviceHTML };
+
+})(window.NetLab);
+
+/* ─── ui/timeline.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   UI · EVENT TIMELINE
+   ───────────────────────────────────────────────────────────────────
+   নিচের অংশ — প্রতিটি ঘটনা ক্রম অনুসারে। click করলে সেই ধাপে ফেরত যায়।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var esc = NS.ui.canvas.esc;
+
+/* simulated clock — শুরু 10:01:00, প্রতিটি ধাপ ১ সেকেন্ড */
+function clock(t){
+  var s = t % 60, m = Math.floor(t / 60);
+  return '10:' + String(1 + m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function render(el, eng){
+  var o = [];
+  if(!eng.steps.length){
+    el.innerHTML = '<div class="tl-empty">এই lab-এ কোনো ধাপ নেই।</div>';
+    return;
+  }
+  for(var i = 0; i < eng.steps.length; i++){
+    var s = eng.steps[i];
+    var cls = 'tl-item k-' + (s.kind || 'info');
+    if(i === eng.i)  cls += ' now';
+    if(i <  eng.i)   cls += ' past';
+    if(i >  eng.i)   cls += ' future';
+    o.push(
+      '<button class="' + cls + '" data-step="' + i + '">' +
+        '<span class="tl-t">' + clock(s.t) + '</span>' +
+        '<span class="tl-actor">' + esc(s.actor) + '</span>' +
+        '<span class="tl-title">' + esc(s.title) + '</span>' +
+        '<span class="tl-layer">' + esc(s.layer || '') + '</span>' +
+      '</button>'
+    );
+  }
+  el.innerHTML = o.join('');
+
+  var now = el.querySelector('.tl-item.now');
+  if(now && now.scrollIntoView) now.scrollIntoView({ block:'nearest', inline:'nearest' });
+}
+
+NS.ui.timeline = { render: render, clock: clock };
+
+})(window.NetLab);
+
+/* ─── ui/app.js ─── */
+/* ═══════════════════════════════════════════════════════════════════
+   UI · APP SHELL
+   ───────────────────────────────────────────────────────────────────
+   Engine ↔ UI-র সংযোগস্থল। Engine state বদলালেই এখান থেকে সব panel
+   নতুন করে আঁকা হয়।
+   ═══════════════════════════════════════════════════════════════════ */
+(function(NS){
+"use strict";
+var esc = NS.ui.canvas.esc;
+
+var $ = function(id){ return document.getElementById(id); };
+
+var App = {
+  eng: null,
+  lab: null,
+  cfg: {},
+  selDev: null,
+  selPkt: null,
+  timer: null,
+  speed: 1200,
+  insMode: 'packet'
+};
+
+/* ───────── THEME (book-এর সাথে একই key, তাই setting ভাগাভাগি হয়) ───────── */
+function initTheme(){
+  var root = document.documentElement, btn = $('themeBtn');
+  function apply(t){
+    root.setAttribute('data-theme', t);
+    btn.textContent = t === 'dark' ? '☀️' : '🌙';
+    try { localStorage.setItem('nf-theme', t); } catch(e){}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('nf-theme'); } catch(e){}
+  if(!saved) saved = window.matchMedia &&
+    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  apply(saved);
+  btn.addEventListener('click', function(){
+    apply(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+}
+
+/* ───────── LAB LIST ───────── */
+function renderLabs(){
+  var labs = NS.labList(), o = [], group = null;
+  for(var i = 0; i < labs.length; i++){
+    var L = labs[i];
+    if(L.group !== group){ group = L.group; o.push('<div class="lab-group">' + esc(group) + '</div>'); }
+    o.push('<button class="lab-item' + (App.lab && L.id === App.lab.id ? ' on' : '') +
+           '" data-lab="' + esc(L.id) + '">' +
+             '<span class="t">' + esc(L.title) + '</span>' +
+             '<span class="d">' + esc(L.blurb) + '</span>' +
+           '</button>');
+  }
+  /* এখনো যেসব lab বাকি — roadmap হিসেবে দেখানো হচ্ছে */
+  o.push('<div class="lab-group">পরের ধাপে আসছে</div>');
+  var soon = ['IP Addressing','Subnet Calculator','Routing','Longest Prefix Match',
+              'TTL & Traceroute','TCP Handshake','DNS','HTTP','NAT','Full URL Journey'];
+  for(var s = 0; s < soon.length; s++)
+    o.push('<div class="lab-soon">' + esc(soon[s]) + '</div>');
+
+  $('labList').innerHTML = o.join('');
+}
+
+/* ───────── CONTROLS (প্রতিটি lab-এর নিজস্ব) ───────── */
+function renderControls(){
+  var c = App.lab.controls || [], o = [];
+  for(var i = 0; i < c.length; i++){
+    var ct = c[i], v = App.cfg[ct.key];
+    if(ct.type === 'toggle'){
+      o.push('<label class="ctl-row"><input type="checkbox" data-ctl="' + esc(ct.key) + '"' +
+             (v ? ' checked' : '') + '><span class="cl">' + esc(ct.label) + '</span></label>');
+    } else if(ct.type === 'choice'){
+      o.push('<div class="ctl-row col"><span class="cl">' + esc(ct.label) + '</span>' +
+             '<select data-ctl="' + esc(ct.key) + '">');
+      for(var j = 0; j < ct.options.length; j++){
+        var op = ct.options[j];
+        o.push('<option value="' + esc(op[0]) + '"' +
+               (v === op[0] ? ' selected' : '') + '>' + esc(op[1]) + '</option>');
+      }
+      o.push('</select></div>');
+    }
+    if(ct.help) o.push('<div class="ctl-help">' + esc(ct.help) + '</div>');
+  }
+  $('labControls').innerHTML = o.join('') ||
+    '<div class="ctl-help">এই lab-এ কোনো বাড়তি setting নেই।</div>';
+}
+
+/* ───────── LEARNING PANEL ───────── */
+function renderLearn(){
+  var L = App.lab, o = [];
+
+  o.push('<div class="ln-h">এই Lab-এ কী শিখবেন</div><ul class="ln-list">');
+  for(var i = 0; i < L.learn.length; i++) o.push('<li>' + esc(L.learn[i]) + '</li>');
+  o.push('</ul>');
+
+  if(L.mistakes && L.mistakes.length){
+    o.push('<div class="ln-h">প্রচলিত ভুল ধারণা</div>');
+    for(var j = 0; j < L.mistakes.length; j++){
+      var m = L.mistakes[j];
+      o.push('<div class="ln-myth">' +
+               '<div class="mm"><span class="lbl">ভুল ধারণা</span>' + esc(m.m) + '</div>' +
+               '<div class="mr"><span class="lbl">সঠিক ধারণা</span>' + esc(m.r) + '</div>' +
+             '</div>');
+    }
+  }
+
+  o.push('<a class="ln-book" href="index.html#' + esc(L.chapter) + '" target="_blank" ' +
+         'rel="noopener">এই concept সম্পর্কে বিস্তারিত পড়ুন →<span>বই-এর ' +
+         esc(L.chapter.toUpperCase()) + '</span></a>');
+
+  $('learnPanel').innerHTML = o.join('');
+}
+
+/* ───────── "এখন কী হলো?" ───────── */
+/* explanation-এ `code` আর **bold** লেখা যায় — সেটুকু markdown এখানে রূপান্তর হয় */
+function mini(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n\n/g, '</p><p>');
+}
+
+function renderWhat(){
+  var s = App.eng.current();
+  if(!s){
+    $('whatPanel').innerHTML =
+      '<div class="wh-idle">▶ <b>চালু</b> চাপুন, অথবা <b>এক ধাপ</b> দিয়ে ধীরে ধীরে এগোন।<br>' +
+      '<span>প্রতিটি ধাপের পর এখানে ব্যাখ্যা আসবে।</span></div>';
+    return;
+  }
+  var LI = NS.pkt.LAYERS[s.layer] || { n:s.layer || '' };
+  $('whatPanel').innerHTML =
+    '<div class="wh-top"><span class="wh-k k-' + esc(s.kind || 'info') + '">' +
+      esc(s.actor) + '</span><span class="wh-layer">' + esc(LI.n) + '</span></div>' +
+    '<div class="wh-q">এখন কী হলো?</div><p>' + mini(s.what) + '</p>' +
+    '<div class="wh-q">কেন?</div><p>' + mini(s.why) + '</p>';
+}
+
+/* ───────── সব panel নতুন করে আঁকা ───────── */
+function paint(){
+  var eng = App.eng, st = eng.state, cur = eng.current();
+
+  NS.ui.canvas.render($('canvas'), st, {
+    active: cur ? cur.actor : null,
+    selected: App.selDev
+  });
+
+  /* current step-এ packet থাকলে সেটিই inspector-এ দেখাও */
+  if(cur && cur.packet) App.selPkt = cur.packet;
+
+  NS.ui.timeline.render($('timeline'), eng);
+  renderWhat();
+  renderInspector();
+
+  $('stepNow').textContent = (eng.i + 1) + ' / ' + eng.steps.length;
+  $('banner').textContent  = st.banner || '';
+  $('btnStep').disabled    = eng.done();
+  $('btnBack').disabled    = eng.i < 0;
+  $('btnPlay').textContent = App.timer ? '⏸ বিরতি' : '▶ চালু';
+}
+
+function renderInspector(){
+  var dev = null;
+  if(App.selDev){
+    var all = App.eng.state.devices.slice();
+    if(App.eng.state.hub) all.push(App.eng.state.hub);
+    for(var i = 0; i < all.length; i++) if(all[i].id === App.selDev) dev = all[i];
+  }
+  $('insBody').innerHTML = App.insMode === 'packet'
+    ? NS.ui.inspector.packetHTML(App.selPkt)
+    : NS.ui.inspector.deviceHTML(dev);
+
+  var tabs = document.querySelectorAll('#insTabs button');
+  for(var t = 0; t < tabs.length; t++)
+    tabs[t].classList.toggle('on', tabs[t].getAttribute('data-ins') === App.insMode);
+}
+
+/* ───────── PLAYBACK ───────── */
+function stop(){
+  if(App.timer){ clearInterval(App.timer); App.timer = null; }
+}
+function play(){
+  if(App.timer) { stop(); paint(); return; }
+  if(App.eng.done()) App.eng.seek(-1);
+  App.timer = setInterval(function(){
+    if(!App.eng.step()){ stop(); paint(); }
+  }, App.speed);
+  paint();
+}
+
+/* ───────── LAB LOAD ───────── */
+function loadLab(id){
+  stop();
+  var lab = NS.labs[id];
+  if(!lab) return;
+  App.lab = lab;
+  App.cfg = { seed: 1 };
+  var c = lab.controls || [];
+  for(var i = 0; i < c.length; i++) App.cfg[c[i].key] = c[i].def;
+
+  App.selDev = null;
+  App.selPkt = null;
+  App.eng = new NS.Engine(lab, App.cfg).on(function(){ /* paint নিজে ডাকা হয় */ });
+
+  $('labTitle').textContent = lab.title;
+  $('labBlurb').textContent = lab.blurb;
+  renderLabs();
+  renderControls();
+  renderLearn();
+  paint();
+
+  try { localStorage.setItem('nl-lab', id); } catch(e){}
+  if(window.innerWidth <= 1080) $('sidebar').classList.remove('open');
+}
+
+/* config বদলালে simulation নতুন করে বানাতে হয় */
+function rebuild(){
+  stop();
+  App.eng = new NS.Engine(App.lab, App.cfg);
+  App.selPkt = null;
+  paint();
+}
+
+/* ───────── EVENTS ───────── */
+function bind(){
+  $('labList').addEventListener('click', function(e){
+    var b = e.target.closest('[data-lab]');
+    if(b) loadLab(b.getAttribute('data-lab'));
+  });
+
+  $('labControls').addEventListener('change', function(e){
+    var el = e.target.closest('[data-ctl]');
+    if(!el) return;
+    App.cfg[el.getAttribute('data-ctl')] =
+      el.type === 'checkbox' ? el.checked : el.value;
+    rebuild();
+  });
+
+  $('btnPlay').addEventListener('click', play);
+  $('btnStep').addEventListener('click', function(){ stop(); App.eng.step(); paint(); });
+  $('btnBack').addEventListener('click', function(){ stop(); App.eng.back(); paint(); });
+  $('btnReset').addEventListener('click', function(){ stop(); App.eng.reset(); App.selPkt = null; paint(); });
+
+  $('speed').addEventListener('input', function(){
+    App.speed = 2400 - parseInt(this.value, 10);
+    $('speedLbl').textContent = (App.speed / 1000).toFixed(1) + 's';
+    if(App.timer){ stop(); play(); }
+  });
+
+  $('timeline').addEventListener('click', function(e){
+    var b = e.target.closest('[data-step]');
+    if(!b) return;
+    stop();
+    App.eng.seek(parseInt(b.getAttribute('data-step'), 10));
+    paint();
+  });
+
+  $('canvas').addEventListener('click', function(e){
+    var d = e.target.closest('[data-dev]');
+    if(d){
+      App.selDev = d.getAttribute('data-dev');
+      App.insMode = 'device';
+      renderInspector();
+      NS.ui.canvas.render($('canvas'), App.eng.state, {
+        active: App.eng.current() ? App.eng.current().actor : null,
+        selected: App.selDev
+      });
+      return;
+    }
+    if(e.target.closest('[data-pkt]')){
+      var st = App.eng.state;
+      if(st.wire && st.wire.pkt){ App.selPkt = st.wire.pkt; App.insMode = 'packet'; renderInspector(); }
+    }
+  });
+
+  $('insTabs').addEventListener('click', function(e){
+    var b = e.target.closest('[data-ins]');
+    if(!b) return;
+    App.insMode = b.getAttribute('data-ins');
+    renderInspector();
+  });
+
+  /* field-এ click করলে তার ব্যাখ্যা খোলে/বন্ধ হয় */
+  $('insBody').addEventListener('click', function(e){
+    var f = e.target.closest('.ins-f');
+    if(!f) return;
+    var help = f.nextElementSibling;
+    if(help && help.classList.contains('ins-fh')){
+      help.classList.toggle('on');
+      f.classList.toggle('open');
+    }
+  });
+
+  $('menuBtn').addEventListener('click', function(){ $('sidebar').classList.toggle('open'); });
+  $('backdrop').addEventListener('click', function(){ $('sidebar').classList.remove('open'); });
+
+  document.addEventListener('keydown', function(e){
+    if(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if(e.key === ' ' || e.key === 'k'){ e.preventDefault(); play(); }
+    else if(e.key === 'ArrowRight'){ stop(); App.eng.step(); paint(); }
+    else if(e.key === 'ArrowLeft'){ stop(); App.eng.back(); paint(); }
+    else if(e.key === 'r'){ stop(); App.eng.reset(); paint(); }
+  });
+}
+
+/* ───────── START ───────── */
+function boot(){
+  initTheme();
+  bind();
+  var want = null;
+  if(location.hash) want = location.hash.slice(1);
+  if(!want){ try { want = localStorage.getItem('nl-lab'); } catch(e){} }
+  loadLab(NS.labs[want] ? want : NS.LAB_ORDER[0]);
+}
+
+if(document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', boot);
+else boot();
+
+})(window.NetLab);
+</script>
+</body>
+</html>
