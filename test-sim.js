@@ -28,9 +28,14 @@ const js = fs.readFileSync(SIM, 'utf8').match(/<script>([\s\S]*)<\/script>/)[1];
 /* ── browser ছাড়া চালানোর জন্য ন্যূনতম DOM ── */
 const els = {};
 function mkEl(id){
+  const listeners = {};
   return { id, innerHTML:'', textContent:'', disabled:false, value:'1200',
     classList:{toggle(){},remove(){},add(){},contains(){return false}},
-    addEventListener(){}, querySelector(){return null}, querySelectorAll(){return []},
+    addEventListener(ev, fn){ (listeners[ev] = listeners[ev] || []).push(fn); },
+    /* আসল UI handler চালানোর জন্য — click() করলে যা হওয়ার কথা তাই হয় */
+    fire(ev, e){ for (const fn of (listeners[ev] || [])) fn(e || { target:{ closest:()=>null } }); },
+    click(){ this.fire('click'); },
+    querySelector(){return null}, querySelectorAll(){return []},
     getAttribute(){return null}, scrollIntoView(){}, closest(){return null} };
 }
 global.window = { innerWidth:1400, matchMedia:()=>({matches:false}), addEventListener(){} };
@@ -42,8 +47,16 @@ global.document = {
   querySelectorAll(){ return []; }, addEventListener(){}
 };
 global.location = { hash:'' };
-global.setInterval = () => 0;
-global.clearInterval = () => {};
+
+/* নিয়ন্ত্রণযোগ্য ঘড়ি — Play/Pause-এর আচরণ যাচাই করার জন্য।
+   আগে setInterval no-op ছিল, তাই playback কখনো পরীক্ষাই হতো না। */
+const clock = { timers: new Map(), next: 1 };
+global.setInterval = (fn) => { const id = clock.next++; clock.timers.set(id, fn); return id; };
+global.clearInterval = (id) => { clock.timers.delete(id); };
+clock.tick = function(n){
+  for (let i = 0; i < (n || 1); i++)
+    for (const fn of Array.from(this.timers.values())) fn();
+};
 
 eval(js);
 const NS = global.window.NetLab;
@@ -281,6 +294,40 @@ for (const id of NS.LAB_ORDER){
   }
   ok(macs.size >= 3, `Hop: destination MAC অন্তত ৩ বার বদলায় (পাওয়া গেছে ${macs.size})`);
   ok(ips.size === 1,  `Hop: destination IP একটাই থাকে (পাওয়া গেছে ${ips.size})`);
+})();
+
+/* ───────── Playback — ▶ চালু বোতাম ─────────
+   এখানে আসল UI handler গুলোই চলে, তাই "state এগোচ্ছে কিন্তু পর্দা বদলাচ্ছে না"
+   ধরনের bug এখানে ধরা পড়বে। */
+(function(){
+  const el = id => els[id] || (els[id] = mkEl(id));
+  const shown = () => el('stepNow').textContent;
+
+  /* boot() ইতিমধ্যে চলেছে, তাই handler গুলো বসানো আছে; একটি lab ধরে নিই */
+  const before = shown();
+  ok(/^\d+ \/ \d+$/.test(before), 'stepNow একটি "n / total" দেখাচ্ছে');
+
+  const total = parseInt(before.split('/')[1], 10);
+  const play = () => el('btnPlay').click();
+  play();                         /* ▶ চালু */
+  ok(clock.timers.size === 1, 'Play: একটি timer চালু হয়েছে');
+
+  const afterStart = shown();
+  clock.tick(1);
+  ok(shown() !== afterStart,
+     `Play: এক tick-এর পরে পর্দার সংখ্যা বদলাতে হবে (ছিল ${afterStart}, আছে ${shown()})`);
+
+  clock.tick(total + 3);          /* শেষ পর্যন্ত চালাও */
+  ok(shown() === total + ' / ' + total, 'Play: শেষ ধাপ পর্যন্ত পৌঁছায়');
+  ok(clock.timers.size === 0, 'Play: শেষে timer নিজে থেমে যায়');
+
+  /* Pause */
+  play();
+  const mid = shown();
+  play();                         /* ⏸ বিরতি */
+  ok(clock.timers.size === 0, 'Pause: timer বন্ধ হয়');
+  clock.tick(3);
+  ok(shown() === mid, 'Pause: থামার পরে আর এগোয় না');
 })();
 
 ok(NS.ui.inspector.packetHTML(null).length > 0, 'packet select না থাকলেও চলে');
