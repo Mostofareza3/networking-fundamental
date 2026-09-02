@@ -51,13 +51,6 @@ function renderLabs(){
              '<span class="d">' + esc(L.blurb) + '</span>' +
            '</button>');
   }
-  /* এখনো যেসব lab বাকি — roadmap হিসেবে দেখানো হচ্ছে */
-  o.push('<div class="lab-group">পরের ধাপে আসছে</div>');
-  var soon = ['TCP Handshake','TCP Reliability','UDP','Sockets & Ports',
-              'DNS','HTTP','TLS','NAT','Firewall','Full URL Journey'];
-  for(var s = 0; s < soon.length; s++)
-    o.push('<div class="lab-soon">' + esc(soon[s]) + '</div>');
-
   $('labList').innerHTML = o.join('');
 }
 

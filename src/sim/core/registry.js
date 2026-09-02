@@ -10,7 +10,12 @@ NS.labs = NS.labs || {};
 
 /* Sidebar-এ lab গুলো এই ক্রমে দেখাবে */
 NS.LAB_ORDER = ['packet','encap','ethernet','switching','arp',
-                'ip','subnet','routing','lpm','ttl','hop'];
+                'ip','subnet','routing','lpm','ttl','hop',
+                'handshake','reliable','ordering','flow','close',
+                'udp','tcpudp','socket',
+                'dns','dnscache','http','tls','nat','firewall',
+                'latency','queue','cdn','lb','breakit',
+                'journey'];
 
 NS.labList = function(){
   var out = [];

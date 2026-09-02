@@ -156,21 +156,18 @@ Chapter ফাইলের কাঠামো:
 ## Simulator Roadmap — কতটুকু হয়েছে, কতটুকু বাকি
 
 মূল পরিকল্পনায় **৩০টি lab**, ৬টি phase-এ ভাগ করা।
-এখন পর্যন্ত **১১টি হয়েছে (৩৭%)** — Phase 1 ও 2 সম্পূর্ণ।
+**সবগুলোই সম্পূর্ণ হয়েছে (১০০%)।**
 
 ```
 Phase 1  ██████████████████████  5/5    ✅ সম্পূর্ণ
 Phase 2  ██████████████████████  6/6    ✅ সম্পূর্ণ
-Phase 3  ░░░░░░░░░░░░░░░░░░░░░░  0/7
-Phase 4  ░░░░░░░░░░░░░░░░░░░░░░  0/6
-Phase 5  ░░░░░░░░░░░░░░░░░░░░░░  0/5
-Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
+Phase 3  ██████████████████████  7/7    ✅ সম্পূর্ণ
+Phase 4  ██████████████████████  6/6    ✅ সম্পূর্ণ
+Phase 5  ██████████████████████  5/5    ✅ সম্পূর্ণ
+Phase 6  ██████████████████████  1/1    ✅ সম্পূর্ণ
 ─────────────────────────────────────
-মোট      ████████░░░░░░░░░░░░░░  11/30  (৩৭%)
+মোট      ██████████████████████  30/30  (১০০%)
 ```
-
-শুধু lab নয় — **core যন্ত্রপাতিও** একবারই বানাতে হয়েছে, সেটা সব lab
-ব্যবহার করে। তাই পরের lab গুলো তুলনামূলক দ্রুত যোগ হবে।
 
 | Core | অবস্থা |
 |---|---|
@@ -181,72 +178,100 @@ Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
 | "এখন কী হলো? / কেন?" panel | ✅ |
 | Learning System — শিখবেন / ভুল ধারণা / বই-এর link | ✅ |
 | Network Canvas — device, packet, flood, layer stack | ✅ |
-| Break-It Mode (কিছু lab-এ toggle হিসেবে আছে) | 🟡 আংশিক |
+| Break-It Mode — নিজস্ব lab + অন্য lab-এ toggle | ✅ |
 | Calculator panel — interactive lab-এর জন্য (`panel()`) | ✅ |
 | IP / Subnet / LPM-এর গণিত (`core/net.js`) | ✅ |
-| Prediction Mode — ঘটার আগে user predict করবে | ⬜ |
+| Prediction Mode — ঘটার আগে user predict করবে | ⬜ পরিকল্পনায় আছে |
 
 ---
 
-### ✅ Phase 1 · Foundation + Layer 2 — সম্পূর্ণ
+### ✅ Phase 1 · Foundation + Layer 2
 
-| # | Lab | বই | অবস্থা |
+| # | Lab | বই |
+|---|---|---|
+| 1 | Packet Visualizer | `ch4` |
+| 2 | Encapsulation Lab | `ch3` |
+| 3 | Ethernet & MAC Lab | `ch6` |
+| 4 | Switching Lab | `ch7` |
+| 5 | ARP Lab | `ch8` |
+
+### ✅ Phase 2 · Layer 3 — IP ও Routing
+
+| # | Lab | বই |
+|---|---|---|
+| 6 | IP Addressing Lab | `ch11` |
+| 7 | Subnet Calculator | `ch10` |
+| 8 | Routing Lab | `ch12` |
+| 9 | Longest Prefix Match | `ch12` |
+| 10 | TTL & Traceroute | `ch14` |
+| 11 | Router Hop Visualization | `ch13` |
+
+### ✅ Phase 3 · Layer 4 — TCP / UDP
+
+| # | Lab | বই | কী দেখায় |
 |---|---|---|---|
-| 1 | Packet Visualizer | `ch4` | ✅ |
-| 2 | Encapsulation Lab | `ch3` | ✅ |
-| 3 | Ethernet & MAC Lab | `ch6` | ✅ |
-| 4 | Switching Lab | `ch7` | ✅ |
-| 5 | ARP Lab | `ch8` | ✅ |
+| 12 | TCP Three-Way Handshake | `ch18` | SYN → SYN-ACK → ACK; RST বনাম নীরব drop |
+| 13 | TCP Reliability | `ch19` | Fast Retransmit বনাম Timeout, duplicate ACK |
+| 14 | TCP Ordering | `ch19` | Receive Buffer, Head-of-Line Blocking |
+| 15 | Flow Control | `ch20` | Receive Window, Zero Window, probe |
+| 16 | Connection Close & TIME_WAIT | `ch22` | চারটি Packet, half-close, RST-এর দাম |
+| 17 | UDP | `ch23` | Fire-and-forget; voice আর DNS-এ ভিন্ন ফল |
+| 18 | TCP vs UDP | `ch24` | একই loss-এ দুজনের আচরণ পাশাপাশি |
+| 19 | Sockets & Ports | `ch16` | 4-tuple, demultiplexing, EADDRINUSE |
 
-### ✅ Phase 2 · Layer 3 — IP ও Routing — সম্পূর্ণ
+### ✅ Phase 4 · Application Layer
 
-| # | Lab | বই | অবস্থা |
+| # | Lab | বই | কী দেখায় |
 |---|---|---|---|
-| 6 | IP Addressing Lab | `ch11` | ✅ |
-| 7 | Subnet Calculator | `ch10` | ✅ |
-| 8 | Routing Lab | `ch12` | ✅ |
-| 9 | Longest Prefix Match | `ch12` | ✅ |
-| 10 | TTL & Traceroute | `ch14` | ✅ |
-| 11 | Router Hop Visualization | `ch13` | ✅ |
+| 20 | DNS Resolution | `ch26` | Root → TLD → Authoritative; NXDOMAIN বনাম SERVFAIL |
+| 21 | DNS Cache & TTL | `ch27` | Cache hit, migration-এ পুরনো IP, ছোট TTL-এর কৌশল |
+| 22 | HTTP | `ch28` | 200/301/404/500, stateless, Keep-Alive |
+| 23 | TLS Handshake | `ch33` | সরলীকৃত model; তিন ধরনের certificate ব্যর্থতা |
+| 24 | NAT | `ch34` | NAT table, port forwarding, অযাচিত inbound |
+| 25 | Firewall | `ch35` | নিয়মের ক্রম, default DENY, DROP বনাম REJECT |
 
-### ⬜ Phase 3 · Layer 4 — TCP / UDP
+### ✅ Phase 5 · Performance ও Scale
 
-| # | Lab | বই | কী দেখাবে |
+| # | Lab | বই | কী দেখায় |
 |---|---|---|---|
-| 12 | TCP Three-Way Handshake | `ch18` | SYN → SYN-ACK → ACK, প্রতিটির flag ও number |
-| 13 | TCP Reliability | `ch19` | ইচ্ছা করে packet drop → timeout → retransmission |
-| 14 | TCP Ordering | `ch19` | 1,3,2,4 এলে sequence number দিয়ে সাজানো |
-| 15 | TCP Flow Control | `ch20` | Receive Window বদলালে sender-এর গতি বদলায় |
-| 16 | UDP Lab | `ch23` | Handshake নেই, retransmission নেই |
-| 17 | TCP vs UDP | `ch24` | একই packet loss-এ দুজনের আচরণ পাশাপাশি |
-| 18 | Socket & Ports Lab | `ch16` | IP + Port = Socket, closed port-এ কী হয় |
+| 26 | Latency — দেরির চার উৎস | `ch36` | কোনটি bandwidth-নির্ভর, কোনটি পদার্থবিজ্ঞান |
+| 27 | Router Queue & Loss | `ch38` | Tail Drop, Bufferbloat-এর ফাঁদ |
+| 28 | CDN | `ch46` | Edge বনাম origin, cache hit/miss |
+| 29 | Load Balancer | `ch47` | Round Robin, health check, sticky-র দাম |
+| 30 | Break-It Mode | `ch39` | ৬ রকম ভাঙন, প্রতিটির উপসর্গ ও সরঞ্জাম |
 
-### ⬜ Phase 4 · Application Layer
+### ✅ Phase 6 · Master Simulation
 
-| # | Lab | বই | কী দেখাবে |
+| # | Lab | বই | কী দেখায় |
 |---|---|---|---|
-| 19 | DNS Lab | `ch26` | Resolver → Root → TLD → Authoritative |
-| 20 | DNS Cache | `ch27` | প্রথমবার MISS, পরেরবার HIT, TTL শেষ হলে আবার |
-| 21 | HTTP Lab | `ch28` | Request/Response inspect করা |
-| 22 | HTTPS / TLS Lab | `ch33` | TLS Handshake — সরলীকৃত শিক্ষামূলক model |
-| 23 | NAT Lab | `ch34` | Private → Public, translation table |
-| 24 | Firewall Lab | `ch35` | ALLOW / BLOCK rule, কারণসহ |
+| 31 | Full URL Journey | `ch48` | DNS → ARP → TCP → NAT → TLS → HTTP, RTT-র হিসাবসহ |
 
-### ⬜ Phase 5 · Performance ও Scale
+> তালিকায় ৩১টি — মূল পরিকল্পনার ৩০টির সাথে **Connection Close & TIME_WAIT**
+> আলাদা lab হিসেবে যোগ হয়েছে, কারণ FIN আর TIME_WAIT handshake-এর সাথে
+> একই lab-এ রাখলে দুটোই চাপা পড়ে যাচ্ছিল।
 
-| # | Lab | বই | কী দেখাবে |
-|---|---|---|---|
-| 25 | Network Performance Lab | `ch36`–`ch38` | Latency / Bandwidth / Loss / Jitter slider |
-| 26 | Router Queue | `ch38` | Queue ভরে গেলে packet drop |
-| 27 | CDN | `ch46` | Origin বনাম nearest CDN |
-| 28 | Load Balancer | `ch47` | Request distribute হওয়া |
-| 29 | Break-It Mode (পূর্ণাঙ্গ) | — | ১৪ রকম failure + "সমস্যা কোথায়?" প্রশ্ন |
+---
 
-### ⬜ Phase 6 · Master Simulation
+### যাচাই
 
-| # | Lab | বই | কী দেখাবে |
-|---|---|---|---|
-| 30 | Full URL Journey | `ch48` | URL → DNS → TCP → TLS → HTTP → Router → Server → Response, প্রতিটি ধাপে pause করে inspect |
+```
+./build.sh        # index.html + simulator.html তৈরি ও structural check
+node test-sim.js  # 11,852 checks · 0 failures
+```
+
+`test-sim.js` শুধু "crash করে না" দেখে না — **lab যা শেখাচ্ছে তা সত্যি কিনা**
+সেটাও যাচাই করে। যেমন:
+
+- Handshake-এ `ack = ISN + 1` (SYN নিজে একটি ক্রম দখল করে)
+- ফাঁক থাকলে cumulative ACK আটকে থাকে, ভরলে লাফায়
+- Firewall-এ **প্রথম মিলই চূড়ান্ত** — DENY উপরে বসালে সব বন্ধ হয়ে যায়
+- Bandwidth বাড়ালে propagation delay একটুও কমে না
+- মৃত server load balancer থেকে একটিও request পায় না
+- বাইরে যাওয়া কোনো Packet-এ private IP থাকতে পারে না
+- Timeline-এর ঘড়ি সবসময় সামনে এগোয়
+
+প্রতিটি assertion **ইচ্ছা করে কোড ভেঙে** যাচাই করা হয়েছে — অর্থাৎ নিশ্চিত
+করা হয়েছে যে ভুল ঢুকলে test সত্যিই ধরতে পারে।
 
 ---
 
@@ -255,7 +280,6 @@ Phase 6  ░░░░░░░░░░░░░░░░░░░░░░  0/1
 | কাজ | অবস্থা |
 |---|---|
 | Prediction Mode — ঘটার আগে option দিয়ে predict করানো | ⬜ |
-| Break-It Mode-কে সব lab-এ ছড়ানো | 🟡 |
 | Packet Inspector-এ payload hex view | ⬜ |
 | প্রতিটি lab-এ "Try it yourself" experiment | 🟡 controls আছে, আলাদা section নেই |
 
@@ -283,8 +307,14 @@ src/sim/
 │   ├── packet.js       ← Packet-এর গঠন + প্রতিটি field-এর Bangla ব্যাখ্যা
 │   ├── net.js          ← Device, Link, IP helper
 │   └── registry.js     ← কোন lab কোন ক্রমে
-├── labs/               ← এক lab = এক ফাইল
-│   ├── packet.js  encap.js  ethernet.js  switching.js  arp.js
+├── labs/               ← এক lab = এক ফাইল (৩১টি)
+│   ├── packet.js  encap.js  ethernet.js  switching.js  arp.js       ← Phase 1
+│   ├── ip.js  subnet.js  routing.js  lpm.js  ttl.js  hop.js         ← Phase 2
+│   ├── handshake.js  reliable.js  ordering.js  flow.js  close.js
+│   │   udp.js  tcpudp.js  socket.js                                 ← Phase 3
+│   ├── dns.js  dnscache.js  http.js  tls.js  nat.js  firewall.js    ← Phase 4
+│   ├── latency.js  queue.js  cdn.js  lb.js  breakit.js              ← Phase 5
+│   └── journey.js                                                   ← Phase 6
 └── ui/
     ├── canvas.js  inspector.js  timeline.js  app.js
 ```

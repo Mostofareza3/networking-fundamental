@@ -23,6 +23,14 @@ SIM_JS = [
     'labs/switching.js', 'labs/arp.js',
     'labs/ip.js', 'labs/subnet.js', 'labs/routing.js',
     'labs/lpm.js', 'labs/ttl.js', 'labs/hop.js',
+    'labs/handshake.js', 'labs/reliable.js', 'labs/ordering.js',
+    'labs/flow.js', 'labs/close.js', 'labs/udp.js',
+    'labs/tcpudp.js', 'labs/socket.js',
+    'labs/dns.js', 'labs/dnscache.js', 'labs/http.js',
+    'labs/tls.js', 'labs/nat.js', 'labs/firewall.js',
+    'labs/latency.js', 'labs/queue.js', 'labs/cdn.js',
+    'labs/lb.js', 'labs/breakit.js',
+    'labs/journey.js',
     'ui/canvas.js', 'ui/inspector.js', 'ui/timeline.js', 'ui/app.js',
 ]
 
